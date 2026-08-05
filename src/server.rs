@@ -7,7 +7,6 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{SocketAddr, TcpStream};
-use std::sync::mpsc::Sender;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::channels::Channel;
@@ -15,6 +14,7 @@ use crate::config::{Config, LinkBlock};
 use crate::extensible::Extensible;
 use crate::link::{Link, RemoteServer, RemoteUser};
 use crate::module::Hook;
+use crate::socketengine::OutSink;
 use crate::users::{Caps, User, UserFlags};
 use crate::xline::XLine;
 use crate::Uid;
@@ -160,8 +160,8 @@ impl Server {
         &mut self,
         uid: Uid,
         addr: SocketAddr,
-        out: Sender<String>,
-        sock: TcpStream,
+        out: OutSink,
+        sock: Option<TcpStream>,
         secure: bool,
     ) {
         let uuid = self.next_uuid();
@@ -197,7 +197,7 @@ impl Server {
                 ping_sent: false,
                 ext: Extensible::default(),
                 out,
-                sock: Some(sock),
+                sock,
             },
         );
     }
@@ -268,7 +268,7 @@ impl Server {
             } else {
                 line
             };
-            let _ = u.out.send(line);
+            u.out.send(line);
         }
     }
 
@@ -346,7 +346,7 @@ impl Server {
             } else {
                 format!("@{} {body}", tags.join(";"))
             };
-            let _ = u.out.send(line);
+            u.out.send(line);
         }
     }
 
@@ -498,7 +498,7 @@ mod tests {
                 last_active: 0,
                 ping_sent: false,
                 ext: Extensible::default(),
-                out: tx,
+                out: OutSink::Thread(tx),
                 sock: None,
             },
         );

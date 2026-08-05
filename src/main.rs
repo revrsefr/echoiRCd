@@ -20,7 +20,16 @@ fn main() {
         .unwrap_or_else(|| "echoircd.conf".to_string());
     let cfg = Config::load(&path);
 
-    let listener = match TcpListener::bind(&cfg.bind) {
+    // Client plaintext connections run on the mio reactor, so bind a mio listener
+    // (fail fast if the main port is taken).
+    let bind_addr: std::net::SocketAddr = match cfg.bind.parse() {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("echoircd: bad bind address {}: {e}", cfg.bind);
+            std::process::exit(1);
+        }
+    };
+    let client_listener = match mio::net::TcpListener::bind(bind_addr) {
         Ok(l) => l,
         Err(e) => {
             eprintln!("echoircd: cannot bind {}: {e}", cfg.bind);
@@ -101,6 +110,7 @@ fn main() {
         });
     }
 
-    socketengine::accept_loop(listener, tx, None, counter, false);
+    // client plaintext connections: one mio reactor thread drives them all
+    thread::spawn(move || socketengine::run_reactor(client_listener, tx, counter));
     let _ = core.join();
 }

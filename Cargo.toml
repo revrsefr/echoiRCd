@@ -18,6 +18,11 @@ path = "src/lib.rs"
 # openssl backend — the crate keeps all `unsafe` internal, so the daemon stays
 # `#![forbid(unsafe_code)]`). A pure-Rust `rustls` backend can slot in beside it.
 openssl = "0.10"
+# epoll/kqueue reactor for the client socket engine — the minimal readiness layer
+# Tokio itself is built on. Lets one thread drive tens of thousands of connections
+# instead of 2 OS threads per client. Its `unsafe` stays internal (like openssl),
+# so the daemon is still `#![forbid(unsafe_code)]`; no async runtime is pulled in.
+mio = { version = "1", features = ["os-poll", "net"] }
 
 [profile.release]
 opt-level = 3

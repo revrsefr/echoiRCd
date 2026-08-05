@@ -20,20 +20,20 @@
 //! CAPAB/FJOIN/metadata wire format. Also: SASL relays here once a services links in.
 
 use std::net::{SocketAddr, TcpStream};
-use std::sync::mpsc::Sender;
 
 use std::collections::HashSet;
 
 use crate::channels::{Ban, Channel, Member, Topic};
 use crate::message::Message;
 use crate::server::{now, Server};
+use crate::socketengine::OutSink;
 use crate::users::User;
 use crate::Uid;
 
 /// A local server-link connection (one hop away). Distinct from a client `User`.
 pub struct Link {
     pub uid: Uid,
-    pub out: Sender<String>,
+    pub out: OutSink,
     pub outbound: bool,    // we dialed them (so we introduce ourselves first)
     pub registered: bool,  // handshake complete
     pub sent_server: bool, // we've sent our own SERVER line
@@ -101,8 +101,8 @@ impl Server {
         &mut self,
         uid: Uid,
         addr: SocketAddr,
-        out: Sender<String>,
-        _sock: TcpStream, // held by the reader/writer threads; closed gracefully
+        out: OutSink,
+        _sock: Option<TcpStream>, // held by the reader/writer threads; closed gracefully
         outbound: bool,
     ) {
         let mut sent_server = false;
@@ -113,7 +113,7 @@ impl Server {
                 .find(|b| b.ip == addr.ip().to_string())
                 .map(|b| b.password.clone());
             if let Some(pass) = pass {
-                let _ = out.send(format!(
+                out.send(format!(
                     "SERVER {} {} {} :{}",
                     self.name, pass, self.sid, self.server_desc
                 ));
@@ -137,7 +137,7 @@ impl Server {
 
     fn link_out(&self, uid: Uid, line: String) {
         if let Some(l) = self.links.get(&uid) {
-            let _ = l.out.send(line);
+            l.out.send(line);
         }
     }
 

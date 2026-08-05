@@ -4,12 +4,12 @@
 
 use std::collections::HashSet;
 use std::net::{SocketAddr, TcpStream};
-use std::sync::mpsc::Sender;
 
 use crate::extensible::Extensible;
 use crate::module::Hook;
 use crate::numeric::*;
 use crate::server::{Server, VERSION};
+use crate::socketengine::OutSink;
 use crate::Uid;
 
 /// User modes and session flags. Kept in one `Default` bag so adding a mode
@@ -219,7 +219,7 @@ pub struct User {
     pub last_active: u64, // unix secs of the last line we received
     pub ping_sent: bool,  // a server PING is outstanding
     pub ext: Extensible,  // typed, module-owned per-user metadata
-    pub out: Sender<String>,
+    pub out: OutSink,
     pub sock: Option<TcpStream>, // core-side fd handle; dropped on quit so the
                                  // writer thread flushes then closes (None in tests)
 }

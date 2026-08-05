@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::net::{SocketAddr, TcpStream};
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Receiver;
 
 use crate::command::Command;
 use crate::config::Config;
@@ -13,6 +13,7 @@ use crate::message;
 use crate::module::{Hook, ModResult, Module};
 use crate::numeric::{ERR_NEEDMOREPARAMS, ERR_NOTREGISTERED, ERR_UNKNOWNCOMMAND};
 use crate::server::Server;
+use crate::socketengine::OutSink;
 use crate::Uid;
 
 /// What the I/O threads hand to the core.
@@ -20,8 +21,8 @@ pub enum Event {
     Connect {
         uid: Uid,
         addr: SocketAddr,
-        out: Sender<String>,
-        sock: TcpStream,
+        out: OutSink,
+        sock: Option<TcpStream>,
         secure: bool,
         link: bool,     // a server-to-server connection, not a client
         outbound: bool, // (link) we dialed them

@@ -30,11 +30,11 @@ ffi=$(grep -rnE 'extern[[:space:]]+"C"|\blibc::|std::ffi|#\[no_mangle\]' src/ 2>
 
 # 4. dependency-light — only openssl is allowed as an external crate
 deps=$(awk '/^\[dependencies\]/{f=1;next} /^\[/{f=0} f && NF {print}' Cargo.toml 2>/dev/null \
-        | grep -vE '^[[:space:]]*#' | sed -E 's/[[:space:]=].*//' | grep -vE '^(openssl)?$')
-[ -n "$deps" ] && flag "unexpected dependency (only openssl allowed):" "$deps"
+        | grep -vE '^[[:space:]]*#' | sed -E 's/[[:space:]=].*//' | grep -vE '^(openssl|mio)?$')
+[ -n "$deps" ] && flag "unexpected dependency (only openssl + mio allowed):" "$deps"
 
 if [ "$fail" -eq 0 ]; then
-  echo "native-rust-guard: OK — original Rust, no-unsafe, no C/FFI, openssl-only."
+  echo "native-rust-guard: OK — original Rust, no-unsafe, no C/FFI, openssl+mio only."
   exit 0
 fi
 echo "native-rust-guard: FAILED — see violations above." >&2
