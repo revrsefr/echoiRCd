@@ -1,0 +1,71 @@
+//! Flood protection — a module that rate-limits messages.
+//!
+//! It keeps each user's recent message times in that user's typed
+//! [`crate::extensible::Extensible`] slot. Because the state is *owned by the
+//! `User`*, it vanishes the moment the user quits — no cleanup callback, no cull
+//! list, no chance of a dangling reference (the C++ InspIRCd failure mode this
+//! design rules out at compile time).
+
+use crate::module::{ModResult, Module};
+use crate::server::{now, Server};
+use crate::Uid;
+
+const FLOOD_MAX: usize = 8; // messages allowed…
+const FLOOD_WINDOW: u64 = 4; // …within this many seconds
+
+#[derive(Default)]
+struct FloodState {
+    times: Vec<u64>,
+    warned: bool,
+}
+
+pub struct Flood;
+
+impl Module for Flood {
+    fn name(&self) -> &'static str {
+        "flood"
+    }
+
+    fn on_pre_message(
+        &mut self,
+        srv: &mut Server,
+        uid: Uid,
+        _target: &str,
+        _text: &str,
+    ) -> ModResult {
+        let now = now();
+        let (over, warn) = {
+            let Some(u) = srv.users.get_mut(&uid) else {
+                return ModResult::Passthru;
+            };
+            if u.flags.oper {
+                return ModResult::Passthru; // opers bypass flood limits
+            }
+            let st = u.ext.get_or_insert_with(FloodState::default);
+            st.times.retain(|&t| now.saturating_sub(t) < FLOOD_WINDOW);
+            st.times.push(now);
+            let over = st.times.len() > FLOOD_MAX;
+            let warn = over && !st.warned; // notice once per burst
+            st.warned = over;
+            (over, warn)
+        };
+        if over {
+            if warn {
+                let nick = srv
+                    .users
+                    .get(&uid)
+                    .map(|u| u.nick.clone())
+                    .unwrap_or_default();
+                srv.send(
+                    uid,
+                    format!(
+                        ":{} NOTICE {nick} :*** Flood detected — slow down",
+                        srv.name
+                    ),
+                );
+            }
+            return ModResult::Deny;
+        }
+        ModResult::Passthru
+    }
+}

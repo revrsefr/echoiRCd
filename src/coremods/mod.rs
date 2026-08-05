@@ -1,0 +1,34 @@
+//! The built-in commands, grouped the way InspIRCd groups its `coremods/`:
+//! `core_user`, `core_channel`, `core_message`, `core_mode`, `core_oper`,
+//! `core_info`. Each module exposes `commands()`; [`command_table`] assembles the
+//! registry the core dispatches through.
+
+pub mod core_channel;
+pub mod core_extra;
+pub mod core_info;
+pub mod core_message;
+pub mod core_mode;
+pub mod core_oper;
+pub mod core_user;
+pub mod core_watch;
+
+use std::collections::HashMap;
+
+use crate::command::Command;
+
+pub fn command_table() -> HashMap<&'static str, Box<dyn Command>> {
+    let mut m: HashMap<&'static str, Box<dyn Command>> = HashMap::new();
+    for c in core_user::commands()
+        .into_iter()
+        .chain(core_channel::commands())
+        .chain(core_message::commands())
+        .chain(core_mode::commands())
+        .chain(core_oper::commands())
+        .chain(core_info::commands())
+        .chain(core_extra::commands())
+        .chain(core_watch::commands())
+    {
+        m.insert(c.name(), c);
+    }
+    m
+}

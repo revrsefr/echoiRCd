@@ -1,0 +1,12 @@
+/target
+Cargo.lock
+
+# --- secrets: never commit ---
+# real config holds the oper password, cloak_key and link secret
+/echoircd.conf
+# TLS certificate + private key
+/tls/
+*.pem
+*.key
+# stray logs / local scratch
+*.log

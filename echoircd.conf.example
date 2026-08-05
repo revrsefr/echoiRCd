@@ -1,0 +1,43 @@
+# echoIRCd config — simple key = value (repeat `motd` for extra lines).
+# Copy this file to `echoircd.conf` and fill in your own values.
+# NOTE: echoircd.conf is gitignored because it holds secrets (oper password,
+# cloak key, link password). Never commit your real config.
+
+servername = irc.example.net
+network    = ExampleNet
+bind       = 0.0.0.0:6667
+
+# TLS listener. Generate a cert/key first, e.g.:
+#   openssl req -x509 -newkey rsa:2048 -keyout tls/key.pem -out tls/cert.pem \
+#           -days 3650 -nodes -subj "/CN=irc.example.net"
+bind_tls   = 0.0.0.0:6697
+tls_cert   = ./tls/cert.pem
+tls_key    = ./tls/key.pem
+
+motd = Welcome to echoIRCd — a from-scratch IRC daemon in Rust.
+motd = Edit the MOTD in your echoircd.conf.
+
+# --- server-to-server linking ---
+sid         = 0AA
+serverdesc  = echoIRCd server
+bind_server = 0.0.0.0:7000
+# link = <name> <ip> <port> <password> [autoconnect]   (the password is a shared secret)
+# link = peer.example.net 203.0.113.5 7000 CHANGE_THIS_LINK_SECRET autoconnect
+
+# IRC operators — oper = <name> <password>
+oper = admin CHANGE_THIS_PASSWORD
+
+# host-cloaking secret (+x). Use a long random hex string; keep it private.
+# Changing it re-cloaks everyone.
+cloak_key  = CHANGE_THIS_TO_A_LONG_RANDOM_HEX_STRING
+
+# antimixedutf8 — block spam that mixes look-alike scripts within words.
+# action = block | kill | gline | kline | zline ; target = both | channel | private
+antimixedutf8 = off
+amu_threshold = 8
+amu_minlen    = 10
+amu_action    = block
+amu_target    = both
+
+# +G censor words: `badword = <find> [replacement]` (omit replacement to block).
+# badword = examplebadword ***

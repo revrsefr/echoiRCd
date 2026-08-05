@@ -1,0 +1,23 @@
+[package]
+name = "echoircd"
+version = "0.1.0"
+edition = "2021"
+description = "A small, dependency-light IRC daemon in Rust — InspIRCd-inspired command/module API."
+license = "MIT"
+
+[[bin]]
+name = "echoircd"
+path = "src/main.rs"
+
+[lib]
+name = "echoircd"
+path = "src/lib.rs"
+
+[dependencies]
+# TLS backend (InspIRCd ships ssl_openssl / ssl_gnutls as modules; this is our
+# openssl backend — the crate keeps all `unsafe` internal, so the daemon stays
+# `#![forbid(unsafe_code)]`). A pure-Rust `rustls` backend can slot in beside it.
+openssl = "0.10"
+
+[profile.release]
+opt-level = 3

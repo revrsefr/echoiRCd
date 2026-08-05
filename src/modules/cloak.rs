@@ -1,0 +1,168 @@
+//! cloak — echoIRCd's host-masking module (InspIRCd's `m_cloak_*`, our way).
+//!
+//! Every user gets a deterministic, keyed **cloak** of their host that hides the
+//! real IP while *preserving subnet structure*, so a channel ban on a whole /24
+//! or /16 still bites. The cloak is shown under user mode **+x**, which this
+//! module auto-sets on connect; only opers may drop it (see [`crate::mode`]),
+//! which stops +x from becoming a ban-evasion switch.
+//!
+//! Format follows InspIRCd's `SegmentIP`: one hashed segment per cumulative IP
+//! octet-prefix, most-specific on the left, ending in the literal `.IP` suffix
+//! that marks a cloaked address (as opposed to a cloaked hostname, which keeps
+//! its domain). For `a.b.c.d`:
+//!
+//! ```text
+//!   HASH(a.b.c.d) . HASH(a.b.c) . HASH(a.b) . HASH(a) . IP
+//!      (/32)          (/24)        (/16)       (/8)
+//! ```
+//!
+//! so two IPs in the same /24 share the `…​/24./16./8.IP` tail (same /16 shares
+//! `…​/16./8.IP`), and the exact address never leaks. Where this improves on the
+//! C++ original: the hash is **SHA-256** (via the `openssl` we already link for
+//! TLS) instead of MD5, it needs no separate hashing module, and the whole path
+//! stays `#![forbid(unsafe_code)]`. The key lives in the config (`cloak_key = …`);
+//! with no key set, cloaking is simply off and +x is a no-op.
+
+use openssl::sha::sha256;
+
+use crate::module::Module;
+use crate::server::Server;
+use crate::Uid;
+
+/// The suffix marking a cloaked IP address (InspIRCd's default is `.IP` too).
+const IP_SUFFIX: &str = ".IP";
+
+pub struct Cloak;
+
+impl Module for Cloak {
+    fn name(&self) -> &'static str {
+        "cloak"
+    }
+
+    /// Compute the cloak once, at connect, and cloak the user by default (+x).
+    fn on_user_connect(&mut self, srv: &mut Server, uid: Uid) {
+        let Some(key) = srv.cloak_key.clone() else {
+            return; // no cloak key configured -> cloaking disabled
+        };
+        let Some(host) = srv.users.get(&uid).map(|u| u.host.clone()) else {
+            return;
+        };
+        let cloak = cloak_host(&key, &host);
+        if let Some(u) = srv.users.get_mut(&uid) {
+            u.cloak = cloak;
+            u.flags.cloak = true; // cloaked by default; -x is oper-only
+        }
+    }
+}
+
+/// One cloak label: the first `n` hex chars of `SHA-256(key ‖ NUL ‖ data)`.
+fn label(key: &str, data: &str, n: usize) -> String {
+    let digest = sha256(format!("{key}\u{0}{data}").as_bytes());
+    let mut s = String::with_capacity(n + 1);
+    for b in &digest {
+        s.push_str(&format!("{b:02x}"));
+        if s.len() >= n {
+            break;
+        }
+    }
+    s.truncate(n);
+    s
+}
+
+/// Parse `"a.b.c.d"` into four octets, or `None` if it isn't a dotted IPv4.
+fn parse_v4(host: &str) -> Option<(u8, u8, u8, u8)> {
+    let mut it = host.split('.');
+    let a = it.next()?.parse().ok()?;
+    let b = it.next()?.parse().ok()?;
+    let c = it.next()?.parse().ok()?;
+    let d = it.next()?.parse().ok()?;
+    if it.next().is_some() {
+        return None;
+    }
+    Some((a, b, c, d))
+}
+
+/// Compute a user's cloak from their real host.
+///
+/// - IPv4 `a.b.c.d` → `H(a.b.c.d).H(a.b.c).H(a.b).H(a).IP` — one keyed segment per
+///   octet-prefix tier (/32 · /24 · /16 · /8), so subnet bans keep working while
+///   the exact address never appears.
+/// - IPv6 → `ALPHA.BETA.GAMMA.IP` (mirrors InspIRCd), coarsened by hextet groups.
+/// - hostname → keep the last two labels (the domain), mask everything to the left
+///   (no `.IP` — a resolved name isn't a raw address).
+pub fn cloak_host(key: &str, host: &str) -> String {
+    if let Some((a, b, c, d)) = parse_v4(host) {
+        let h32 = label(key, &format!("{a}.{b}.{c}.{d}"), 6);
+        let h24 = label(key, &format!("{a}.{b}.{c}"), 5);
+        let h16 = label(key, &format!("{a}.{b}"), 4);
+        let h8 = label(key, &format!("{a}"), 4);
+        format!("{h32}.{h24}.{h16}.{h8}{IP_SUFFIX}")
+    } else if host.contains(':') {
+        let groups: Vec<&str> = host.split(':').filter(|g| !g.is_empty()).collect();
+        let mid = groups.iter().take(4).copied().collect::<Vec<_>>().join(":");
+        let wide = groups.iter().take(2).copied().collect::<Vec<_>>().join(":");
+        let alpha = label(key, host, 6);
+        let beta = label(key, &mid, 5);
+        let gamma = label(key, &wide, 4);
+        format!("{alpha}.{beta}.{gamma}{IP_SUFFIX}")
+    } else {
+        let parts: Vec<&str> = host.split('.').filter(|p| !p.is_empty()).collect();
+        if parts.len() >= 3 {
+            let suffix = parts[parts.len() - 2..].join(".");
+            format!("{}.{suffix}", label(key, host, 8))
+        } else {
+            format!("{}.cloak", label(key, host, 8))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn v4_cloak_is_deterministic_and_hides_the_ip() {
+        let c = cloak_host("secret", "203.0.113.7");
+        assert_eq!(c, cloak_host("secret", "203.0.113.7")); // stable
+        assert!(!c.contains("203.0.113")); // the dotted IP never appears
+        assert!(c.ends_with(".IP")); // InspIRCd-style IP suffix
+        assert_eq!(c.split('.').count(), 5); // H32.H24.H16.H8.IP
+    }
+
+    #[test]
+    fn same_subnet_shares_a_suffix_but_host_differs() {
+        let a = cloak_host("secret", "203.0.113.7");
+        let b = cloak_host("secret", "203.0.113.9"); // same /24
+        let e = cloak_host("secret", "8.8.8.8"); // different net
+        let tail = |s: &str| s.split_once('.').unwrap().1.to_string();
+        assert_eq!(tail(&a), tail(&b)); // /24 ban still matches both
+        assert_ne!(a, b); // but the exact host label differs
+        assert_ne!(tail(&a), tail(&e)); // unrelated net -> unrelated tail
+    }
+
+    #[test]
+    fn wider_ban_matches_the_whole_16() {
+        // two different /24s inside the same /16 share only the /16./8.IP tail
+        let a = cloak_host("secret", "203.0.113.7");
+        let b = cloak_host("secret", "203.0.200.4");
+        let net16_tail = |s: &str| s.splitn(3, '.').nth(2).unwrap().to_string();
+        assert_eq!(net16_tail(&a), net16_tail(&b)); // H16.H8.IP shared
+        assert_ne!(a.split_once('.').unwrap().1, b.split_once('.').unwrap().1); // /24 differs
+    }
+
+    #[test]
+    fn the_key_changes_the_cloak() {
+        assert_ne!(
+            cloak_host("key-one", "203.0.113.7"),
+            cloak_host("key-two", "203.0.113.7"),
+        );
+    }
+
+    #[test]
+    fn hostname_keeps_its_domain_and_has_no_ip_suffix() {
+        let c = cloak_host("secret", "host.dyn.example.com");
+        assert!(c.ends_with(".example.com"));
+        assert!(!c.ends_with(".IP"));
+        assert!(!c.starts_with("host"));
+    }
+}
