@@ -18,6 +18,7 @@ use crate::Uid;
 pub const WATCH_MAX: usize = 128;
 pub const MONITOR_MAX: usize = 128;
 pub const SILENCE_MAX: usize = 32;
+pub const ACCEPT_MAX: usize = 64;
 
 impl Server {
     /// A nick just came online (registered, or someone renamed to it): tell its
@@ -72,6 +73,15 @@ impl Server {
             .values()
             .filter(|u| u.watch.contains(&low))
             .count()
+    }
+
+    /// True if `sender_nick` is on `target`'s ACCEPT list (callerid +g).
+    pub fn is_accepted(&self, target: Uid, sender_nick: &str) -> bool {
+        let low = sender_nick.to_ascii_lowercase();
+        self.users
+            .get(&target)
+            .map(|u| u.accept.contains(&low))
+            .unwrap_or(false)
     }
 
     /// True if user `by` has silenced someone whose prefix is `sender_mask`.

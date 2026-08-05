@@ -781,6 +781,7 @@ static USER_MODES: &[&(dyn UserMode + Sync)] = &[
     &REGISTERED,
     &SSLPM,
     &SNOMASK,
+    &CALLERID,
 ];
 
 /// A simple boolean user flag (+i / +w).
@@ -820,6 +821,9 @@ fn set_regdeaf(f: &mut UserFlags, v: bool) {
 fn set_sslpm(f: &mut UserFlags, v: bool) {
     f.ssl_pm = v;
 }
+fn set_callerid(f: &mut UserFlags, v: bool) {
+    f.callerid = v;
+}
 static BOT: UFlag = UFlag {
     ch: 'B',
     set: set_bot,
@@ -843,6 +847,10 @@ static REGDEAF: UFlag = UFlag {
 static SSLPM: UFlag = UFlag {
     ch: 'z',
     set: set_sslpm,
+};
+static CALLERID: UFlag = UFlag {
+    ch: 'g',
+    set: set_callerid,
 };
 
 impl UserMode for UFlag {
@@ -984,7 +992,7 @@ mod tests {
 
     #[test]
     fn registry_covers_all_user_modes() {
-        for c in "iwoxBDIHrRzs".chars() {
+        for c in "iwoxBDIHrRzsg".chars() {
             assert!(user_mode(c).is_some(), "missing umode +{c}");
         }
         assert!(user_mode('Q').is_none());

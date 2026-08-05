@@ -28,6 +28,7 @@ pub struct UserFlags {
     pub reg_only_pm: bool,    // +R (only accept PMs from logged-in users)
     pub ssl_pm: bool,         // +z (only accept PMs from TLS users)
     pub snomask: bool,        // +s (oper: receive server notices)
+    pub callerid: bool,       // +g (only accept PMs from users on the ACCEPT list)
     pub away: Option<String>, // AWAY message, if set
 }
 
@@ -69,6 +70,9 @@ impl UserFlags {
         }
         if self.snomask {
             s.push('s');
+        }
+        if self.callerid {
+            s.push('g');
         }
         s
     }
@@ -209,6 +213,7 @@ pub struct User {
     pub watch: Vec<String>,        // WATCH list — lowercased nicks
     pub monitor: Vec<String>,      // MONITOR list — lowercased nicks
     pub silence: Vec<String>,      // SILENCE masks — nick!user@host globs
+    pub accept: Vec<String>,       // ACCEPT list — lowercased nicks (callerid +g)
     pub quitting: Option<String>,  // set by QUIT; drained by the core
     pub flags: UserFlags,
     pub last_active: u64, // unix secs of the last line we received
@@ -355,7 +360,7 @@ impl Server {
             uid,
             RPL_MYINFO,
             &format!(
-                "{} echoircd-{VERSION} iowxsBDIHrRz qaohvbeIklimnpstzCTcSNORMfjFLgGu",
+                "{} echoircd-{VERSION} iowxsgBDIHrRz qaohvbeIklimnpstzCTcSNORMfjFLgGu",
                 self.name
             ),
         );
@@ -363,7 +368,7 @@ impl Server {
             uid,
             RPL_ISUPPORT,
             &format!(
-                "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIg,k,lfjFL,CGMNORSTcimnpstuz EXTBAN=,cmn WATCH=128 MONITOR=128 SILENCE=32 CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={} :are supported by this server",
+                "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIg,k,lfjFL,CGMNORSTcimnpstuz EXTBAN=,cmn WATCH=128 MONITOR=128 SILENCE=32 CALLERID=g CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={} :are supported by this server",
                 self.network
             ),
         );

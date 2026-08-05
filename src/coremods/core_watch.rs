@@ -7,11 +7,16 @@ use crate::channels::normalize_mask;
 use crate::command::{CmdResult, Command};
 use crate::numeric::*;
 use crate::server::Server;
-use crate::watch::{MONITOR_MAX, SILENCE_MAX, WATCH_MAX};
+use crate::watch::{ACCEPT_MAX, MONITOR_MAX, SILENCE_MAX, WATCH_MAX};
 use crate::Uid;
 
 pub fn commands() -> Vec<Box<dyn Command>> {
-    vec![Box::new(Watch), Box::new(Monitor), Box::new(Silence)]
+    vec![
+        Box::new(Watch),
+        Box::new(Monitor),
+        Box::new(Silence),
+        Box::new(Accept),
+    ]
 }
 
 // --- WATCH ------------------------------------------------------------------
@@ -300,6 +305,90 @@ impl Command for Silence {
             s.send(uid, format!(":{prefix} SILENCE -{mask}"));
         } else {
             silence_list(s, uid);
+        }
+        CmdResult::Ok
+    }
+}
+
+// --- ACCEPT (callerid +g allow-list) ----------------------------------------
+
+fn accept_list(s: &Server, uid: Uid) {
+    let list = s
+        .users
+        .get(&uid)
+        .map(|u| u.accept.clone())
+        .unwrap_or_default();
+    for n in list {
+        s.numeric(uid, RPL_ACCEPTLIST, &n);
+    }
+    s.numeric(uid, RPL_ENDOFACCEPT, ":End of ACCEPT list");
+}
+
+struct Accept;
+impl Command for Accept {
+    fn name(&self) -> &'static str {
+        "ACCEPT"
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        let first = params.first().map(|a| a.as_str()).unwrap_or("");
+        if first.is_empty() || first == "*" {
+            accept_list(s, uid);
+            return CmdResult::Ok;
+        }
+        for tok in params
+            .iter()
+            .flat_map(|p| p.split([',', ' ']))
+            .filter(|t| !t.is_empty())
+        {
+            if tok == "*" {
+                accept_list(s, uid);
+                continue;
+            }
+            let (adding, name) = match tok.strip_prefix('-') {
+                Some(n) => (false, n),
+                None => (true, tok.strip_prefix('+').unwrap_or(tok)),
+            };
+            if name.is_empty() {
+                continue;
+            }
+            let low = name.to_ascii_lowercase();
+            if adding {
+                let (full, exists) = s
+                    .users
+                    .get(&uid)
+                    .map(|u| (u.accept.len() >= ACCEPT_MAX, u.accept.contains(&low)))
+                    .unwrap_or((true, false));
+                if exists {
+                    s.numeric(
+                        uid,
+                        ERR_ACCEPTEXIST,
+                        &format!("{name} :is already on your accept list"),
+                    );
+                } else if full {
+                    s.numeric(
+                        uid,
+                        ERR_ACCEPTFULL,
+                        &format!("{name} :Your accept list is full"),
+                    );
+                } else if let Some(u) = s.users.get_mut(&uid) {
+                    u.accept.push(low);
+                }
+            } else {
+                let existed = s
+                    .users
+                    .get(&uid)
+                    .map(|u| u.accept.contains(&low))
+                    .unwrap_or(false);
+                if !existed {
+                    s.numeric(
+                        uid,
+                        ERR_ACCEPTNOT,
+                        &format!("{name} :is not on your accept list"),
+                    );
+                } else if let Some(u) = s.users.get_mut(&uid) {
+                    u.accept.retain(|x| x != &low);
+                }
+            }
         }
         CmdResult::Ok
     }

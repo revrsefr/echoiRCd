@@ -37,6 +37,16 @@ pub const RPL_SILELIST: u16 = 271;
 pub const RPL_ENDOFSILENCE: u16 = 272;
 pub const ERR_SILELISTFULL: u16 = 511;
 
+// ACCEPT / callerid (umode +g)
+pub const RPL_ACCEPTLIST: u16 = 281;
+pub const RPL_ENDOFACCEPT: u16 = 282;
+pub const ERR_ACCEPTFULL: u16 = 456;
+pub const ERR_ACCEPTEXIST: u16 = 457;
+pub const ERR_ACCEPTNOT: u16 = 458;
+pub const RPL_TARGUMODEG: u16 = 716; // "<nick> :is in +g mode (server-side ignore)"
+pub const RPL_TARGNOTIFY: u16 = 717; // "<nick> :has been informed that you messaged them"
+pub const RPL_UMODEGMSG: u16 = 718; // to the +g user: "<nick> <user@host> :is messaging you…"
+
 // WATCH (notify list)
 pub const RPL_LOGON: u16 = 600;
 pub const RPL_LOGOFF: u16 = 601;

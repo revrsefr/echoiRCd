@@ -376,6 +376,50 @@ fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool) -> CmdResu
             }
             return CmdResult::Fail;
         }
+        // +g callerid: a +g user only accepts PMs from users on their ACCEPT list.
+        // Others are blocked; the target is told someone tried (718), and a PRIVMSG
+        // sender is told the target is in +g and has been informed (716 + 717).
+        let sender_nick = s
+            .users
+            .get(&uid)
+            .map(|u| u.nick.clone())
+            .unwrap_or_default();
+        let target_g = s
+            .users
+            .get(&tuid)
+            .map(|u| u.flags.callerid)
+            .unwrap_or(false);
+        if target_g && uid != tuid && !s.is_accepted(tuid, &sender_nick) {
+            let (tnick, sident, shost) = {
+                let t = s.users.get(&tuid);
+                let u = s.users.get(&uid);
+                (
+                    t.map(|x| x.nick.clone()).unwrap_or_default(),
+                    u.map(|x| x.ident.clone()).unwrap_or_default(),
+                    u.map(|x| x.host_display().to_string()).unwrap_or_default(),
+                )
+            };
+            s.numeric(
+                tuid,
+                RPL_UMODEGMSG,
+                &format!(
+                    "{sender_nick} {sident}@{shost} :is messaging you, and you have umode +g."
+                ),
+            );
+            if !notice {
+                s.numeric(
+                    uid,
+                    RPL_TARGUMODEG,
+                    &format!("{tnick} :is in +g mode (server-side ignore)."),
+                );
+                s.numeric(
+                    uid,
+                    RPL_TARGNOTIFY,
+                    &format!("{tnick} :has been informed that you messaged them."),
+                );
+            }
+            return CmdResult::Ok;
+        }
         // SILENCE: if the recipient silenced the sender, drop it silently — the
         // sender is never told (that's the point), but still gets their own echo.
         let silenced = s.is_silenced(tuid, &prefix);
@@ -396,6 +440,20 @@ fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool) -> CmdResu
         if !notice && !silenced {
             if let Some(msg) = s.users.get(&tuid).and_then(|u| u.flags.away.clone()) {
                 s.numeric(uid, RPL_AWAY, &format!("{target} :{msg}"));
+            }
+        }
+        // callerid convenience: if the SENDER is +g, auto-accept whoever they
+        // message so that person can reply without being blocked.
+        if s.users.get(&uid).map(|u| u.flags.callerid).unwrap_or(false) {
+            let tnick = s
+                .users
+                .get(&tuid)
+                .map(|u| u.nick.to_ascii_lowercase())
+                .unwrap_or_default();
+            if let Some(su) = s.users.get_mut(&uid) {
+                if !tnick.is_empty() && !su.accept.contains(&tnick) {
+                    su.accept.push(tnick);
+                }
             }
         }
     } else if let Some((uuid, via)) = s.find_remote(target) {
