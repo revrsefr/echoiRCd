@@ -25,6 +25,7 @@ pub mod mode;
 pub mod module;
 pub mod modules;
 pub mod numeric;
+pub mod resolver;
 pub mod server;
 pub mod socketengine;
 pub mod tls;

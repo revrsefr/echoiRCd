@@ -7,13 +7,17 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{SocketAddr, TcpStream};
+use std::sync::mpsc::Sender;
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::channels::Channel;
 use crate::config::{Config, LinkBlock};
 use crate::extensible::Extensible;
+use crate::ircd::Event;
 use crate::link::{Link, RemoteServer, RemoteUser};
 use crate::module::Hook;
+use crate::resolver;
 use crate::socketengine::OutSink;
 use crate::users::{Caps, User, UserFlags};
 use crate::xline::XLine;
@@ -93,10 +97,12 @@ pub struct Server {
     pub in_redirect: bool,                         // +L: guards against redirect loops
     pub censor: Vec<(String, String)>,             // +G bad words: (find, replace)
     pub amu: crate::config::AntiMixedCfg,          // antimixedutf8 module config
+    pub resolve_hosts: bool,                       // reverse-DNS clients on connect
+    pub event_tx: Sender<Event>,                   // self-inject events (DNS results)
 }
 
 impl Server {
-    pub fn new(cfg: Config) -> Server {
+    pub fn new(cfg: Config, event_tx: Sender<Event>) -> Server {
         Server {
             name: cfg.servername,
             network: cfg.network,
@@ -126,6 +132,8 @@ impl Server {
             in_redirect: false,
             censor: cfg.censor,
             amu: cfg.amu,
+            resolve_hosts: cfg.resolve_hosts,
+            event_tx,
         }
     }
 
@@ -166,6 +174,7 @@ impl Server {
     ) {
         let uuid = self.next_uuid();
         self.uuid_local.insert(uuid.clone(), uid);
+        let ip = addr.ip();
         self.users.insert(
             uid,
             User {
@@ -182,6 +191,7 @@ impl Server {
                 signon: now(),
                 addr,
                 registered: false,
+                dns_pending: false,
                 cap: false,
                 cap_302: false,
                 caps: Caps::default(),
@@ -200,6 +210,54 @@ impl Server {
                 sock,
             },
         );
+
+        // Pre-registration connection notices, InspIRCd / solanum style. Ident-113
+        // is archaic and firewalled, so those two are cosmetic; the hostname lookup
+        // is real (see `resolver`) — its result arrives later as an Event.
+        self.notice_star(uid, "Checking Ident");
+        self.notice_star(uid, "No Ident response");
+        self.notice_star(uid, "Looking up your hostname...");
+        if self.resolve_hosts && resolver::try_acquire() {
+            if let Some(u) = self.users.get_mut(&uid) {
+                u.dns_pending = true; // hold registration until the lookup returns
+            }
+            let tx = self.event_tx.clone();
+            thread::spawn(move || {
+                let host = resolver::reverse_confirmed(ip, resolver::DNS_TIMEOUT);
+                resolver::release();
+                let _ = tx.send(Event::ResolvedHost { uid, host });
+            });
+        } else {
+            // resolution off (or too many in flight): keep the IP as the host
+            self.notice_star(
+                uid,
+                "Couldn't look up your hostname; using your IP address instead",
+            );
+        }
+    }
+
+    /// A pre-registration `:server NOTICE * :*** <msg>` line.
+    fn notice_star(&self, uid: Uid, msg: &str) {
+        self.send(uid, format!(":{} NOTICE * :*** {msg}", self.name));
+    }
+
+    /// A client's reverse-DNS lookup finished. Set the resolved host (so WHOIS,
+    /// bans and cloaking use the hostname, not the IP), tell the client, and clear
+    /// the flag that was holding their registration.
+    pub fn on_resolved(&mut self, uid: Uid, host: Option<String>) {
+        match &host {
+            Some(h) => self.notice_star(uid, &format!("Found your hostname ({h})")),
+            None => self.notice_star(
+                uid,
+                "Couldn't look up your hostname; using your IP address instead",
+            ),
+        }
+        if let Some(u) = self.users.get_mut(&uid) {
+            if let Some(h) = host {
+                u.host = h;
+            }
+            u.dns_pending = false;
+        }
     }
 
     /// Mark a user as quitting; the core turns this into a full quit after the
@@ -484,6 +542,7 @@ mod tests {
                 signon: 0,
                 addr: "127.0.0.1:1".parse().unwrap(),
                 registered: true,
+                dns_pending: false,
                 cap: false,
                 cap_302: false,
                 caps: Caps::default(),
@@ -507,7 +566,8 @@ mod tests {
     }
 
     fn srv() -> Server {
-        Server::new(Config::default())
+        let (tx, _rx) = mpsc::channel();
+        Server::new(Config::default(), tx)
     }
 
     #[test]

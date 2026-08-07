@@ -69,6 +69,7 @@ pub struct Config {
     pub conf_path: String,             // where this was loaded from (for REHASH)
     pub censor: Vec<(String, String)>, // +G bad words: (find, replace); empty replace = block
     pub amu: AntiMixedCfg,             // antimixedutf8 module config
+    pub resolve_hosts: bool,           // reverse-DNS clients on connect (default on)
 }
 
 impl Default for Config {
@@ -90,6 +91,7 @@ impl Default for Config {
             conf_path: "echoircd.conf".to_string(),
             censor: Vec::new(),
             amu: AntiMixedCfg::default(),
+            resolve_hosts: true,
         }
     }
 }
@@ -184,6 +186,12 @@ impl Config {
                     let t = v.to_ascii_lowercase();
                     c.amu.check_channel = t == "both" || t == "channel";
                     c.amu.check_private = t == "both" || t == "private";
+                }
+                "resolve_hosts" | "resolvehosts" | "dns" => {
+                    c.resolve_hosts = !matches!(
+                        v.to_ascii_lowercase().as_str(),
+                        "off" | "false" | "no" | "0"
+                    )
                 }
                 _ => {}
             }

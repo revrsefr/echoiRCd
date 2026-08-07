@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::net::{SocketAddr, TcpStream};
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, Sender};
 
 use crate::command::Command;
 use crate::config::Config;
@@ -34,6 +34,11 @@ pub enum Event {
     Disconnect {
         uid: Uid,
     },
+    /// A client's reverse-DNS lookup finished (`None` = no confirmed hostname).
+    ResolvedHost {
+        uid: Uid,
+        host: Option<String>,
+    },
     /// Background timer tick — drives ping/idle timeouts.
     Tick,
 }
@@ -45,9 +50,9 @@ pub struct Ircd {
 }
 
 impl Ircd {
-    pub fn new(cfg: Config) -> Ircd {
+    pub fn new(cfg: Config, event_tx: Sender<Event>) -> Ircd {
         Ircd {
-            server: Server::new(cfg),
+            server: Server::new(cfg, event_tx),
             commands: command_table(),
             modules: crate::modules::default_modules(),
         }
@@ -87,6 +92,10 @@ impl Ircd {
                     } else {
                         self.quit_user(uid, "Connection closed");
                     }
+                }
+                Event::ResolvedHost { uid, host } => {
+                    self.server.on_resolved(uid, host);
+                    self.try_register(uid); // DNS may have been the last thing we waited on
                 }
                 Event::Tick => self.on_tick(),
             }
@@ -162,15 +171,27 @@ impl Ircd {
         }
         // …or completed the registration handshake
         if !registered {
-            let ready = self
-                .server
-                .users
-                .get(&uid)
-                .map(|u| !u.registered && !u.nick.is_empty() && !u.ident.is_empty() && !u.cap)
-                .unwrap_or(false);
-            if ready {
-                self.complete_registration(uid);
-            }
+            self.try_register(uid);
+        }
+    }
+
+    /// Finish registration if NICK, USER, CAP and the reverse-DNS lookup are all
+    /// done. Called after each command and when a DNS result arrives.
+    fn try_register(&mut self, uid: Uid) {
+        let ready = self
+            .server
+            .users
+            .get(&uid)
+            .map(|u| {
+                !u.registered
+                    && !u.nick.is_empty()
+                    && !u.ident.is_empty()
+                    && !u.cap
+                    && !u.dns_pending
+            })
+            .unwrap_or(false);
+        if ready {
+            self.complete_registration(uid);
         }
     }
 

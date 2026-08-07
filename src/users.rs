@@ -197,7 +197,7 @@ pub struct User {
     pub nick: String,  // "" until NICK
     pub ident: String, // "" until USER
     pub realname: String,
-    pub host: String,            // real host (ip string; no rDNS)
+    pub host: String,            // displayed host: reverse-DNS name if resolved, else IP
     pub cloak: String,           // masked host shown under +x ("" until computed)
     pub vhost: Option<String>,   // displayed-host override (CHGHOST/SETHOST vhost)
     pub secure: bool,            // connected over TLS (drives WHOIS 671 / sslinfo)
@@ -205,16 +205,17 @@ pub struct User {
     pub signon: u64,             // unix secs at registration (WHOIS 317)
     pub addr: SocketAddr,
     pub registered: bool,
-    pub cap: bool,                 // CAP negotiation in progress (holds registration)
-    pub cap_302: bool,             // client sent CAP LS 302 (cap-notify aware)
-    pub caps: Caps,                // enabled IRCv3 capabilities
+    pub dns_pending: bool, // holding registration for a reverse-DNS lookup
+    pub cap: bool,         // CAP negotiation in progress (holds registration)
+    pub cap_302: bool,     // client sent CAP LS 302 (cap-notify aware)
+    pub caps: Caps,        // enabled IRCv3 capabilities
     pub sasl_mech: Option<String>, // SASL mechanism chosen, mid-handshake
     pub channels: HashSet<String>, // lowercased channel keys
-    pub watch: Vec<String>,        // WATCH list — lowercased nicks
-    pub monitor: Vec<String>,      // MONITOR list — lowercased nicks
-    pub silence: Vec<String>,      // SILENCE masks — nick!user@host globs
-    pub accept: Vec<String>,       // ACCEPT list — lowercased nicks (callerid +g)
-    pub quitting: Option<String>,  // set by QUIT; drained by the core
+    pub watch: Vec<String>, // WATCH list — lowercased nicks
+    pub monitor: Vec<String>, // MONITOR list — lowercased nicks
+    pub silence: Vec<String>, // SILENCE masks — nick!user@host globs
+    pub accept: Vec<String>, // ACCEPT list — lowercased nicks (callerid +g)
+    pub quitting: Option<String>, // set by QUIT; drained by the core
     pub flags: UserFlags,
     pub last_active: u64, // unix secs of the last line we received
     pub ping_sent: bool,  // a server PING is outstanding

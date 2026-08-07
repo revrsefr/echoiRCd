@@ -46,7 +46,8 @@ fn main() {
 
     let (tx, rx) = mpsc::channel();
     let core_cfg = cfg.clone();
-    let core = thread::spawn(move || Ircd::new(core_cfg).run(rx));
+    let core_tx = tx.clone(); // the core self-injects events (DNS results)
+    let core = thread::spawn(move || Ircd::new(core_cfg, core_tx).run(rx));
 
     // background timer: drives ping/idle timeouts
     let tick_tx = tx.clone();
