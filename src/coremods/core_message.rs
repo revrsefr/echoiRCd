@@ -144,9 +144,18 @@ impl Command for ChatHistory {
         let sub = params[0].to_ascii_uppercase();
         let target = params[1].clone();
         let key = target.to_ascii_lowercase();
-        let sel = params[2].as_str();
-        let limit = params[3]
-            .parse::<usize>()
+        // BETWEEN takes two selectors then the limit; the rest take one + the limit
+        let (sel, sel2, limit_s) = if sub == "BETWEEN" {
+            (
+                params[2].as_str(),
+                params.get(3).map(|s| s.as_str()).unwrap_or("*"),
+                params.get(4),
+            )
+        } else {
+            (params[2].as_str(), "", params.get(3))
+        };
+        let limit = limit_s
+            .and_then(|l| l.parse::<usize>().ok())
             .unwrap_or(50)
             .clamp(1, HISTORY_CAP);
 
@@ -161,6 +170,16 @@ impl Command for ChatHistory {
                     .strip_prefix("msgid=")
                     .and_then(|id| buf.iter().position(|m| m.msgid == id));
                 let ref_ts = sel.strip_prefix("timestamp=").and_then(parse_iso);
+                // resolve any selector to a buffer index (for AROUND / BETWEEN)
+                let idx_of = |sl: &str| -> Option<usize> {
+                    if let Some(id) = sl.strip_prefix("msgid=") {
+                        buf.iter().position(|m| m.msgid == id)
+                    } else if let Some(iso) = sl.strip_prefix("timestamp=") {
+                        parse_iso(iso).and_then(|b| buf.iter().position(|m| m.ts >= b))
+                    } else {
+                        None
+                    }
+                };
                 let picked: Vec<&HistMsg> = match sub.as_str() {
                     "BEFORE" => {
                         let end = ref_idx.unwrap_or_else(|| {
@@ -179,6 +198,23 @@ impl Command for ChatHistory {
                             }
                         };
                         buf.iter().skip(begin).take(limit).collect()
+                    }
+                    "AROUND" => {
+                        // messages centred on the selector: half before, half after
+                        let i = idx_of(sel).unwrap_or(buf.len() / 2);
+                        let start = i.saturating_sub(limit / 2);
+                        buf.iter().skip(start).take(limit).collect()
+                    }
+                    "BETWEEN" => {
+                        // messages strictly between the two selector points
+                        let a = idx_of(sel).unwrap_or(0);
+                        let b = idx_of(sel2).unwrap_or(buf.len());
+                        let (lo, hi) = (a.min(b), a.max(b));
+                        buf.iter()
+                            .skip(lo + 1)
+                            .take(hi.saturating_sub(lo + 1))
+                            .take(limit)
+                            .collect()
                     }
                     _ => {
                         // LATEST: newest `limit`, optionally bounded below by the selector
