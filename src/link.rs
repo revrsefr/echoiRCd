@@ -554,6 +554,8 @@ impl Server {
             params: msg.params[2..].to_vec(),
             ctags: String::new(),
             label: None,
+            batch: None,
+            concat: false,
         };
         self.on_link(from, &sub);
     }

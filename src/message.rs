@@ -15,6 +15,12 @@ pub struct Message {
     /// The IRCv3 `label` tag value, if the client tagged this command (for
     /// labeled-response); `None` otherwise.
     pub label: Option<String>,
+    /// The `batch` tag value (which client batch this line belongs to), for
+    /// inbound draft/multiline.
+    pub batch: Option<String>,
+    /// Whether the line carried the `draft/multiline-concat` tag (join to the
+    /// previous multiline part with no newline).
+    pub concat: bool,
 }
 
 impl Message {
@@ -47,6 +53,8 @@ pub fn parse(line: &str) -> Option<Message> {
     // IRCv3 message tags — keep the client-only (`+`) tags for relay, drop the rest.
     let mut ctags = String::new();
     let mut label = None;
+    let mut batch = None;
+    let mut concat = false;
     if let Some(after_at) = rest.strip_prefix('@') {
         let (tags, r) = after_at.split_once(' ')?;
         ctags = tags
@@ -58,6 +66,11 @@ pub fn parse(line: &str) -> Option<Message> {
             .split(';')
             .find_map(|t| t.strip_prefix("label="))
             .map(|v| v.to_string());
+        batch = tags
+            .split(';')
+            .find_map(|t| t.strip_prefix("batch="))
+            .map(|v| v.to_string());
+        concat = tags.split(';').any(|t| t == "draft/multiline-concat");
         rest = r.trim_start();
     }
 
@@ -100,6 +113,8 @@ pub fn parse(line: &str) -> Option<Message> {
         params,
         ctags,
         label,
+        batch,
+        concat,
     })
 }
 

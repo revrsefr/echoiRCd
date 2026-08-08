@@ -8,7 +8,7 @@ use std::net::{SocketAddr, TcpStream};
 use crate::extensible::Extensible;
 use crate::module::Hook;
 use crate::numeric::*;
-use crate::server::{Server, VERSION};
+use crate::server::{Server, MLINE_MAX_BYTES, MLINE_MAX_LINES, VERSION};
 use crate::socketengine::OutSink;
 use crate::Uid;
 
@@ -101,6 +101,7 @@ pub const SUPPORTED_CAPS: &[&str] = &[
     "draft/message-redaction",
     "draft/pre-away",
     "draft/metadata-2",
+    "draft/multiline",
     "cap-notify",
 ];
 
@@ -130,6 +131,7 @@ pub struct Caps {
     pub message_redaction: bool, // draft/message-redaction — understands REDACT
     pub pre_away: bool,         // draft/pre-away — may set AWAY before registration
     pub metadata: bool,         // draft/metadata-2 — wants metadata + change notices
+    pub multiline: bool,        // draft/multiline — may send multiline message batches
     pub cap_notify: bool,
 }
 
@@ -150,6 +152,10 @@ impl Caps {
                     } else {
                         "sasl=PLAIN".to_string()
                     }
+                } else if *c == "draft/multiline" && cap302 {
+                    format!(
+                        "draft/multiline=max-bytes={MLINE_MAX_BYTES},max-lines={MLINE_MAX_LINES}"
+                    )
                 } else {
                     (*c).to_string()
                 }
@@ -181,6 +187,7 @@ impl Caps {
             "draft/message-redaction" => self.message_redaction,
             "draft/pre-away" => self.pre_away,
             "draft/metadata-2" => self.metadata,
+            "draft/multiline" => self.multiline,
             "cap-notify" => self.cap_notify,
             _ => false,
         }
@@ -210,6 +217,7 @@ impl Caps {
             "draft/message-redaction" => &mut self.message_redaction,
             "draft/pre-away" => &mut self.pre_away,
             "draft/metadata-2" => &mut self.metadata,
+            "draft/multiline" => &mut self.multiline,
             "cap-notify" => &mut self.cap_notify,
             _ => return false,
         };

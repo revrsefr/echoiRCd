@@ -191,6 +191,22 @@ impl Ircd {
         if registered && !matches!(cmd, "PING" | "PONG" | "QUIT") && self.server.user_shunned(uid) {
             return;
         }
+        // draft/multiline: a PRIVMSG/NOTICE tagged for an open batch is buffered,
+        // not delivered on its own — it's assembled and sent when the BATCH closes.
+        if let Some(bref) = &msg.batch {
+            if matches!(cmd, "PRIVMSG" | "NOTICE") && msg.params.len() >= 2 {
+                let consumed = self.server.multiline_accumulate(
+                    uid,
+                    bref,
+                    cmd == "NOTICE",
+                    &msg.params[1],
+                    msg.concat,
+                );
+                if consumed {
+                    return;
+                }
+            }
+        }
         // module pre-command gate
         for m in &mut self.modules {
             if m.on_pre_command(&mut self.server, uid, cmd, &msg.params) == ModResult::Deny {
