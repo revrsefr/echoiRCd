@@ -182,6 +182,11 @@ impl Ircd {
     /// transparently captured when a labeled command wraps this call.
     fn dispatch(&mut self, uid: Uid, msg: &message::Message, registered: bool) {
         let cmd = msg.command.as_str();
+        // SHUN: a shunned user stays connected but their commands are silently
+        // dropped — except keepalive and quit, so they still time out cleanly.
+        if registered && !matches!(cmd, "PING" | "PONG" | "QUIT") && self.server.user_shunned(uid) {
+            return;
+        }
         // module pre-command gate
         for m in &mut self.modules {
             if m.on_pre_command(&mut self.server, uid, cmd, &msg.params) == ModResult::Deny {

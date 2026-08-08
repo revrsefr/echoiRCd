@@ -350,6 +350,17 @@ impl Command for Nick {
             );
             return CmdResult::Fail;
         }
+        // Q-line: a reserved nick is refused (opers and services bypass)
+        if !s.is_oper(uid) {
+            if let Some(reason) = s.matched_qline(newnick) {
+                s.numeric(
+                    uid,
+                    ERR_ERRONEUSNICKNAME,
+                    &format!("{newnick} :Nickname is reserved: {reason}"),
+                );
+                return CmdResult::Fail;
+            }
+        }
         if let Some(other) = s.find_nick(newnick) {
             if other != uid {
                 s.numeric(

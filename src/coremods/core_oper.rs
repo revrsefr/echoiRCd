@@ -31,6 +31,9 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(Kline),
         Box::new(Gline),
         Box::new(Zline),
+        Box::new(Eline),
+        Box::new(Shun),
+        Box::new(Qline),
         Box::new(ChgHost),
         Box::new(ChgIdent),
         Box::new(SetHost),
@@ -623,6 +626,48 @@ impl Command for Zline {
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         do_xline(s, uid, params, XKind::Zline)
+    }
+}
+
+/// ELINE — exempt a `user@host` / ip glob from all K/G/Z-lines.
+struct Eline;
+impl Command for Eline {
+    fn name(&self) -> &'static str {
+        "ELINE"
+    }
+    fn min_params(&self) -> usize {
+        1
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        do_xline(s, uid, params, XKind::Eline)
+    }
+}
+
+/// SHUN — let a `user@host` connect but silently drop their commands.
+struct Shun;
+impl Command for Shun {
+    fn name(&self) -> &'static str {
+        "SHUN"
+    }
+    fn min_params(&self) -> usize {
+        1
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        do_xline(s, uid, params, XKind::Shun)
+    }
+}
+
+/// QLINE — reserve/forbid a nick glob (opers bypass it).
+struct Qline;
+impl Command for Qline {
+    fn name(&self) -> &'static str {
+        "QLINE"
+    }
+    fn min_params(&self) -> usize {
+        1
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        do_xline(s, uid, params, XKind::Qline)
     }
 }
 

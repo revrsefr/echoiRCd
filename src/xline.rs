@@ -12,6 +12,9 @@ pub enum XKind {
     Kline, // user@host, this server
     Gline, // user@host, "global" (locally the same until services span it)
     Zline, // an IP address
+    Eline, // user@host / ip EXEMPT from K/G/Z-lines
+    Shun,  // user@host allowed to connect but whose commands are dropped
+    Qline, // a reserved/forbidden nick glob
 }
 
 impl XKind {
@@ -20,6 +23,9 @@ impl XKind {
             XKind::Kline => "K",
             XKind::Gline => "G",
             XKind::Zline => "Z",
+            XKind::Eline => "E",
+            XKind::Shun => "SHUN",
+            XKind::Qline => "Q",
         }
     }
 }
@@ -54,20 +60,79 @@ pub fn parse_duration(s: &str) -> Option<u64> {
 }
 
 impl Server {
-    /// The reason a `user@host` / `ip` is banned by an active x-line, if any.
-    pub fn matched_xline(&self, ident: &str, host: &str, ip: &str) -> Option<String> {
-        let uh = format!("{ident}@{host}");
+    /// Whether an active x-line of `kind` matches this `user@host` / `ip`.
+    fn xmatch(&self, kind: XKind, uh: &str, ip: &str) -> bool {
         let n = now();
-        for x in &self.xlines {
-            if x.expires != 0 && x.expires <= n {
-                continue;
-            }
-            let hit = match x.kind {
-                XKind::Zline => glob_match(&x.mask, ip),
-                _ => glob_match(&x.mask, &uh),
-            };
-            if hit {
-                return Some(format!("{}-lined: {}", x.kind.tag(), x.reason));
+        self.xlines.iter().any(|x| {
+            x.kind == kind
+                && (x.expires == 0 || x.expires > n)
+                && match kind {
+                    XKind::Zline => glob_match(&x.mask, ip),
+                    _ => glob_match(&x.mask, uh),
+                }
+        })
+    }
+
+    /// True if this `user@host` / `ip` is E-lined (exempt from all bans).
+    pub fn is_exempt(&self, ident: &str, host: &str, ip: &str) -> bool {
+        let uh = format!("{ident}@{host}");
+        self.xmatch(XKind::Eline, &uh, ip)
+    }
+
+    /// True if this `user@host` is SHUN'd (connected but silenced) and not exempt.
+    pub fn is_shunned(&self, ident: &str, host: &str, ip: &str) -> bool {
+        if self.is_exempt(ident, host, ip) {
+            return false;
+        }
+        let uh = format!("{ident}@{host}");
+        self.xmatch(XKind::Shun, &uh, ip)
+    }
+
+    /// True if the connected user `uid` is currently SHUN'd.
+    pub fn user_shunned(&self, uid: Uid) -> bool {
+        self.users
+            .get(&uid)
+            .map(|u| self.is_shunned(&u.ident, &u.host, &u.addr.ip().to_string()))
+            .unwrap_or(false)
+    }
+
+    /// The reason nick `nick` is Q-lined (reserved/forbidden), if any.
+    pub fn matched_qline(&self, nick: &str) -> Option<String> {
+        let n = now();
+        self.xlines
+            .iter()
+            .find(|x| {
+                x.kind == XKind::Qline
+                    && (x.expires == 0 || x.expires > n)
+                    && glob_match(&x.mask, nick)
+            })
+            .map(|x| x.reason.clone())
+    }
+
+    /// The reason a `user@host` / `ip` is banned by an active x-line, if any.
+    /// An E-line (exemption) overrides every K/G/Z-line.
+    pub fn matched_xline(&self, ident: &str, host: &str, ip: &str) -> Option<String> {
+        if self.is_exempt(ident, host, ip) {
+            return None;
+        }
+        let uh = format!("{ident}@{host}");
+        for kind in [XKind::Kline, XKind::Gline, XKind::Zline] {
+            if self.xmatch(kind, &uh, ip) {
+                let n = now();
+                let reason = self
+                    .xlines
+                    .iter()
+                    .find(|x| {
+                        x.kind == kind
+                            && (x.expires == 0 || x.expires > n)
+                            && match kind {
+                                XKind::Zline => glob_match(&x.mask, ip),
+                                _ => glob_match(&x.mask, &uh),
+                            }
+                    })
+                    .map(|x| x.reason.clone())
+                    .unwrap_or_default();
+                return Some(format!("{}-lined: {reason}", kind.tag()));
             }
         }
         None
