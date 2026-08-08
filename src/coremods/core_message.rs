@@ -125,38 +125,7 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(TagMsg),
         Box::new(ChatHistory),
         Box::new(Redact),
-        Box::new(Batch),
     ]
-}
-
-/// BATCH — the client side of draft/multiline. `BATCH +<ref> draft/multiline
-/// <target>` opens a batch; the `@batch=<ref>`-tagged PRIVMSG/NOTICE lines are
-/// buffered (see `Ircd::dispatch`); `BATCH -<ref>` assembles them (honouring
-/// `draft/multiline-concat`) and delivers each logical line normally.
-struct Batch;
-impl Command for Batch {
-    fn name(&self) -> &'static str {
-        "BATCH"
-    }
-    fn min_params(&self) -> usize {
-        1
-    }
-    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
-        let tag = &params[0];
-        if let Some(bref) = tag.strip_prefix('+') {
-            if params.get(1).map(|t| t.as_str()) == Some("draft/multiline") {
-                let target = params.get(2).cloned().unwrap_or_default();
-                s.multiline_open(uid, bref, &target);
-            }
-        } else if let Some(bref) = tag.strip_prefix('-') {
-            if let Some((target, notice, lines)) = s.multiline_close(uid, bref) {
-                for line in lines {
-                    deliver(s, uid, &[target.clone(), line], notice);
-                }
-            }
-        }
-        CmdResult::Ok
-    }
 }
 
 /// REDACT — delete a previously-sent channel message (draft/message-redaction).
@@ -463,7 +432,8 @@ impl Command for ChatHistory {
 }
 
 /// Shared PRIVMSG/NOTICE delivery. NOTICE never generates automatic replies.
-fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool) -> CmdResult {
+/// `pub(crate)` so the multiline module can replay an assembled batch through it.
+pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool) -> CmdResult {
     let cmd = if notice { "NOTICE" } else { "PRIVMSG" };
     if params.is_empty() {
         if !notice {

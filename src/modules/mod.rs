@@ -10,6 +10,7 @@ pub mod filter;
 pub mod flood;
 pub mod markread;
 pub mod metadata;
+pub mod multiline;
 pub mod snoop;
 
 use crate::command::Command;
@@ -25,6 +26,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(filter::Filter),
         Box::new(metadata::Metadata),
         Box::new(markread::MarkRead),
+        Box::new(multiline::Multiline),
     ]
 }
 
@@ -35,5 +37,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .into_iter()
         .chain(metadata::commands())
         .chain(markread::commands())
+        .chain(multiline::commands())
         .collect()
 }

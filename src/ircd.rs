@@ -195,7 +195,8 @@ impl Ircd {
         // not delivered on its own — it's assembled and sent when the BATCH closes.
         if let Some(bref) = &msg.batch {
             if matches!(cmd, "PRIVMSG" | "NOTICE") && msg.params.len() >= 2 {
-                let consumed = self.server.multiline_accumulate(
+                let consumed = crate::modules::multiline::accumulate(
+                    &mut self.server,
                     uid,
                     bref,
                     cmd == "NOTICE",

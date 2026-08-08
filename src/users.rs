@@ -8,7 +8,8 @@ use std::net::{SocketAddr, TcpStream};
 use crate::extensible::Extensible;
 use crate::module::Hook;
 use crate::numeric::*;
-use crate::server::{Server, MLINE_MAX_BYTES, MLINE_MAX_LINES, VERSION};
+use crate::modules::multiline::{MAX_BYTES as MLINE_MAX_BYTES, MAX_LINES as MLINE_MAX_LINES};
+use crate::server::{Server, VERSION};
 use crate::socketengine::OutSink;
 use crate::Uid;
 

@@ -97,20 +97,6 @@ pub struct HistMsg {
     pub text: String,
 }
 
-/// Limits advertised in the `draft/multiline` cap and enforced while buffering.
-pub const MLINE_MAX_BYTES: usize = 4096;
-pub const MLINE_MAX_LINES: usize = 24;
-
-/// An in-progress inbound draft/multiline batch — one long client message being
-/// assembled from several `@batch=`-tagged PRIVMSG/NOTICE lines.
-pub struct MlineBatch {
-    pub bref: String,
-    pub target: String,
-    pub notice: bool,
-    pub parts: Vec<(String, bool)>, // (text, concat-with-previous-part)
-    pub bytes: usize,
-}
-
 /// A recently-departed identity, kept for WHOWAS.
 pub struct WhowasEntry {
     pub nick: String,
@@ -164,8 +150,7 @@ pub struct Server {
     // output primitives are `&self`.
     pub label_capture: RefCell<Option<(Uid, Vec<String>)>>,
     pub history: HashMap<String, VecDeque<HistMsg>>, // channel key -> recent messages (CHATHISTORY)
-    pub mline: HashMap<Uid, MlineBatch>, // in-progress inbound multiline batches
-    pub event_tx: Sender<Event>,         // self-inject events (DNS results)
+    pub event_tx: Sender<Event>,                     // self-inject events (DNS results)
     pub conn_counter: Arc<AtomicU64>,    // mints connection uids (for CONNECT dials)
     /// Module-owned server state, keyed by type — the InspIRCd `ExtensionItem`
     /// equivalent. Each `modules/*.rs` stores its own struct here so features live
@@ -213,7 +198,6 @@ impl Server {
             webirc: cfg.webirc,
             label_capture: RefCell::new(None),
             history: HashMap::new(),
-            mline: HashMap::new(),
             event_tx,
             conn_counter,
             ext: Extensible::default(),
@@ -267,64 +251,6 @@ impl Server {
         while buf.len() > HISTORY_CAP {
             buf.pop_front();
         }
-    }
-
-    /// Open an inbound draft/multiline batch for `uid` (a client assembling one
-    /// long message from several tagged PRIVMSG/NOTICE lines).
-    pub fn multiline_open(&mut self, uid: Uid, bref: &str, target: &str) {
-        self.mline.insert(
-            uid,
-            MlineBatch {
-                bref: bref.to_string(),
-                target: target.to_string(),
-                notice: false,
-                parts: Vec::new(),
-                bytes: 0,
-            },
-        );
-    }
-
-    /// Buffer one PRIVMSG/NOTICE line into `uid`'s open multiline batch when `bref`
-    /// matches (bounded by the advertised byte/line limits). Returns true if it was
-    /// part of the batch — i.e. it should not be delivered on its own.
-    pub fn multiline_accumulate(
-        &mut self,
-        uid: Uid,
-        bref: &str,
-        notice: bool,
-        text: &str,
-        concat: bool,
-    ) -> bool {
-        match self.mline.get_mut(&uid) {
-            Some(mb) if mb.bref == bref => {
-                if mb.parts.len() < MLINE_MAX_LINES && mb.bytes + text.len() <= MLINE_MAX_BYTES {
-                    mb.notice = notice;
-                    mb.bytes += text.len();
-                    mb.parts.push((text.to_string(), concat));
-                }
-                true
-            }
-            _ => false,
-        }
-    }
-
-    /// Close `uid`'s multiline batch `bref` and return `(target, is_notice, lines)`
-    /// with `concat` parts joined into single logical lines. `None` if no match.
-    pub fn multiline_close(&mut self, uid: Uid, bref: &str) -> Option<(String, bool, Vec<String>)> {
-        match self.mline.get(&uid) {
-            Some(mb) if mb.bref == bref => {}
-            _ => return None,
-        }
-        let mb = self.mline.remove(&uid)?;
-        let mut lines: Vec<String> = Vec::new();
-        for (text, concat) in mb.parts {
-            if concat && !lines.is_empty() {
-                lines.last_mut().unwrap().push_str(&text);
-            } else {
-                lines.push(text);
-            }
-        }
-        Some((mb.target, mb.notice, lines))
     }
 
     // --- connection lifecycle ------------------------------------------------
@@ -504,7 +430,6 @@ impl Server {
             return;
         };
         self.uuid_local.remove(&user.uuid);
-        self.mline.remove(&uid); // any half-open multiline batch
         if user.registered {
             self.push_whowas(
                 &user.nick,
