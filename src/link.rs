@@ -171,6 +171,7 @@ impl Server {
             "SVSLOGOUT" if registered => self.link_svslogout(msg),
             "ENCAP" if registered => self.link_encap(uid, msg),
             "METADATA" if registered => self.link_metadata(msg),
+            "SASL" if registered => self.link_sasl(msg),
             "BURST" => {
                 if let Some(l) = self.links.get_mut(&uid) {
                     l.bursting = true;
@@ -517,6 +518,89 @@ impl Server {
             } else {
                 self.set_login(tuid, value);
             }
+        }
+    }
+
+    // --- SASL relay (client AUTHENTICATE ⇄ services) --------------------------
+
+    /// The local link toward the configured SASL services server, if connected.
+    pub fn sasl_link(&self) -> Option<Uid> {
+        if self.sasl_server.is_empty() {
+            return None;
+        }
+        self.servers
+            .values()
+            .find(|sv| sv.name == self.sasl_server)
+            .map(|sv| sv.via)
+    }
+
+    /// Relay one SASL step for local client `uid` to the services server:
+    /// `:<our-sid> SASL <client-uuid> <rest>`. No-op if SASL services aren't linked.
+    pub fn sasl_relay(&self, uid: Uid, rest: &str) {
+        let (Some(via), Some(uuid)) = (
+            self.sasl_link(),
+            self.users.get(&uid).map(|u| u.uuid.clone()),
+        ) else {
+            return;
+        };
+        self.link_out(via, format!(":{} SASL {uuid} {rest}", self.sid));
+    }
+
+    /// A SASL message from services: `:<svcsid> SASL <client-uuid> <type> …`.
+    ///   `C <data>` → relay a server challenge to the client as `AUTHENTICATE`;
+    ///   `D S [account]` → success (log in + 900/903); `D <other>` → fail (904).
+    fn link_sasl(&mut self, msg: &Message) {
+        if msg.params.len() < 2 {
+            return;
+        }
+        let Some(&uid) = self.uuid_local.get(&msg.params[0]) else {
+            return; // not one of our clients
+        };
+        match msg.params[1].as_str() {
+            "C" => {
+                if let Some(data) = msg.params.get(2) {
+                    self.send(uid, format!("AUTHENTICATE {data}"));
+                }
+            }
+            "D" => {
+                let ok = msg.params.get(2).map(|t| t == "S").unwrap_or(false);
+                let account = msg.params.get(3).cloned().unwrap_or_default();
+                if ok && !account.is_empty() {
+                    self.set_login(uid, &account);
+                }
+                self.sasl_done(uid, ok, &account);
+                if let Some(u) = self.users.get_mut(&uid) {
+                    u.sasl_mech = None;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Emit the SASL outcome to the client: 900 + 903 on success, 904 on failure.
+    fn sasl_done(&self, uid: Uid, success: bool, account: &str) {
+        if success {
+            let mask = self
+                .users
+                .get(&uid)
+                .map(|u| u.prefix())
+                .unwrap_or_else(|| "*".to_string());
+            self.numeric(
+                uid,
+                crate::numeric::RPL_LOGGEDIN,
+                &format!("{mask} {account} :You are now logged in as {account}"),
+            );
+            self.numeric(
+                uid,
+                crate::numeric::RPL_SASLSUCCESS,
+                ":SASL authentication successful",
+            );
+        } else {
+            self.numeric(
+                uid,
+                crate::numeric::ERR_SASLFAIL,
+                ":SASL authentication failed",
+            );
         }
     }
 

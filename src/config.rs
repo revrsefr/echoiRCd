@@ -74,6 +74,7 @@ pub struct Config {
     pub dnsbl_zones: Vec<String>,      // DNS blocklist zones to check on connect
     pub dnsbl_action: String,          // mark | kline | gline | zline (on a hit)
     pub dnsbl_reason: String,          // ban reason for a DNSBL hit
+    pub sasl_server: String,           // linked services server that handles SASL ("" = none)
 }
 
 impl Default for Config {
@@ -100,6 +101,7 @@ impl Default for Config {
             dnsbl_zones: Vec::new(),
             dnsbl_action: "mark".to_string(),
             dnsbl_reason: "Your host is listed in a DNS blocklist".to_string(),
+            sasl_server: String::new(),
         }
     }
 }
@@ -232,6 +234,7 @@ impl Config {
                 }
                 "dnsbl_action" => c.dnsbl_action = v.to_ascii_lowercase(),
                 "dnsbl_reason" => c.dnsbl_reason = v.to_string(),
+                "sasl_server" | "sasl_target" => c.sasl_server = v.to_string(),
                 _ => {}
             }
         }

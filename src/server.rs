@@ -103,6 +103,7 @@ pub struct Server {
     pub dnsbl_zones: Vec<String>,                  // DNS blocklist zones checked on connect
     pub dnsbl_action: String,                      // mark | kline | gline | zline
     pub dnsbl_reason: String,                      // ban reason on a DNSBL hit
+    pub sasl_server: String,                       // services server that handles SASL
     pub event_tx: Sender<Event>,                   // self-inject events (DNS results)
 }
 
@@ -142,6 +143,7 @@ impl Server {
             dnsbl_zones: cfg.dnsbl_zones,
             dnsbl_action: cfg.dnsbl_action,
             dnsbl_reason: cfg.dnsbl_reason,
+            sasl_server: cfg.sasl_server,
             event_tx,
         }
     }

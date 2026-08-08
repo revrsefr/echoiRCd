@@ -159,17 +159,23 @@ impl Command for Authenticate {
         }
         let arg = &params[0];
         let mech = s.users.get(&uid).and_then(|u| u.sasl_mech.clone());
+        // SASL is relayed to a linked services server (see `Server::sasl_relay`);
+        // with none configured/linked it fails cleanly, exactly like InspIRCd.
+        let have_services = s.sasl_link().is_some();
         match mech {
             // step 1 — the client picks a mechanism
             None => {
-                if arg.eq_ignore_ascii_case("PLAIN") {
+                if arg == "*" {
+                    s.numeric(uid, ERR_SASLABORTED, ":SASL authentication aborted");
+                    CmdResult::Ok
+                } else if arg.eq_ignore_ascii_case("PLAIN") {
                     if let Some(u) = s.users.get_mut(&uid) {
                         u.sasl_mech = Some("PLAIN".to_string());
                     }
+                    if have_services {
+                        s.sasl_relay(uid, "S PLAIN"); // start the exchange at services
+                    }
                     s.send(uid, "AUTHENTICATE +".to_string());
-                    CmdResult::Ok
-                } else if arg == "*" {
-                    s.numeric(uid, ERR_SASLABORTED, ":SASL authentication aborted");
                     CmdResult::Ok
                 } else {
                     s.numeric(uid, RPL_SASLMECHS, "PLAIN :are available SASL mechanisms");
@@ -179,25 +185,39 @@ impl Command for Authenticate {
             }
             // step 2 — the client sends the base64 payload (or aborts with `*`)
             Some(_) => {
-                if let Some(u) = s.users.get_mut(&uid) {
-                    u.sasl_mech = None;
-                }
                 if arg == "*" {
+                    if have_services {
+                        s.sasl_relay(uid, "D A");
+                    }
+                    if let Some(u) = s.users.get_mut(&uid) {
+                        u.sasl_mech = None;
+                    }
                     s.numeric(uid, ERR_SASLABORTED, ":SASL authentication aborted");
                     return CmdResult::Ok;
                 }
                 if arg.len() > 400 {
+                    if let Some(u) = s.users.get_mut(&uid) {
+                        u.sasl_mech = None;
+                    }
                     s.numeric(uid, ERR_SASLTOOLONG, ":SASL message too long");
                     return CmdResult::Fail;
                 }
-                // base64(authzid \0 authcid \0 passwd) — would be relayed to services
-                let _creds = openssl::base64::decode_block(arg).unwrap_or_default();
-                s.numeric(
-                    uid,
-                    ERR_SASLFAIL,
-                    ":SASL authentication failed (services are not available)",
-                );
-                CmdResult::Fail
+                if have_services {
+                    // relay the response; the verdict (900/903 or 904) comes back
+                    // over S2S in `Server::link_sasl`, which clears `sasl_mech`.
+                    s.sasl_relay(uid, &format!("C {arg}"));
+                    CmdResult::Ok
+                } else {
+                    if let Some(u) = s.users.get_mut(&uid) {
+                        u.sasl_mech = None;
+                    }
+                    s.numeric(
+                        uid,
+                        ERR_SASLFAIL,
+                        ":SASL authentication failed (services are not available)",
+                    );
+                    CmdResult::Fail
+                }
             }
         }
     }
