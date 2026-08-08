@@ -6,9 +6,11 @@
 pub mod antimixedutf8;
 pub mod cloak;
 pub mod dnsbl;
+pub mod filter;
 pub mod flood;
 pub mod snoop;
 
+use crate::command::Command;
 use crate::module::Module;
 
 /// The modules loaded at boot. (Later: load by name from the config.)
@@ -18,5 +20,12 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(flood::Flood),
         Box::new(cloak::Cloak),
         Box::new(antimixedutf8::AntiMixedUtf8),
+        Box::new(filter::Filter),
     ]
+}
+
+/// Commands contributed by modules (chained into the core command table), so a
+/// module that adds a command keeps it in its own file, InspIRCd-style.
+pub fn module_commands() -> Vec<Box<dyn Command>> {
+    filter::commands().into_iter().collect()
 }

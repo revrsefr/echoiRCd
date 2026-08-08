@@ -29,6 +29,7 @@ pub fn command_table() -> HashMap<&'static str, Box<dyn Command>> {
         .chain(core_info::commands())
         .chain(core_extra::commands())
         .chain(core_watch::commands())
+        .chain(crate::modules::module_commands())
     {
         m.insert(c.name(), c);
     }

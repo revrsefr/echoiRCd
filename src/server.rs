@@ -169,6 +169,10 @@ pub struct Server {
     pub mline: HashMap<Uid, MlineBatch>,                    // in-progress inbound multiline batches
     pub event_tx: Sender<Event>,                            // self-inject events (DNS results)
     pub conn_counter: Arc<AtomicU64>, // mints connection uids (for CONNECT dials)
+    /// Module-owned server state, keyed by type — the InspIRCd `ExtensionItem`
+    /// equivalent. Each `modules/*.rs` stores its own struct here so features live
+    /// in their own file instead of bloating this one.
+    pub ext: Extensible,
 }
 
 impl Server {
@@ -216,6 +220,7 @@ impl Server {
             mline: HashMap::new(),
             event_tx,
             conn_counter,
+            ext: Extensible::default(),
         }
     }
 
