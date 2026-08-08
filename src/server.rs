@@ -98,6 +98,7 @@ pub struct Server {
     pub censor: Vec<(String, String)>,             // +G bad words: (find, replace)
     pub amu: crate::config::AntiMixedCfg,          // antimixedutf8 module config
     pub resolve_hosts: bool,                       // reverse-DNS clients on connect
+    pub use_resolved_host: bool,                   // apply the resolved name to the hostmask
     pub event_tx: Sender<Event>,                   // self-inject events (DNS results)
 }
 
@@ -133,6 +134,7 @@ impl Server {
             censor: cfg.censor,
             amu: cfg.amu,
             resolve_hosts: cfg.resolve_hosts,
+            use_resolved_host: cfg.use_resolved_host,
             event_tx,
         }
     }
@@ -252,9 +254,14 @@ impl Server {
                 "Couldn't look up your hostname; using your IP address instead",
             ),
         }
+        let apply = self.use_resolved_host;
         if let Some(u) = self.users.get_mut(&uid) {
-            if let Some(h) = host {
-                u.host = h;
+            // `use_resolved_host = off` keeps the IP in the hostmask even though we
+            // resolved and reported the name above.
+            if apply {
+                if let Some(h) = host {
+                    u.host = h;
+                }
             }
             u.dns_pending = false;
         }
@@ -568,6 +575,21 @@ mod tests {
     fn srv() -> Server {
         let (tx, _rx) = mpsc::channel();
         Server::new(Config::default(), tx)
+    }
+
+    #[test]
+    fn resolved_host_applied_only_when_configured() {
+        let mut s = srv(); // use_resolved_host = true (default)
+        let _a = add_user(&mut s, 1, "ann"); // host starts "localhost"
+        s.on_resolved(1, Some("host.example.net".to_string()));
+        assert_eq!(s.users[&1].host, "host.example.net");
+        assert!(!s.users[&1].dns_pending);
+
+        s.use_resolved_host = false; // resolve + report, but keep the IP in the mask
+        let _b = add_user(&mut s, 2, "bob");
+        s.on_resolved(2, Some("host.example.net".to_string()));
+        assert_eq!(s.users[&2].host, "localhost");
+        assert!(!s.users[&2].dns_pending); // registration still un-held either way
     }
 
     #[test]

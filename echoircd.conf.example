@@ -32,8 +32,12 @@ oper = admin CHANGE_THIS_PASSWORD
 cloak_key  = CHANGE_THIS_TO_A_LONG_RANDOM_HEX_STRING
 
 # reverse-DNS clients on connect (the "*** Looking up your hostname..." notices).
-# on (default) shows resolved hostnames; off keeps bare IPs.
+# on (default) performs the lookup and reports the result; off skips it (bare IP).
 resolve_hosts = on
+# whether a resolved hostname is used in the hostmask (nick!user@host). on (default)
+# shows the domain; off keeps the IP in the mask even though the lookup still runs
+# and reports "Found your hostname". Only matters when resolve_hosts = on.
+use_resolved_host = on
 
 # antimixedutf8 — block spam that mixes look-alike scripts within words.
 # action = block | kill | gline | kline | zline ; target = both | channel | private

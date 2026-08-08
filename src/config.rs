@@ -70,6 +70,7 @@ pub struct Config {
     pub censor: Vec<(String, String)>, // +G bad words: (find, replace); empty replace = block
     pub amu: AntiMixedCfg,             // antimixedutf8 module config
     pub resolve_hosts: bool,           // reverse-DNS clients on connect (default on)
+    pub use_resolved_host: bool,       // put the resolved hostname in the hostmask (default on)
 }
 
 impl Default for Config {
@@ -92,6 +93,7 @@ impl Default for Config {
             censor: Vec::new(),
             amu: AntiMixedCfg::default(),
             resolve_hosts: true,
+            use_resolved_host: true,
         }
     }
 }
@@ -189,6 +191,12 @@ impl Config {
                 }
                 "resolve_hosts" | "resolvehosts" | "dns" => {
                     c.resolve_hosts = !matches!(
+                        v.to_ascii_lowercase().as_str(),
+                        "off" | "false" | "no" | "0"
+                    )
+                }
+                "use_resolved_host" | "resolved_hostmask" | "hostmask_dns" => {
+                    c.use_resolved_host = !matches!(
                         v.to_ascii_lowercase().as_str(),
                         "off" | "false" | "no" | "0"
                     )

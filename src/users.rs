@@ -197,12 +197,12 @@ pub struct User {
     pub nick: String,  // "" until NICK
     pub ident: String, // "" until USER
     pub realname: String,
-    pub host: String,            // displayed host: reverse-DNS name if resolved, else IP
-    pub cloak: String,           // masked host shown under +x ("" until computed)
-    pub vhost: Option<String>,   // displayed-host override (CHGHOST/SETHOST vhost)
-    pub secure: bool,            // connected over TLS (drives WHOIS 671 / sslinfo)
+    pub host: String,  // displayed host: reverse-DNS name if resolved, else IP
+    pub cloak: String, // masked host shown under +x ("" until computed)
+    pub vhost: Option<String>, // displayed-host override (CHGHOST/SETHOST vhost)
+    pub secure: bool,  // connected over TLS (drives WHOIS 671 / sslinfo)
     pub account: Option<String>, // logged-in account name (set by services)
-    pub signon: u64,             // unix secs at registration (WHOIS 317)
+    pub signon: u64,   // unix secs at registration (WHOIS 317)
     pub addr: SocketAddr,
     pub registered: bool,
     pub dns_pending: bool, // holding registration for a reverse-DNS lookup

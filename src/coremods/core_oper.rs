@@ -229,6 +229,8 @@ impl Command for Rehash {
         s.cloak_key = fresh.cloak_key;
         s.censor = fresh.censor;
         s.amu = fresh.amu;
+        s.resolve_hosts = fresh.resolve_hosts;
+        s.use_resolved_host = fresh.use_resolved_host;
         s.numeric(uid, RPL_REHASHING, &format!("{} :Rehashing", s.conf_path));
         CmdResult::Ok
     }
