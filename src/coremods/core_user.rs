@@ -1,6 +1,8 @@
 //! core_user — the client registration & session commands: CAP, NICK, USER,
 //! PING, PONG, QUIT.
 
+use std::net::{IpAddr, SocketAddr};
+
 use crate::command::{CmdResult, Command};
 use crate::numeric::*;
 use crate::server::Server;
@@ -18,7 +20,50 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(Quit),
         Box::new(Away),
         Box::new(SetName),
+        Box::new(WebIrc),
     ]
+}
+
+/// WEBIRC — a trusted web gateway declares the real client's host + IP, so users
+/// behind it don't all share the gateway's address. `WEBIRC <password> <gateway>
+/// <hostname> <ip> [:flags]`; must precede registration and the password must
+/// match a `webirc` config block. (Password-only trust for now — restricting it
+/// to the gateway's own source IP is a TODO.)
+struct WebIrc;
+impl Command for WebIrc {
+    fn name(&self) -> &'static str {
+        "WEBIRC"
+    }
+    fn min_params(&self) -> usize {
+        4
+    }
+    fn before_reg(&self) -> bool {
+        true
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        if s.users.get(&uid).map(|u| u.registered).unwrap_or(false) {
+            return CmdResult::Fail; // can't re-spoof a registered session
+        }
+        let (pass, host, ip) = (&params[0], &params[2], &params[3]);
+        let Some(gw) = s
+            .webirc
+            .iter()
+            .find(|(p, _)| p == pass)
+            .map(|(_, g)| g.clone())
+        else {
+            s.notice_star(uid, "WEBIRC: invalid credentials");
+            return CmdResult::Fail;
+        };
+        let newip = ip.parse::<IpAddr>().ok();
+        if let Some(u) = s.users.get_mut(&uid) {
+            u.host = host.clone();
+            if let Some(a) = newip {
+                u.addr = SocketAddr::new(a, u.addr.port());
+            }
+        }
+        s.notice_star(uid, &format!("WEBIRC identity accepted via {gw}"));
+        CmdResult::Ok
+    }
 }
 
 struct Away;

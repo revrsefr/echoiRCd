@@ -104,6 +104,7 @@ pub struct Server {
     pub dnsbl_action: String,                      // mark | kline | gline | zline
     pub dnsbl_reason: String,                      // ban reason on a DNSBL hit
     pub sasl_server: String,                       // services server that handles SASL
+    pub webirc: Vec<(String, String)>,             // trusted web gateways: (password, name)
     pub event_tx: Sender<Event>,                   // self-inject events (DNS results)
 }
 
@@ -144,6 +145,7 @@ impl Server {
             dnsbl_action: cfg.dnsbl_action,
             dnsbl_reason: cfg.dnsbl_reason,
             sasl_server: cfg.sasl_server,
+            webirc: cfg.webirc,
             event_tx,
         }
     }

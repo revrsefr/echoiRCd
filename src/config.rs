@@ -75,6 +75,7 @@ pub struct Config {
     pub dnsbl_action: String,          // mark | kline | gline | zline (on a hit)
     pub dnsbl_reason: String,          // ban reason for a DNSBL hit
     pub sasl_server: String,           // linked services server that handles SASL ("" = none)
+    pub webirc: Vec<(String, String)>, // trusted web gateways: (password, gateway name)
 }
 
 impl Default for Config {
@@ -102,6 +103,7 @@ impl Default for Config {
             dnsbl_action: "mark".to_string(),
             dnsbl_reason: "Your host is listed in a DNS blocklist".to_string(),
             sasl_server: String::new(),
+            webirc: Vec::new(),
         }
     }
 }
@@ -235,6 +237,14 @@ impl Config {
                 "dnsbl_action" => c.dnsbl_action = v.to_ascii_lowercase(),
                 "dnsbl_reason" => c.dnsbl_reason = v.to_string(),
                 "sasl_server" | "sasl_target" => c.sasl_server = v.to_string(),
+                "webirc" => {
+                    // webirc = <password> [gateway-name]
+                    let mut it = v.split_whitespace();
+                    if let Some(pass) = it.next() {
+                        let gw = it.next().unwrap_or("webirc").to_string();
+                        c.webirc.push((pass.to_string(), gw));
+                    }
+                }
                 _ => {}
             }
         }
