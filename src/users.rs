@@ -400,7 +400,7 @@ impl Server {
             uid,
             RPL_ISUPPORT,
             &format!(
-                "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIg,k,lfjFL,CGMNORSTcimnpstuz EXTBAN=,cmn WATCH=128 MONITOR=128 SILENCE=32 CALLERID=g WHOX CHATHISTORY=256 MSGREFTYPES=timestamp,msgid CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={} :are supported by this server",
+                "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIg,k,lfjFL,CGMNORSTcimnpstuz EXTBAN=,cmn WATCH=128 MONITOR=128 SILENCE=32 CALLERID=g WHOX CHATHISTORY=256 MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={} :are supported by this server",
                 self.network
             ),
         );

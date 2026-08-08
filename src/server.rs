@@ -150,8 +150,9 @@ pub struct Server {
     // output primitives are `&self`.
     pub label_capture: RefCell<Option<(Uid, Vec<String>)>>,
     pub history: HashMap<String, VecDeque<HistMsg>>, // channel key -> recent messages (CHATHISTORY)
-    pub event_tx: Sender<Event>,                     // self-inject events (DNS results)
-    pub conn_counter: Arc<AtomicU64>,                // mints connection uids (for CONNECT dials)
+    pub read_markers: HashMap<String, HashMap<String, u64>>, // identity -> target -> read ts (MARKREAD)
+    pub event_tx: Sender<Event>,                             // self-inject events (DNS results)
+    pub conn_counter: Arc<AtomicU64>, // mints connection uids (for CONNECT dials)
 }
 
 impl Server {
@@ -194,6 +195,7 @@ impl Server {
             webirc: cfg.webirc,
             label_capture: RefCell::new(None),
             history: HashMap::new(),
+            read_markers: HashMap::new(),
             event_tx,
             conn_counter,
         }
@@ -246,6 +248,16 @@ impl Server {
         while buf.len() > HISTORY_CAP {
             buf.pop_front();
         }
+    }
+
+    /// The read-marker identity for `uid`: their account when logged in (so markers
+    /// are shared across their devices and survive reconnects), else a per-session
+    /// key. `remove_user` prunes the session key on disconnect.
+    pub fn marker_id(&self, uid: Uid) -> String {
+        self.users
+            .get(&uid)
+            .and_then(|u| u.account.clone())
+            .unwrap_or_else(|| format!("~{uid}"))
     }
 
     // --- connection lifecycle ------------------------------------------------
@@ -425,6 +437,7 @@ impl Server {
             return;
         };
         self.uuid_local.remove(&user.uuid);
+        self.read_markers.remove(&format!("~{uid}")); // session read-markers (kept if account-keyed)
         if user.registered {
             self.push_whowas(
                 &user.nick,
