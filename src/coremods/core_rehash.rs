@@ -50,6 +50,12 @@ impl Command for Rehash {
         let path = s.conf_path.clone();
         match Config::try_load(&path) {
             Some(fresh) => {
+                // echoIRCd's own announcement (not InspIRCd's) — broadcast to
+                // everyone connected, not just opers.
+                s.announce(&format!(
+                    "admin {who} has changed the configuration of the server."
+                ));
+                s.announce(&format!("{who} is rehashing the server config file."));
                 s.motd = fresh.motd;
                 s.opers = fresh.opers;
                 s.cloak_key = fresh.cloak_key;
@@ -57,21 +63,22 @@ impl Command for Rehash {
                 s.amu = fresh.amu;
                 s.resolve_hosts = fresh.resolve_hosts;
                 s.use_resolved_host = fresh.use_resolved_host;
+                s.announce("Server configuration reloaded.");
                 s.numeric(uid, RPL_REHASHING, &format!("{path} :Rehashing"));
-                s.snotice(&format!("{who} is rehashing config: {path}"));
             }
             None => {
                 // Unreadable config — keep what's running (do NOT reset to defaults).
+                s.announce(&format!(
+                    "{who} tried to reload the server configuration, but the config file \
+                     could not be read — no changes were made."
+                ));
                 s.send(
                     uid,
                     format!(
-                        ":{} NOTICE {who} :*** Cannot read {path}; keeping the running config",
+                        ":{} NOTICE {who} :*** Could not read {path} — the running configuration was kept.",
                         s.name
                     ),
                 );
-                s.snotice(&format!(
-                    "{who} tried to REHASH but {path} could not be read; config unchanged"
-                ));
             }
         }
         CmdResult::Ok

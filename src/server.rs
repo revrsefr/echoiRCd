@@ -375,6 +375,17 @@ impl Server {
         }
     }
 
+    /// Broadcast a `*** msg` server NOTICE to *every* registered local user — for
+    /// server-wide announcements everyone should see (e.g. a config reload).
+    pub fn announce(&self, msg: &str) {
+        for u in self.users.values() {
+            if u.registered && !u.nick.is_empty() {
+                u.out
+                    .send(format!(":{} NOTICE {} :*** {msg}", self.name, u.nick));
+            }
+        }
+    }
+
     /// Send a line to every member of a channel, optionally skipping one uid.
     pub fn to_channel(&self, key: &str, line: &str, except: Option<Uid>) {
         if let Some(ch) = self.channels.get(key) {
