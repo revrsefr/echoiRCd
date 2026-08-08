@@ -32,6 +32,8 @@ pub const TICK_SECS: u64 = 15;
 pub const PING_AFTER: u64 = 90;
 pub const PING_TIMEOUT: u64 = 60;
 pub const REG_TIMEOUT: u64 = 60;
+/// Recent messages CHATHISTORY keeps per channel.
+pub const HISTORY_CAP: usize = 256;
 
 pub fn now() -> u64 {
     SystemTime::now()
@@ -57,6 +59,39 @@ pub fn iso_time(secs: u64) -> String {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
     format!("{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}.000Z")
+}
+
+/// Parse an IRCv3 `server-time` value (`2026-08-08T19:52:42.000Z`) back to unix
+/// seconds — the inverse of [`iso_time`], for CHATHISTORY `timestamp=` selectors.
+pub fn parse_iso(s: &str) -> Option<u64> {
+    let (date, time) = s.split_once('T')?;
+    let mut d = date.split('-');
+    let y: i64 = d.next()?.parse().ok()?;
+    let mo: i64 = d.next()?.parse().ok()?;
+    let da: i64 = d.next()?.parse().ok()?;
+    let time = time.trim_end_matches('Z').split('.').next()?;
+    let mut t = time.split(':');
+    let h: i64 = t.next()?.parse().ok()?;
+    let mi: i64 = t.next()?.parse().ok()?;
+    let se: i64 = t.next().unwrap_or("0").parse().ok()?;
+    // civil date -> days since 1970-01-01 (inverse Howard Hinnant)
+    let yy = y - i64::from(mo <= 2);
+    let era = if yy >= 0 { yy } else { yy - 399 } / 400;
+    let yoe = yy - era * 400;
+    let mp = if mo > 2 { mo - 3 } else { mo + 9 };
+    let doy = (153 * mp + 2) / 5 + da - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    Some((days * 86400 + h * 3600 + mi * 60 + se).max(0) as u64)
+}
+
+/// One stored channel message, replayed by CHATHISTORY.
+pub struct HistMsg {
+    pub ts: u64,
+    pub msgid: String,
+    pub prefix: String,     // sender's nick!user@host at send time
+    pub verb: &'static str, // "PRIVMSG" or "NOTICE"
+    pub text: String,
 }
 
 /// A recently-departed identity, kept for WHOWAS.
@@ -111,7 +146,8 @@ pub struct Server {
     // the command's `label` (single tag, BATCH, or ACK). RefCell because the
     // output primitives are `&self`.
     pub label_capture: RefCell<Option<(Uid, Vec<String>)>>,
-    pub event_tx: Sender<Event>, // self-inject events (DNS results)
+    pub history: HashMap<String, VecDeque<HistMsg>>, // channel key -> recent messages (CHATHISTORY)
+    pub event_tx: Sender<Event>,                     // self-inject events (DNS results)
 }
 
 impl Server {
@@ -153,6 +189,7 @@ impl Server {
             sasl_server: cfg.sasl_server,
             webirc: cfg.webirc,
             label_capture: RefCell::new(None),
+            history: HashMap::new(),
             event_tx,
         }
     }
@@ -179,6 +216,28 @@ impl Server {
         });
         while self.whowas.len() > 256 {
             self.whowas.pop_back();
+        }
+    }
+
+    /// Record a channel message for CHATHISTORY replay (capped ring per channel).
+    pub fn store_history(
+        &mut self,
+        key: &str,
+        prefix: &str,
+        verb: &'static str,
+        text: &str,
+        msgid: &str,
+    ) {
+        let buf = self.history.entry(key.to_string()).or_default();
+        buf.push_back(HistMsg {
+            ts: now(),
+            msgid: msgid.to_string(),
+            prefix: prefix.to_string(),
+            verb,
+            text: text.to_string(),
+        });
+        while buf.len() > HISTORY_CAP {
+            buf.pop_front();
         }
     }
 

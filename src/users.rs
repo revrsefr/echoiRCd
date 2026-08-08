@@ -97,6 +97,7 @@ pub const SUPPORTED_CAPS: &[&str] = &[
     "standard-replies",
     "labeled-response",
     "batch",
+    "draft/chathistory",
     "cap-notify",
 ];
 
@@ -122,6 +123,7 @@ pub struct Caps {
     pub standard_replies: bool, // understands FAIL/WARN/NOTE structured replies
     pub labeled_response: bool, // tag responses to a labeled command with its label
     pub batch: bool,            // understands BATCH framing
+    pub chathistory: bool,      // draft/chathistory — can request message history
     pub cap_notify: bool,
 }
 
@@ -169,6 +171,7 @@ impl Caps {
             "standard-replies" => self.standard_replies,
             "labeled-response" => self.labeled_response,
             "batch" => self.batch,
+            "draft/chathistory" => self.chathistory,
             "cap-notify" => self.cap_notify,
             _ => false,
         }
@@ -194,6 +197,7 @@ impl Caps {
             "standard-replies" => &mut self.standard_replies,
             "labeled-response" => &mut self.labeled_response,
             "batch" => &mut self.batch,
+            "draft/chathistory" => &mut self.chathistory,
             "cap-notify" => &mut self.cap_notify,
             _ => return false,
         };
@@ -392,7 +396,7 @@ impl Server {
             uid,
             RPL_ISUPPORT,
             &format!(
-                "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIg,k,lfjFL,CGMNORSTcimnpstuz EXTBAN=,cmn WATCH=128 MONITOR=128 SILENCE=32 CALLERID=g WHOX CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={} :are supported by this server",
+                "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIg,k,lfjFL,CGMNORSTcimnpstuz EXTBAN=,cmn WATCH=128 MONITOR=128 SILENCE=32 CALLERID=g WHOX CHATHISTORY=256 MSGREFTYPES=timestamp,msgid CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={} :are supported by this server",
                 self.network
             ),
         );

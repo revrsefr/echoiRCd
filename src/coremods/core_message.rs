@@ -3,7 +3,7 @@
 use crate::channels::{glob_match, RANK_HALFOP, RANK_VOICE};
 use crate::command::{CmdResult, Command};
 use crate::numeric::*;
-use crate::server::Server;
+use crate::server::{iso_time, parse_iso, HistMsg, Server, HISTORY_CAP};
 use crate::Uid;
 
 /// mIRC/IRC formatting control bytes (bold, colour, hex-colour, reset, …).
@@ -119,7 +119,103 @@ fn apply_censor(body: &str, censor: &[(String, String)]) -> Option<String> {
 }
 
 pub fn commands() -> Vec<Box<dyn Command>> {
-    vec![Box::new(PrivMsg), Box::new(Notice), Box::new(TagMsg)]
+    vec![
+        Box::new(PrivMsg),
+        Box::new(Notice),
+        Box::new(TagMsg),
+        Box::new(ChatHistory),
+    ]
+}
+
+/// CHATHISTORY — replay recent channel messages (draft/chathistory), leveraging
+/// BATCH. `CHATHISTORY <LATEST|BEFORE|AFTER> <#chan> <selector> <limit>`, where
+/// `<selector>` is `*`, `timestamp=<iso>` or `msgid=<id>`. Only members get a
+/// channel's history; the reply is a `chathistory` batch of the original
+/// PRIVMSG/NOTICE lines, each carrying its stored server-time + msgid.
+struct ChatHistory;
+impl Command for ChatHistory {
+    fn name(&self) -> &'static str {
+        "CHATHISTORY"
+    }
+    fn min_params(&self) -> usize {
+        4
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        let sub = params[0].to_ascii_uppercase();
+        let target = params[1].clone();
+        let key = target.to_ascii_lowercase();
+        let sel = params[2].as_str();
+        let limit = params[3]
+            .parse::<usize>()
+            .unwrap_or(50)
+            .clamp(1, HISTORY_CAP);
+
+        let bref = s.next_msgid().replace('-', "");
+        let mut lines: Vec<String> = Vec::new();
+        if s.is_member(uid, &key) {
+            if let Some(buf) = s.history.get(&key) {
+                // Resolve the selector to a reference position. `msgid=` matches an
+                // exact buffer index (so same-second messages aren't lost);
+                // `timestamp=` and `*` fall back to a ts bound.
+                let ref_idx = sel
+                    .strip_prefix("msgid=")
+                    .and_then(|id| buf.iter().position(|m| m.msgid == id));
+                let ref_ts = sel.strip_prefix("timestamp=").and_then(parse_iso);
+                let picked: Vec<&HistMsg> = match sub.as_str() {
+                    "BEFORE" => {
+                        let end = ref_idx.unwrap_or_else(|| {
+                            let b = ref_ts.unwrap_or(u64::MAX);
+                            buf.iter().position(|m| m.ts >= b).unwrap_or(buf.len())
+                        });
+                        let start = end.saturating_sub(limit);
+                        buf.iter().take(end).skip(start).collect()
+                    }
+                    "AFTER" => {
+                        let begin = match ref_idx {
+                            Some(i) => i + 1,
+                            None => {
+                                let b = ref_ts.unwrap_or(0);
+                                buf.iter().position(|m| m.ts > b).unwrap_or(buf.len())
+                            }
+                        };
+                        buf.iter().skip(begin).take(limit).collect()
+                    }
+                    _ => {
+                        // LATEST: newest `limit`, optionally bounded below by the selector
+                        let begin = match (ref_idx, ref_ts) {
+                            (Some(i), _) => i + 1,
+                            (None, Some(b)) => {
+                                buf.iter().position(|m| m.ts > b).unwrap_or(buf.len())
+                            }
+                            _ => 0,
+                        };
+                        let n = buf.len() - begin;
+                        let start = begin + n.saturating_sub(limit);
+                        buf.iter().skip(start).collect()
+                    }
+                };
+                for m in picked {
+                    lines.push(format!(
+                        "@time={};msgid={};batch={bref} :{} {} {target} :{}",
+                        iso_time(m.ts),
+                        m.msgid,
+                        m.prefix,
+                        m.verb,
+                        m.text
+                    ));
+                }
+            }
+        }
+        s.send(
+            uid,
+            format!(":{} BATCH +{bref} chathistory {target}", s.name),
+        );
+        for l in lines {
+            s.send(uid, l);
+        }
+        s.send(uid, format!(":{} BATCH -{bref}", s.name));
+        CmdResult::Ok
+    }
 }
 
 /// Shared PRIVMSG/NOTICE delivery. NOTICE never generates automatic replies.
@@ -308,6 +404,7 @@ fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool) -> CmdResu
         let line = format!(":{prefix} {cmd} {target} :{body}");
         let ctags = s.line_ctags.clone();
         let msgid = s.next_msgid(); // one id shared by every recipient of this message
+        s.store_history(&key, &prefix, cmd, &body, &msgid); // for CHATHISTORY
         let members: Vec<Uid> = s
             .channels
             .get(&key)
