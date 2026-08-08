@@ -1,8 +1,11 @@
 //! Optional, pluggable modules — echoIRCd's answer to InspIRCd's `src/modules/`.
-//! Each hooks lifecycle events via the [`crate::module::Module`] trait.
+//! Most hook lifecycle events via the [`crate::module::Module`] trait; [`dnsbl`]
+//! is the exception — it's driven straight from the connection lifecycle rather
+//! than the hook bus, but lives here as its own self-contained unit.
 
 pub mod antimixedutf8;
 pub mod cloak;
+pub mod dnsbl;
 pub mod flood;
 pub mod snoop;
 

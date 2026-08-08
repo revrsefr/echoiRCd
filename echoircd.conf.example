@@ -39,6 +39,17 @@ resolve_hosts = on
 # and reports "Found your hostname". Only matters when resolve_hosts = on.
 use_resolved_host = on
 
+# DNS blocklist (DNSBL) checks on connect, like InspIRCd's m_dnsbl. Repeat `dnsbl`
+# for multiple zones. On a listing, `dnsbl_action` decides what happens:
+#   mark  = just show the "*** ... LISTED" notice, let them in (default, safe)
+#   kill  = disconnect them (no persistent ban)
+#   kline / gline / zline = add a 1-day ban and disconnect
+# (leave commented to disable DNSBL entirely)
+# dnsbl = dnsbl.dronebl.org
+# dnsbl = rbl.efnetrbl.org
+# dnsbl_action = mark
+# dnsbl_reason = Your host is listed in a DNS blocklist
+
 # antimixedutf8 — block spam that mixes look-alike scripts within words.
 # action = block | kill | gline | kline | zline ; target = both | channel | private
 antimixedutf8 = off

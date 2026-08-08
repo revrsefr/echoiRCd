@@ -34,10 +34,12 @@ pub enum Event {
     Disconnect {
         uid: Uid,
     },
-    /// A client's reverse-DNS lookup finished (`None` = no confirmed hostname).
+    /// A client's connect-time DNS work finished: the reverse-DNS hostname
+    /// (`None` = none confirmed) and the DNSBL outcome.
     ResolvedHost {
         uid: Uid,
         host: Option<String>,
+        dnsbl: crate::modules::dnsbl::Outcome,
     },
     /// Background timer tick — drives ping/idle timeouts.
     Tick,
@@ -93,8 +95,16 @@ impl Ircd {
                         self.quit_user(uid, "Connection closed");
                     }
                 }
-                Event::ResolvedHost { uid, host } => {
-                    self.server.on_resolved(uid, host);
+                Event::ResolvedHost { uid, host, dnsbl } => {
+                    self.server.on_resolved(uid, host, dnsbl);
+                    // now that the notice block has printed, replay the handshake
+                    // lines we held while resolving
+                    for line in self.server.take_deferred(uid) {
+                        if !self.server.users.contains_key(&uid) {
+                            break; // a replayed QUIT/ban already dropped them
+                        }
+                        self.on_line(uid, &line);
+                    }
                     self.try_register(uid); // DNS may have been the last thing we waited on
                 }
                 Event::Tick => self.on_tick(),
@@ -121,6 +131,12 @@ impl Ircd {
             .get(&uid)
             .map(|u| u.registered)
             .unwrap_or(false);
+
+        // Hold the handshake while the connect-time DNS/DNSBL lookups run, so the
+        // "*** ..." notices print as one block; replayed in Event::ResolvedHost.
+        if !registered && self.server.defer_if_resolving(uid, line) {
+            return;
+        }
 
         // module pre-command gate
         for m in &mut self.modules {

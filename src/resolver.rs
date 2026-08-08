@@ -1,14 +1,21 @@
-//! Reverse-DNS host resolution — echoIRCd's answer to InspIRCd's async resolver,
-//! done from scratch with std UDP (no DNS crate, no `unsafe`). Given a client IP
-//! it looks up the PTR record and **forward-confirms** it (the name must resolve
-//! back to the same IP, so a client can't fake a hostname — same anti-spoofing
-//! InspIRCd does). Best-effort: any failure returns `None` and the caller keeps
-//! the IP. It runs off the core thread, so it never blocks the daemon, and it's
-//! bounded in time (the UDP read timeout) and in concurrency (`try_acquire`).
+//! DNS lookups — echoIRCd's answer to InspIRCd's async resolver + `m_dnsbl`, done
+//! from scratch with std UDP (no DNS crate, no `unsafe`). Two things:
+//!
+//!   * **reverse-DNS**: PTR-resolve a client IP and **forward-confirm** it (the name
+//!     must resolve back to the same IP, so a client can't fake a hostname — the
+//!     anti-spoofing InspIRCd does);
+//!   * **DNSBL**: reverse the client's v4 octets under a blocklist zone and A-lookup
+//!     it (`m_dnsbl` style), reporting the listing reply.
+//!
+//! Best-effort: any failure returns "not found / clean" and the caller keeps the
+//! IP. Runs off the core thread (never blocks the daemon), bounded in time (the UDP
+//! read timeout) and in concurrency (`try_acquire`).
 
-use std::net::{IpAddr, ToSocketAddrs, UdpSocket};
+use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs, UdpSocket};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 /// How long to wait for the DNS server before giving up.
 pub const DNS_TIMEOUT: Duration = Duration::from_millis(2500);
@@ -17,6 +24,40 @@ pub const DNS_TIMEOUT: Duration = Duration::from_millis(2500);
 const MAX_ACTIVE: usize = 512;
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 
+// --- caches -------------------------------------------------------------------
+// Memoize lookups so reconnects and clients sharing an IP (NAT/CGNAT, bouncers)
+// skip the network entirely. These Mutexes are internal to the resolver worker
+// threads — the single-threaded core never touches them, so the "no locks in the
+// core" rule still holds. Entries store their expiry `Instant`; a bounded map
+// (purge-expired, then clear on a pathological unique-IP flood) caps memory.
+const CACHE_CAP: usize = 65_536;
+const NS_TTL: Duration = Duration::from_secs(30); // re-read resolv.conf at most this often
+const RDNS_TTL_HIT: Duration = Duration::from_secs(600); // resolved hostname
+const RDNS_TTL_MISS: Duration = Duration::from_secs(60); // no/unconfirmed PTR
+const A_TTL_HIT: Duration = Duration::from_secs(300); // A record present (e.g. DNSBL listing)
+const A_TTL_MISS: Duration = Duration::from_secs(120); // NXDOMAIN / no A (e.g. not listed)
+
+/// A lazily-initialised, expiry-tagged lookup cache keyed by `K` holding `V`.
+type Cache<K, V> = OnceLock<Mutex<HashMap<K, (V, Instant)>>>;
+
+static NS_CACHE: Mutex<Option<(String, Instant)>> = Mutex::new(None);
+static RDNS_CACHE: Cache<IpAddr, Option<String>> = OnceLock::new();
+static A_CACHE: Cache<String, Option<Ipv4Addr>> = OnceLock::new();
+
+/// Keep a cache map bounded: once it hits the cap, drop expired entries, and if
+/// it's *still* full (a flood of distinct fresh IPs), clear it — degrading to
+/// no-cache rather than growing without bound.
+fn evict_if_full<K: Eq + std::hash::Hash, V>(map: &mut HashMap<K, (V, Instant)>) {
+    if map.len() >= CACHE_CAP {
+        let now = Instant::now();
+        map.retain(|_, (_, exp)| *exp > now);
+        if map.len() >= CACHE_CAP {
+            map.clear();
+        }
+    }
+}
+
+const QTYPE_A: u16 = 1;
 const QTYPE_PTR: u16 = 12;
 const QCLASS_IN: u16 = 1;
 
@@ -37,8 +78,32 @@ pub fn release() {
 }
 
 /// Reverse-resolve `ip` and forward-confirm. `Some(host)` only if a PTR exists
-/// and that host resolves back to `ip`.
+/// and that host resolves back to `ip`. Cached by IP so reconnects and clients
+/// behind the same NAT resolve instantly.
 pub fn reverse_confirmed(ip: IpAddr, timeout: Duration) -> Option<String> {
+    let cache = RDNS_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(g) = cache.lock() {
+        if let Some((val, exp)) = g.get(&ip) {
+            if Instant::now() < *exp {
+                return val.clone();
+            }
+        }
+    }
+    let val = resolve_reverse(ip, timeout);
+    let ttl = if val.is_some() {
+        RDNS_TTL_HIT
+    } else {
+        RDNS_TTL_MISS
+    };
+    if let Ok(mut g) = cache.lock() {
+        evict_if_full(&mut g);
+        g.insert(ip, (val.clone(), Instant::now() + ttl));
+    }
+    val
+}
+
+/// The actual reverse lookup + forward-confirm (uncached; see `reverse_confirmed`).
+fn resolve_reverse(ip: IpAddr, timeout: Duration) -> Option<String> {
     let ns = nameserver();
     let ptr = ptr_lookup(&ns, &reverse_name(ip), timeout)?;
     // forward-confirm: the resolved name must map back to this IP
@@ -49,26 +114,54 @@ pub fn reverse_confirmed(ip: IpAddr, timeout: Duration) -> Option<String> {
     (ok && !ptr.is_empty()).then_some(ptr)
 }
 
-/// The `in-addr.arpa` / `ip6.arpa` reverse name for `ip`.
-fn reverse_name(ip: IpAddr) -> String {
+/// The reversed digit/nibble labels for `ip`, without any suffix — `1.2.3.4` →
+/// `4.3.2.1`, `2001:db8::1` → the 32 reversed hex nibbles. PTR appends
+/// `.in-addr.arpa` / `.ip6.arpa`; DNSBL appends the blocklist zone.
+pub fn reverse_labels(ip: IpAddr) -> String {
     match ip {
         IpAddr::V4(a) => {
             let o = a.octets();
-            format!("{}.{}.{}.{}.in-addr.arpa", o[3], o[2], o[1], o[0])
+            format!("{}.{}.{}.{}", o[3], o[2], o[1], o[0])
         }
         IpAddr::V6(a) => {
-            let mut s = String::with_capacity(72);
+            let mut s = String::with_capacity(64);
             for octet in a.octets().iter().rev() {
                 s.push_str(&format!("{:x}.{:x}.", octet & 0xf, octet >> 4));
             }
-            s.push_str("ip6.arpa");
+            s.pop(); // drop the trailing '.'
             s
         }
     }
 }
 
-/// First `nameserver` in /etc/resolv.conf, else a sensible fallback.
+/// The `in-addr.arpa` / `ip6.arpa` reverse name for `ip` (for PTR lookups).
+fn reverse_name(ip: IpAddr) -> String {
+    let suffix = if ip.is_ipv4() {
+        "in-addr.arpa"
+    } else {
+        "ip6.arpa"
+    };
+    format!("{}.{suffix}", reverse_labels(ip))
+}
+
+/// First `nameserver` in /etc/resolv.conf, else a sensible fallback — cached for
+/// `NS_TTL` so we don't stat+read the file on every single DNS query.
 fn nameserver() -> String {
+    if let Ok(mut g) = NS_CACHE.lock() {
+        if let Some((ns, at)) = g.as_ref() {
+            if at.elapsed() < NS_TTL {
+                return ns.clone();
+            }
+        }
+        let ns = read_nameserver();
+        *g = Some((ns.clone(), Instant::now()));
+        return ns;
+    }
+    read_nameserver()
+}
+
+/// Read the first `nameserver` from /etc/resolv.conf (uncached; see `nameserver`).
+fn read_nameserver() -> String {
     if let Ok(text) = std::fs::read_to_string("/etc/resolv.conf") {
         for line in text.lines() {
             let line = line.trim();
@@ -83,27 +176,101 @@ fn nameserver() -> String {
     "1.1.1.1:53".to_string()
 }
 
-/// Send a PTR query for `qname` to `ns` and return the first PTR answer name.
-fn ptr_lookup(ns: &str, qname: &str, timeout: Duration) -> Option<String> {
+/// Build a `qtype` query for `qname`, send it to `ns`, and return the raw reply
+/// (with the transaction id validated).
+fn send_query(ns: &str, qname: &str, qtype: u16, id: u16, timeout: Duration) -> Option<Vec<u8>> {
     let sock = UdpSocket::bind("0.0.0.0:0")
         .or_else(|_| UdpSocket::bind("[::]:0"))
         .ok()?;
     sock.set_read_timeout(Some(timeout)).ok()?;
-
-    let id: u16 = 0x4543; // fixed query id ("EC"); we match it on the reply
     let mut query = Vec::with_capacity(qname.len() + 18);
     query.extend_from_slice(&id.to_be_bytes());
     query.extend_from_slice(&[0x01, 0x00]); // flags: RD=1
     query.extend_from_slice(&[0, 1]); // QDCOUNT=1
     query.extend_from_slice(&[0, 0, 0, 0, 0, 0]); // AN/NS/AR = 0
     encode_name(&mut query, qname);
-    query.extend_from_slice(&QTYPE_PTR.to_be_bytes());
+    query.extend_from_slice(&qtype.to_be_bytes());
     query.extend_from_slice(&QCLASS_IN.to_be_bytes());
-
     sock.send_to(&query, ns).ok()?;
     let mut buf = [0u8; 1500];
     let n = sock.recv(&mut buf).ok()?;
-    parse_ptr_reply(&buf[..n], id)
+    if n < 12 || u16::from_be_bytes([buf[0], buf[1]]) != id {
+        return None;
+    }
+    Some(buf[..n].to_vec())
+}
+
+/// Send a PTR query for `qname` to `ns` and return the first PTR answer name.
+fn ptr_lookup(ns: &str, qname: &str, timeout: Duration) -> Option<String> {
+    let reply = send_query(ns, qname, QTYPE_PTR, 0x4543, timeout)?;
+    parse_ptr_reply(&reply, 0x4543)
+}
+
+/// Resolve `qname`'s first A record. Generic — the DNSBL module builds a
+/// `<reversed-ip>.<zone>` name and calls this to test a listing. Cached by qname
+/// so repeat DNSBL checks for the same IP+zone don't re-hit the network.
+pub fn a_lookup(qname: &str, timeout: Duration) -> Option<Ipv4Addr> {
+    let cache = A_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(g) = cache.lock() {
+        if let Some((val, exp)) = g.get(qname) {
+            if Instant::now() < *exp {
+                return *val;
+            }
+        }
+    }
+    let val = send_query(&nameserver(), qname, QTYPE_A, 0x4544, timeout)
+        .and_then(|reply| parse_a_reply(&reply, 0x4544));
+    let ttl = if val.is_some() { A_TTL_HIT } else { A_TTL_MISS };
+    if let Ok(mut g) = cache.lock() {
+        evict_if_full(&mut g);
+        g.insert(qname.to_string(), (val, Instant::now() + ttl));
+    }
+    val
+}
+
+/// Parse a DNS reply for the first A record (4-byte address). Bounds-checked.
+fn parse_a_reply(msg: &[u8], want_id: u16) -> Option<Ipv4Addr> {
+    if msg.len() < 12 || u16::from_be_bytes([msg[0], msg[1]]) != want_id {
+        return None;
+    }
+    if msg[3] & 0x0f != 0 {
+        return None; // rcode != NOERROR (e.g. NXDOMAIN = not listed)
+    }
+    let qd = u16::from_be_bytes([msg[4], msg[5]]);
+    let an = u16::from_be_bytes([msg[6], msg[7]]);
+    if an == 0 {
+        return None;
+    }
+    let mut pos = 12;
+    for _ in 0..qd {
+        pos = skip_name(msg, pos)?;
+        pos = pos.checked_add(4)?;
+        if pos > msg.len() {
+            return None;
+        }
+    }
+    for _ in 0..an {
+        pos = skip_name(msg, pos)?;
+        if pos + 10 > msg.len() {
+            return None;
+        }
+        let rtype = u16::from_be_bytes([msg[pos], msg[pos + 1]]);
+        let rdlen = u16::from_be_bytes([msg[pos + 8], msg[pos + 9]]) as usize;
+        let rdata = pos + 10;
+        if rdata + rdlen > msg.len() {
+            return None;
+        }
+        if rtype == QTYPE_A && rdlen == 4 {
+            return Some(Ipv4Addr::new(
+                msg[rdata],
+                msg[rdata + 1],
+                msg[rdata + 2],
+                msg[rdata + 3],
+            ));
+        }
+        pos = rdata + rdlen;
+    }
+    None
 }
 
 /// Encode a dotted name into wire format (length-prefixed labels + root 0).

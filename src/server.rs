@@ -17,6 +17,7 @@ use crate::extensible::Extensible;
 use crate::ircd::Event;
 use crate::link::{Link, RemoteServer, RemoteUser};
 use crate::module::Hook;
+use crate::modules::dnsbl;
 use crate::resolver;
 use crate::socketengine::OutSink;
 use crate::users::{Caps, User, UserFlags};
@@ -99,6 +100,9 @@ pub struct Server {
     pub amu: crate::config::AntiMixedCfg,          // antimixedutf8 module config
     pub resolve_hosts: bool,                       // reverse-DNS clients on connect
     pub use_resolved_host: bool,                   // apply the resolved name to the hostmask
+    pub dnsbl_zones: Vec<String>,                  // DNS blocklist zones checked on connect
+    pub dnsbl_action: String,                      // mark | kline | gline | zline
+    pub dnsbl_reason: String,                      // ban reason on a DNSBL hit
     pub event_tx: Sender<Event>,                   // self-inject events (DNS results)
 }
 
@@ -135,6 +139,9 @@ impl Server {
             amu: cfg.amu,
             resolve_hosts: cfg.resolve_hosts,
             use_resolved_host: cfg.use_resolved_host,
+            dnsbl_zones: cfg.dnsbl_zones,
+            dnsbl_action: cfg.dnsbl_action,
+            dnsbl_reason: cfg.dnsbl_reason,
             event_tx,
         }
     }
@@ -194,6 +201,7 @@ impl Server {
                 addr,
                 registered: false,
                 dns_pending: false,
+                deferred: Vec::new(),
                 cap: false,
                 cap_302: false,
                 caps: Caps::default(),
@@ -218,19 +226,38 @@ impl Server {
         // is real (see `resolver`) — its result arrives later as an Event.
         self.notice_star(uid, "Checking Ident");
         self.notice_star(uid, "No Ident response");
-        self.notice_star(uid, "Looking up your hostname...");
-        if self.resolve_hosts && resolver::try_acquire() {
+        let do_rdns = self.resolve_hosts;
+        let zones = self.dnsbl_zones.clone(); // DNSBL runs if any zones are configured
+        if do_rdns {
+            self.notice_star(uid, "Looking up your hostname...");
+        }
+        if (do_rdns || !zones.is_empty()) && resolver::try_acquire() {
             if let Some(u) = self.users.get_mut(&uid) {
-                u.dns_pending = true; // hold registration until the lookup returns
+                u.dns_pending = true; // hold registration until the lookups return
             }
             let tx = self.event_tx.clone();
             thread::spawn(move || {
-                let host = resolver::reverse_confirmed(ip, resolver::DNS_TIMEOUT);
+                // rDNS and DNSBL are independent (DNSBL only needs the IP), so run
+                // them concurrently — the client waits on max(rdns, dnsbl), not the
+                // sum. Only spin up the extra thread when both are actually needed.
+                let (host, dnsbl) = if do_rdns && !zones.is_empty() {
+                    let job =
+                        thread::spawn(move || dnsbl::check(ip, &zones, resolver::DNS_TIMEOUT));
+                    let host = resolver::reverse_confirmed(ip, resolver::DNS_TIMEOUT);
+                    (host, job.join().unwrap_or(dnsbl::Outcome::Skipped))
+                } else if do_rdns {
+                    (
+                        resolver::reverse_confirmed(ip, resolver::DNS_TIMEOUT),
+                        dnsbl::Outcome::Skipped,
+                    )
+                } else {
+                    (None, dnsbl::check(ip, &zones, resolver::DNS_TIMEOUT))
+                };
                 resolver::release();
-                let _ = tx.send(Event::ResolvedHost { uid, host });
+                let _ = tx.send(Event::ResolvedHost { uid, host, dnsbl });
             });
-        } else {
-            // resolution off (or too many in flight): keep the IP as the host
+        } else if do_rdns {
+            // wanted rDNS but couldn't start (too many in flight): keep the IP
             self.notice_star(
                 uid,
                 "Couldn't look up your hostname; using your IP address instead",
@@ -239,20 +266,47 @@ impl Server {
     }
 
     /// A pre-registration `:server NOTICE * :*** <msg>` line.
-    fn notice_star(&self, uid: Uid, msg: &str) {
+    pub(crate) fn notice_star(&self, uid: Uid, msg: &str) {
         self.send(uid, format!(":{} NOTICE * :*** {msg}", self.name));
+    }
+
+    /// While a client's connect-time DNS/DNSBL lookups are still running, hold its
+    /// handshake lines instead of processing them, so the "*** ..." notices print
+    /// as one contiguous block rather than interleaving with the CAP/NICK replies.
+    /// Returns true if `line` was buffered. Bounded — past the cap we let lines
+    /// through (degrading to interleaved output rather than dropping input).
+    pub fn defer_if_resolving(&mut self, uid: Uid, line: &str) -> bool {
+        const MAX_DEFERRED: usize = 32;
+        match self.users.get_mut(&uid) {
+            Some(u) if u.dns_pending && u.deferred.len() < MAX_DEFERRED => {
+                u.deferred.push(line.to_string());
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Take and clear the handshake lines held while `uid`'s lookups ran, to replay
+    /// once the notice block has printed.
+    pub fn take_deferred(&mut self, uid: Uid) -> Vec<String> {
+        self.users
+            .get_mut(&uid)
+            .map(|u| std::mem::take(&mut u.deferred))
+            .unwrap_or_default()
     }
 
     /// A client's reverse-DNS lookup finished. Set the resolved host (so WHOIS,
     /// bans and cloaking use the hostname, not the IP), tell the client, and clear
     /// the flag that was holding their registration.
-    pub fn on_resolved(&mut self, uid: Uid, host: Option<String>) {
+    pub fn on_resolved(&mut self, uid: Uid, host: Option<String>, outcome: dnsbl::Outcome) {
+        // hostname result (only announced if we actually attempted the lookup)
         match &host {
             Some(h) => self.notice_star(uid, &format!("Found your hostname ({h})")),
-            None => self.notice_star(
+            None if self.resolve_hosts => self.notice_star(
                 uid,
                 "Couldn't look up your hostname; using your IP address instead",
             ),
+            None => {}
         }
         let apply = self.use_resolved_host;
         if let Some(u) = self.users.get_mut(&uid) {
@@ -263,6 +317,12 @@ impl Server {
                     u.host = h;
                 }
             }
+        }
+        // DNSBL notices + action (InspIRCd m_dnsbl style) — see `modules::dnsbl`.
+        // May close the connection if the zone is listed and the action bans.
+        dnsbl::report(self, uid, outcome);
+        // release the registration hold (no-op if a DNSBL ban already removed them)
+        if let Some(u) = self.users.get_mut(&uid) {
             u.dns_pending = false;
         }
     }
@@ -561,6 +621,7 @@ mod tests {
                 addr: "127.0.0.1:1".parse().unwrap(),
                 registered: true,
                 dns_pending: false,
+                deferred: Vec::new(),
                 cap: false,
                 cap_302: false,
                 caps: Caps::default(),
@@ -592,13 +653,21 @@ mod tests {
     fn resolved_host_applied_only_when_configured() {
         let mut s = srv(); // use_resolved_host = true (default)
         let _a = add_user(&mut s, 1, "ann"); // host starts "localhost"
-        s.on_resolved(1, Some("host.example.net".to_string()));
+        s.on_resolved(
+            1,
+            Some("host.example.net".to_string()),
+            dnsbl::Outcome::Skipped,
+        );
         assert_eq!(s.users[&1].host, "host.example.net");
         assert!(!s.users[&1].dns_pending);
 
         s.use_resolved_host = false; // resolve + report, but keep the IP in the mask
         let _b = add_user(&mut s, 2, "bob");
-        s.on_resolved(2, Some("host.example.net".to_string()));
+        s.on_resolved(
+            2,
+            Some("host.example.net".to_string()),
+            dnsbl::Outcome::Skipped,
+        );
         assert_eq!(s.users[&2].host, "localhost");
         assert!(!s.users[&2].dns_pending); // registration still un-held either way
     }
