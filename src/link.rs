@@ -496,6 +496,7 @@ impl Server {
                 command: msg.params[1].to_ascii_uppercase(),
                 params: msg.params[2..].to_vec(),
                 ctags: String::new(),
+                label: None,
             };
             self.on_link(via, &sub);
         }

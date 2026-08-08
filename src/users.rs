@@ -95,6 +95,8 @@ pub const SUPPORTED_CAPS: &[&str] = &[
     "extended-monitor",
     "account-tag",
     "standard-replies",
+    "labeled-response",
+    "batch",
     "cap-notify",
 ];
 
@@ -118,6 +120,8 @@ pub struct Caps {
     pub extended_monitor: bool, // route away/account/chghost/setname for MONITOR targets
     pub account_tag: bool,      // prepend account=<name> tag on messages from logged-in users
     pub standard_replies: bool, // understands FAIL/WARN/NOTE structured replies
+    pub labeled_response: bool, // tag responses to a labeled command with its label
+    pub batch: bool,            // understands BATCH framing
     pub cap_notify: bool,
 }
 
@@ -163,6 +167,8 @@ impl Caps {
             "extended-monitor" => self.extended_monitor,
             "account-tag" => self.account_tag,
             "standard-replies" => self.standard_replies,
+            "labeled-response" => self.labeled_response,
+            "batch" => self.batch,
             "cap-notify" => self.cap_notify,
             _ => false,
         }
@@ -186,6 +192,8 @@ impl Caps {
             "extended-monitor" => &mut self.extended_monitor,
             "account-tag" => &mut self.account_tag,
             "standard-replies" => &mut self.standard_replies,
+            "labeled-response" => &mut self.labeled_response,
+            "batch" => &mut self.batch,
             "cap-notify" => &mut self.cap_notify,
             _ => return false,
         };

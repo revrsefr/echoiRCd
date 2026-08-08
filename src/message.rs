@@ -12,6 +12,9 @@ pub struct Message {
     pub params: Vec<String>,
     /// Client-only IRCv3 tags (`+key=val;…`) re-serialised for relay; `""` if none.
     pub ctags: String,
+    /// The IRCv3 `label` tag value, if the client tagged this command (for
+    /// labeled-response); `None` otherwise.
+    pub label: Option<String>,
 }
 
 /// Parse one wire line. Returns `None` for an empty/garbage line.
@@ -20,6 +23,7 @@ pub fn parse(line: &str) -> Option<Message> {
 
     // IRCv3 message tags — keep the client-only (`+`) tags for relay, drop the rest.
     let mut ctags = String::new();
+    let mut label = None;
     if let Some(after_at) = rest.strip_prefix('@') {
         let (tags, r) = after_at.split_once(' ')?;
         ctags = tags
@@ -27,6 +31,10 @@ pub fn parse(line: &str) -> Option<Message> {
             .filter(|t| t.starts_with('+'))
             .collect::<Vec<_>>()
             .join(";");
+        label = tags
+            .split(';')
+            .find_map(|t| t.strip_prefix("label="))
+            .map(|v| v.to_string());
         rest = r.trim_start();
     }
 
@@ -68,6 +76,7 @@ pub fn parse(line: &str) -> Option<Message> {
         command: cmd.to_ascii_uppercase(),
         params,
         ctags,
+        label,
     })
 }
 

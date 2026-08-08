@@ -5,6 +5,7 @@
 //! keeps usermanager / channelmanager separate from the core. No locks: only the
 //! single core thread ever holds a `Server`.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::mpsc::Sender;
@@ -105,7 +106,12 @@ pub struct Server {
     pub dnsbl_reason: String,                      // ban reason on a DNSBL hit
     pub sasl_server: String,                       // services server that handles SASL
     pub webirc: Vec<(String, String)>,             // trusted web gateways: (password, name)
-    pub event_tx: Sender<Event>,                   // self-inject events (DNS results)
+    // labeled-response: while Some((uid, buf)), that client's own responses are
+    // diverted into `buf` instead of the socket, so `on_line` can wrap them with
+    // the command's `label` (single tag, BATCH, or ACK). RefCell because the
+    // output primitives are `&self`.
+    pub label_capture: RefCell<Option<(Uid, Vec<String>)>>,
+    pub event_tx: Sender<Event>, // self-inject events (DNS results)
 }
 
 impl Server {
@@ -146,6 +152,7 @@ impl Server {
             dnsbl_reason: cfg.dnsbl_reason,
             sasl_server: cfg.sasl_server,
             webirc: cfg.webirc,
+            label_capture: RefCell::new(None),
             event_tx,
         }
     }
@@ -399,6 +406,22 @@ impl Server {
             } else {
                 line
             };
+            self.emit_to(uid, line);
+        }
+    }
+
+    /// Final hop for one line to a client: diverted into the labeled-response
+    /// capture buffer when one is active for `uid`, otherwise written to the wire.
+    fn emit_to(&self, uid: Uid, line: String) {
+        if let Ok(mut cap) = self.label_capture.try_borrow_mut() {
+            if let Some((cuid, buf)) = cap.as_mut() {
+                if *cuid == uid {
+                    buf.push(line);
+                    return;
+                }
+            }
+        }
+        if let Some(u) = self.users.get(&uid) {
             u.out.send(line);
         }
     }
@@ -536,7 +559,7 @@ impl Server {
             } else {
                 format!("@{} {body}", tags.join(";"))
             };
-            u.out.send(line);
+            self.emit_to(uid, line);
         }
     }
 

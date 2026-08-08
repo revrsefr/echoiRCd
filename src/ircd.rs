@@ -46,6 +46,19 @@ pub enum Event {
     Tick,
 }
 
+/// Insert an extra IRCv3 tag into a wire line's tag block, creating the `@…`
+/// block if the line has none. Used to fold `label=`/`batch=` onto captured lines.
+fn with_extra_tag(line: &str, tag: &str) -> String {
+    if let Some(rest) = line.strip_prefix('@') {
+        match rest.split_once(' ') {
+            Some((tags, body)) => format!("@{tags};{tag} {body}"),
+            None => format!("@{rest};{tag}"),
+        }
+    } else {
+        format!("@{tag} {line}")
+    }
+}
+
 pub struct Ircd {
     server: Server,
     commands: HashMap<&'static str, Box<dyn Command>>,
@@ -126,7 +139,6 @@ impl Ircd {
             u.last_active = crate::server::now();
             u.ping_sent = false;
         }
-        let cmd = msg.command.as_str();
         let registered = self
             .server
             .users
@@ -140,6 +152,36 @@ impl Ircd {
             return;
         }
 
+        // labeled-response: if the client tagged this command with `label` and
+        // negotiated the cap, capture its own replies and wrap them with the label.
+        let label = msg.label.clone().filter(|_| {
+            self.server
+                .users
+                .get(&uid)
+                .map(|u| u.caps.labeled_response)
+                .unwrap_or(false)
+        });
+        if let Some(label) = label {
+            *self.server.label_capture.borrow_mut() = Some((uid, Vec::new()));
+            self.dispatch(uid, &msg, registered);
+            let lines = self
+                .server
+                .label_capture
+                .borrow_mut()
+                .take()
+                .map(|(_, l)| l)
+                .unwrap_or_default();
+            self.emit_labeled(uid, &label, lines);
+        } else {
+            self.dispatch(uid, &msg, registered);
+        }
+    }
+
+    /// Run one parsed command: module gates, handler dispatch, post-hooks, and the
+    /// registration/quit follow-ups. Output goes through `Server::send`, so it's
+    /// transparently captured when a labeled command wraps this call.
+    fn dispatch(&mut self, uid: Uid, msg: &message::Message, registered: bool) {
+        let cmd = msg.command.as_str();
         // module pre-command gate
         for m in &mut self.modules {
             if m.on_pre_command(&mut self.server, uid, cmd, &msg.params) == ModResult::Deny {
@@ -190,6 +232,34 @@ impl Ircd {
         // …or completed the registration handshake
         if !registered {
             self.try_register(uid);
+        }
+    }
+
+    /// Emit a labeled command's captured replies (labeled-response): `ACK` if it
+    /// produced none, the single line label-tagged if one, else a `BATCH`-wrapped
+    /// group. Runs after the capture is taken, so these go straight to the wire.
+    fn emit_labeled(&mut self, uid: Uid, label: &str, lines: Vec<String>) {
+        let server = self.server.name.clone();
+        match lines.len() {
+            0 => self
+                .server
+                .send(uid, format!("@label={label} :{server} ACK")),
+            1 => {
+                let l = with_extra_tag(&lines[0], &format!("label={label}"));
+                self.server.send(uid, l);
+            }
+            _ => {
+                let bref = self.server.next_msgid().replace('-', ""); // batch ref: alnum only
+                self.server.send(
+                    uid,
+                    format!("@label={label} :{server} BATCH +{bref} labeled-response"),
+                );
+                for l in lines {
+                    self.server
+                        .send(uid, with_extra_tag(&l, &format!("batch={bref}")));
+                }
+                self.server.send(uid, format!(":{server} BATCH -{bref}"));
+            }
         }
     }
 
