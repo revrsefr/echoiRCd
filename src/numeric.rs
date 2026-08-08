@@ -2,6 +2,7 @@
 
 pub const RPL_MAP: u16 = 6;
 pub const RPL_MAPEND: u16 = 7;
+pub const RPL_STATSLINKINFO: u16 = 211; // STATS l — a server link
 pub const RPL_STATSCOMMANDS: u16 = 212;
 pub const RPL_ENDOFSTATS: u16 = 219;
 pub const RPL_STATSUPTIME: u16 = 242;

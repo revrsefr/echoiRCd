@@ -213,6 +213,20 @@ impl Command for Stats {
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         let letter = params[0].chars().next().unwrap_or(' ');
+        // everything but uptime exposes server internals — opers only
+        if letter != 'u' && !s.is_oper(uid) {
+            s.numeric(
+                uid,
+                ERR_NOPRIVILEGES,
+                ":Permission Denied- You're not an IRC operator",
+            );
+            s.numeric(
+                uid,
+                RPL_ENDOFSTATS,
+                &format!("{letter} :End of /STATS report"),
+            );
+            return CmdResult::Fail;
+        }
         match letter {
             'u' => {
                 let up = now().saturating_sub(s.created);
@@ -229,11 +243,14 @@ impl Command for Stats {
                     s.numeric(uid, RPL_STATSOLINE, &format!("O * * {n} :oper"));
                 }
             }
-            'k' | 'g' | 'z' => {
+            'k' | 'g' | 'z' | 'e' | 'q' | 's' => {
                 let kind = match letter {
                     'k' => XKind::Kline,
                     'g' => XKind::Gline,
-                    _ => XKind::Zline,
+                    'z' => XKind::Zline,
+                    'e' => XKind::Eline,
+                    'q' => XKind::Qline,
+                    _ => XKind::Shun,
                 };
                 let rows: Vec<String> = s
                     .xlines
@@ -252,6 +269,15 @@ impl Command for Stats {
                     .collect();
                 for r in rows {
                     s.numeric(uid, RPL_STATSXLINE, &r);
+                }
+            }
+            'l' => {
+                for sv in s.servers.values() {
+                    s.numeric(
+                        uid,
+                        RPL_STATSLINKINFO,
+                        &format!("{} 0 0 0 0 :{}", sv.name, sv.desc),
+                    );
                 }
             }
             _ => {}
