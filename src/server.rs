@@ -140,7 +140,7 @@ pub struct Server {
     pub dnsbl_action: String,                      // mark | kline | gline | zline
     pub dnsbl_reason: String,                      // ban reason on a DNSBL hit
     pub sasl_server: String,                       // services server that handles SASL
-    pub webirc: Vec<(String, String)>,             // trusted web gateways: (password, name)
+    pub webirc: Vec<(String, String, String)>,     // web gateways: (password, name, ip-mask)
     // labeled-response: while Some((uid, buf)), that client's own responses are
     // diverted into `buf` instead of the socket, so `on_line` can wrap them with
     // the command's `label` (single tag, BATCH, or ACK). RefCell because the

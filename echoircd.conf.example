@@ -29,6 +29,11 @@ bind_server = 0.0.0.0:7000
 # TLS with a client certificate (its fingerprint is sent to services).
 # sasl_server = services.example.net
 
+# trusted web gateways (CGI:IRC / kiwiirc-style): they send WEBIRC to declare the
+# real client's host+ip. webirc = <password> [gateway-name] [ip-mask]; the ip-mask
+# restricts which source IP may use the password (recommended). Repeat for more.
+# webirc = CHANGE_THIS_WEBIRC_SECRET mygateway 203.0.113.9
+
 # IRC operators — oper = <name> <password>
 oper = admin CHANGE_THIS_PASSWORD
 

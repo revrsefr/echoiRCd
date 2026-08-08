@@ -60,13 +60,13 @@ pub struct Config {
     pub tls_cert: Option<String>, // PEM certificate chain
     pub tls_key: Option<String>,  // PEM private key
     pub motd: Vec<String>,
-    pub opers: Vec<(String, String)>,  // (name, password)
-    pub cloak_key: Option<String>,     // secret key for host cloaking (+x); None = off
-    pub sid: String,                   // this server's 3-char server id (S2S)
-    pub serverdesc: String,            // this server's description
-    pub bind_server: Option<String>,   // the server-to-server link listener
-    pub links: Vec<LinkBlock>,         // peers we accept / dial
-    pub conf_path: String,             // where this was loaded from (for REHASH)
+    pub opers: Vec<(String, String)>,          // (name, password)
+    pub cloak_key: Option<String>,             // secret key for host cloaking (+x); None = off
+    pub sid: String,                           // this server's 3-char server id (S2S)
+    pub serverdesc: String,                    // this server's description
+    pub bind_server: Option<String>,           // the server-to-server link listener
+    pub links: Vec<LinkBlock>,                 // peers we accept / dial
+    pub conf_path: String,                     // where this was loaded from (for REHASH)
     pub censor: Vec<(String, String)>, // +G bad words: (find, replace); empty replace = block
     pub amu: AntiMixedCfg,             // antimixedutf8 module config
     pub resolve_hosts: bool,           // reverse-DNS clients on connect (default on)
@@ -75,7 +75,7 @@ pub struct Config {
     pub dnsbl_action: String,          // mark | kline | gline | zline (on a hit)
     pub dnsbl_reason: String,          // ban reason for a DNSBL hit
     pub sasl_server: String,           // linked services server that handles SASL ("" = none)
-    pub webirc: Vec<(String, String)>, // trusted web gateways: (password, gateway name)
+    pub webirc: Vec<(String, String, String)>, // web gateways: (password, name, ip-mask)
 }
 
 impl Default for Config {
@@ -238,11 +238,12 @@ impl Config {
                 "dnsbl_reason" => c.dnsbl_reason = v.to_string(),
                 "sasl_server" | "sasl_target" => c.sasl_server = v.to_string(),
                 "webirc" => {
-                    // webirc = <password> [gateway-name]
+                    // webirc = <password> [gateway-name] [ip-mask]
                     let mut it = v.split_whitespace();
                     if let Some(pass) = it.next() {
                         let gw = it.next().unwrap_or("webirc").to_string();
-                        c.webirc.push((pass.to_string(), gw));
+                        let mask = it.next().unwrap_or("").to_string();
+                        c.webirc.push((pass.to_string(), gw, mask));
                     }
                 }
                 _ => {}

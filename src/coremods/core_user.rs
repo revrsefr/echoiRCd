@@ -3,6 +3,7 @@
 
 use std::net::{IpAddr, SocketAddr};
 
+use crate::channels::glob_match;
 use crate::command::{CmdResult, Command};
 use crate::numeric::*;
 use crate::server::Server;
@@ -45,11 +46,17 @@ impl Command for WebIrc {
             return CmdResult::Fail; // can't re-spoof a registered session
         }
         let (pass, host, ip) = (&params[0], &params[2], &params[3]);
+        // the gateway's own connecting IP (before we spoof it below)
+        let from = s
+            .users
+            .get(&uid)
+            .map(|u| u.addr.ip().to_string())
+            .unwrap_or_default();
         let Some(gw) = s
             .webirc
             .iter()
-            .find(|(p, _)| p == pass)
-            .map(|(_, g)| g.clone())
+            .find(|(p, _, mask)| p == pass && (mask.is_empty() || glob_match(mask, &from)))
+            .map(|(_, g, _)| g.clone())
         else {
             s.notice_star(uid, "WEBIRC: invalid credentials");
             return CmdResult::Fail;
