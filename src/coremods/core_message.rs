@@ -124,7 +124,92 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(Notice),
         Box::new(TagMsg),
         Box::new(ChatHistory),
+        Box::new(Redact),
     ]
+}
+
+/// REDACT — delete a previously-sent channel message (draft/message-redaction).
+/// `REDACT <#chan> <msgid> [:reason]`. Allowed for the message's author, a channel
+/// half-op-or-above, or an oper. Relayed to channel members who enabled the cap,
+/// and the message is dropped from CHATHISTORY.
+struct Redact;
+impl Command for Redact {
+    fn name(&self) -> &'static str {
+        "REDACT"
+    }
+    fn min_params(&self) -> usize {
+        2
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        let target = &params[0];
+        let msgid = &params[1];
+        let reason = params.get(2).cloned().unwrap_or_default();
+        if !target.starts_with('#') {
+            s.fail(
+                uid,
+                "REDACT",
+                "INVALID_TARGET",
+                "REDACT only supports channels",
+            );
+            return CmdResult::Fail;
+        }
+        let key = target.to_ascii_lowercase();
+        let Some(author) = s.history.get(&key).and_then(|buf| {
+            buf.iter().find(|m| m.msgid == *msgid).map(|m| {
+                m.prefix
+                    .split('!')
+                    .next()
+                    .unwrap_or("")
+                    .to_ascii_lowercase()
+            })
+        }) else {
+            s.fail(
+                uid,
+                "REDACT",
+                "UNKNOWN_MSGID",
+                &format!("No such message id {msgid}"),
+            );
+            return CmdResult::Fail;
+        };
+        let my_nick = s
+            .users
+            .get(&uid)
+            .map(|u| u.nick.to_ascii_lowercase())
+            .unwrap_or_default();
+        if my_nick != author && s.rank(uid, &key) < RANK_HALFOP && !s.is_oper(uid) {
+            s.fail(
+                uid,
+                "REDACT",
+                "REDACT_FORBIDDEN",
+                "You may only redact your own messages",
+            );
+            return CmdResult::Fail;
+        }
+        if let Some(buf) = s.history.get_mut(&key) {
+            buf.retain(|m| m.msgid != *msgid);
+        }
+        let prefix = s.users.get(&uid).map(|u| u.prefix()).unwrap_or_default();
+        let line = if reason.is_empty() {
+            format!(":{prefix} REDACT {target} {msgid}")
+        } else {
+            format!(":{prefix} REDACT {target} {msgid} :{reason}")
+        };
+        let members: Vec<Uid> = s
+            .channels
+            .get(&key)
+            .map(|c| c.members.keys().copied().collect())
+            .unwrap_or_default();
+        for m in members {
+            if s.users
+                .get(&m)
+                .map(|u| u.caps.message_redaction)
+                .unwrap_or(false)
+            {
+                s.send(m, line.clone());
+            }
+        }
+        CmdResult::Ok
+    }
 }
 
 /// Canonical CHATHISTORY key for a DM between two nicks (order-independent; the

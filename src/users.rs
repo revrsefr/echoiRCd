@@ -98,6 +98,7 @@ pub const SUPPORTED_CAPS: &[&str] = &[
     "labeled-response",
     "batch",
     "draft/chathistory",
+    "draft/message-redaction",
     "cap-notify",
 ];
 
@@ -124,6 +125,7 @@ pub struct Caps {
     pub labeled_response: bool, // tag responses to a labeled command with its label
     pub batch: bool,            // understands BATCH framing
     pub chathistory: bool,      // draft/chathistory — can request message history
+    pub message_redaction: bool, // draft/message-redaction — understands REDACT
     pub cap_notify: bool,
 }
 
@@ -172,6 +174,7 @@ impl Caps {
             "labeled-response" => self.labeled_response,
             "batch" => self.batch,
             "draft/chathistory" => self.chathistory,
+            "draft/message-redaction" => self.message_redaction,
             "cap-notify" => self.cap_notify,
             _ => false,
         }
@@ -198,6 +201,7 @@ impl Caps {
             "labeled-response" => &mut self.labeled_response,
             "batch" => &mut self.batch,
             "draft/chathistory" => &mut self.chathistory,
+            "draft/message-redaction" => &mut self.message_redaction,
             "cap-notify" => &mut self.cap_notify,
             _ => return false,
         };
