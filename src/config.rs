@@ -76,6 +76,9 @@ pub struct Config {
     pub dnsbl_reason: String,          // ban reason for a DNSBL hit
     pub sasl_server: String,           // linked services server that handles SASL ("" = none)
     pub webirc: Vec<(String, String, String)>, // web gateways: (password, name, ip-mask)
+    pub sts_duration: u64, // IRCv3 STS: seconds a client must keep using TLS (0 = STS off)
+    pub sts_port: u16,     // TLS port to advertise in STS (0 = derive from bind_tls)
+    pub sts_preload: bool, // STS preload flag
 }
 
 impl Default for Config {
@@ -104,6 +107,9 @@ impl Default for Config {
             dnsbl_reason: "Your host is listed in a DNS blocklist".to_string(),
             sasl_server: String::new(),
             webirc: Vec::new(),
+            sts_duration: 0,
+            sts_port: 0,
+            sts_preload: false,
         }
     }
 }
@@ -237,6 +243,9 @@ impl Config {
                 "dnsbl_action" => c.dnsbl_action = v.to_ascii_lowercase(),
                 "dnsbl_reason" => c.dnsbl_reason = v.to_string(),
                 "sasl_server" | "sasl_target" => c.sasl_server = v.to_string(),
+                "sts_duration" => c.sts_duration = v.parse().unwrap_or(0),
+                "sts_port" => c.sts_port = v.parse().unwrap_or(0),
+                "sts_preload" => c.sts_preload = matches!(v, "on" | "yes" | "true" | "1"),
                 "webirc" => {
                     // webirc = <password> [gateway-name] [ip-mask]
                     let mut it = v.split_whitespace();
@@ -247,6 +256,17 @@ impl Config {
                     }
                 }
                 _ => {}
+            }
+        }
+        // STS advertises a TLS port to insecure clients; default it to the TLS listener's.
+        if c.sts_duration > 0 && c.sts_port == 0 {
+            if let Some(p) = c
+                .bind_tls
+                .as_deref()
+                .and_then(|b| b.rsplit(':').next())
+                .and_then(|p| p.parse::<u16>().ok())
+            {
+                c.sts_port = p;
             }
         }
     }

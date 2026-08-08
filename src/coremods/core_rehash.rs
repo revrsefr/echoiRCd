@@ -67,6 +67,9 @@ impl Command for Rehash {
                 s.dnsbl_action = fresh.dnsbl_action;
                 s.dnsbl_reason = fresh.dnsbl_reason;
                 s.sasl_server = fresh.sasl_server;
+                s.sts_duration = fresh.sts_duration;
+                s.sts_port = fresh.sts_port;
+                s.sts_preload = fresh.sts_preload;
                 s.announce("Server configuration reloaded.");
                 s.numeric(uid, RPL_REHASHING, &format!("{path} :Rehashing"));
             }
