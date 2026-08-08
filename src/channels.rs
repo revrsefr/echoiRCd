@@ -324,6 +324,26 @@ impl Server {
             .unwrap_or(false)
     }
 
+    /// Force `uid` out of `chan` (SAPART / SVSPART enforcement): announce the PART
+    /// to the channel and to links, drop the membership, reap the channel if empty.
+    /// No-op if the user isn't a member.
+    pub fn force_part(&mut self, uid: Uid, chan: &str, reason: &str) {
+        let key = chan.to_ascii_lowercase();
+        if !self.is_member(uid, &key) {
+            return;
+        }
+        let prefix = self.users[&uid].prefix();
+        self.to_channel(&key, &format!(":{prefix} PART {chan} :{reason}"), None);
+        self.propagate_part(uid, chan, reason);
+        if let Some(ch) = self.channels.get_mut(&key) {
+            ch.members.remove(&uid);
+        }
+        if let Some(u) = self.users.get_mut(&uid) {
+            u.channels.remove(&key);
+        }
+        self.channels.retain(|_, c| !c.is_empty());
+    }
+
     /// Join a user to a channel (creating it if new, giving the creator +o),
     /// then broadcast JOIN and send TOPIC + NAMES. Queues the join hook.
     pub fn join(&mut self, uid: Uid, name: &str, key_arg: Option<&str>) {

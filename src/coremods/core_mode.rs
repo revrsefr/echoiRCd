@@ -22,6 +22,35 @@ fn emit(applied: &mut String, last: &mut char, sign: char, c: char) {
     applied.push(c);
 }
 
+/// Apply user modes to `tuid` with services authority (SVSMODE): no "only your
+/// own modes" restriction — that's the whole point. Reuses the per-mode handlers
+/// and broadcasts the result to the target as `:nick MODE nick :<changes>`.
+pub fn svs_set_user_modes(s: &mut Server, tuid: Uid, modestring: &str) {
+    let mut sign = '+';
+    let mut applied = String::new();
+    let mut last = ' ';
+    for c in modestring.chars() {
+        if c == '+' || c == '-' {
+            sign = c;
+            continue;
+        }
+        let adding = sign == '+';
+        if let Some(handler) = user_mode(c) {
+            if handler.apply(s, tuid, adding) {
+                emit(&mut applied, &mut last, sign, c);
+            }
+        }
+    }
+    if !applied.is_empty() {
+        let nick = s
+            .users
+            .get(&tuid)
+            .map(|u| u.nick.clone())
+            .unwrap_or_default();
+        s.send(tuid, format!(":{nick} MODE {nick} :{applied}"));
+    }
+}
+
 struct Mode;
 impl Command for Mode {
     fn name(&self) -> &'static str {

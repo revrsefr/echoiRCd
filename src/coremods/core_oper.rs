@@ -3,7 +3,7 @@
 
 use crate::channels::Topic;
 use crate::command::{CmdResult, Command};
-use crate::coremods::core_mode::apply_mode;
+use crate::coremods::core_mode::{apply_mode, svs_set_user_modes};
 use crate::module::Hook;
 use crate::numeric::*;
 use crate::server::{now, Server};
@@ -18,6 +18,10 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(Wallops),
         Box::new(SvsLogin),
         Box::new(SvsLogout),
+        Box::new(SvsNick),
+        Box::new(SvsJoin),
+        Box::new(SvsPart),
+        Box::new(SvsMode),
         Box::new(GlobOps),
         Box::new(SaJoin),
         Box::new(SaPart),
@@ -296,24 +300,11 @@ impl Command for SaPart {
             );
             return CmdResult::Fail;
         };
-        let chan = &params[1];
-        let key = chan.to_ascii_lowercase();
         let reason = params
             .get(2)
             .cloned()
             .unwrap_or_else(|| "Removed".to_string());
-        if s.is_member(tuid, &key) {
-            let prefix = s.users[&tuid].prefix();
-            s.to_channel(&key, &format!(":{prefix} PART {chan} :{reason}"), None);
-            s.propagate_part(tuid, chan, &reason);
-            if let Some(ch) = s.channels.get_mut(&key) {
-                ch.members.remove(&tuid);
-            }
-            if let Some(u) = s.users.get_mut(&tuid) {
-                u.channels.remove(&key);
-            }
-            s.channels.retain(|_, c| !c.is_empty());
-        }
+        s.force_part(tuid, &params[1], &reason);
         CmdResult::Ok
     }
 }
@@ -359,6 +350,146 @@ impl Command for SaNick {
             return CmdResult::Fail;
         }
         s.set_nick(tuid, newnick);
+        CmdResult::Ok
+    }
+}
+
+// --- SVS* : the services interface. Same enforcement as the SA* oper commands,
+// under the names a services package speaks (like SVSLOGIN). Gated to opers/
+// services; a linked services pseudoserver drives these once S2S routes them.
+
+/// SVSNICK — force a nick change (nick-registration enforcement). An optional
+/// third param is the new-nick TS, accepted and ignored (single-TS model).
+struct SvsNick;
+impl Command for SvsNick {
+    fn name(&self) -> &'static str {
+        "SVSNICK"
+    }
+    fn min_params(&self) -> usize {
+        2
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        if !require_oper(s, uid) {
+            return CmdResult::Fail;
+        }
+        let Some(tuid) = s.find_nick(&params[0]) else {
+            s.numeric(
+                uid,
+                ERR_NOSUCHNICK,
+                &format!("{} :No such nick/channel", params[0]),
+            );
+            return CmdResult::Fail;
+        };
+        let newnick = &params[1];
+        if !valid_nick(newnick) {
+            s.numeric(
+                uid,
+                ERR_ERRONEUSNICKNAME,
+                &format!("{newnick} :Erroneous nickname"),
+            );
+            return CmdResult::Fail;
+        }
+        if s.find_nick(newnick).is_some()
+            || s.remote_nick.contains_key(&newnick.to_ascii_lowercase())
+        {
+            s.numeric(
+                uid,
+                ERR_NICKNAMEINUSE,
+                &format!("{newnick} :Nickname is already in use"),
+            );
+            return CmdResult::Fail;
+        }
+        s.set_nick(tuid, newnick);
+        CmdResult::Ok
+    }
+}
+
+/// SVSJOIN — force a user into a channel, bypassing +i/+k/+l/+b.
+struct SvsJoin;
+impl Command for SvsJoin {
+    fn name(&self) -> &'static str {
+        "SVSJOIN"
+    }
+    fn min_params(&self) -> usize {
+        2
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        if !require_oper(s, uid) {
+            return CmdResult::Fail;
+        }
+        let Some(tuid) = s.find_nick(&params[0]) else {
+            s.numeric(
+                uid,
+                ERR_NOSUCHNICK,
+                &format!("{} :No such nick/channel", params[0]),
+            );
+            return CmdResult::Fail;
+        };
+        s.join(tuid, &params[1], None);
+        CmdResult::Ok
+    }
+}
+
+/// SVSPART — force a user out of a channel.
+struct SvsPart;
+impl Command for SvsPart {
+    fn name(&self) -> &'static str {
+        "SVSPART"
+    }
+    fn min_params(&self) -> usize {
+        2
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        if !require_oper(s, uid) {
+            return CmdResult::Fail;
+        }
+        let Some(tuid) = s.find_nick(&params[0]) else {
+            s.numeric(
+                uid,
+                ERR_NOSUCHNICK,
+                &format!("{} :No such nick/channel", params[0]),
+            );
+            return CmdResult::Fail;
+        };
+        let reason = params
+            .get(2)
+            .cloned()
+            .unwrap_or_else(|| "Services forced part".to_string());
+        s.force_part(tuid, &params[1], &reason);
+        CmdResult::Ok
+    }
+}
+
+/// SVSMODE — set modes on a user (e.g. `+r` registered) or a channel with services
+/// authority, bypassing the "own modes only" / rank checks a normal MODE enforces.
+struct SvsMode;
+impl Command for SvsMode {
+    fn name(&self) -> &'static str {
+        "SVSMODE"
+    }
+    fn min_params(&self) -> usize {
+        2
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        if !require_oper(s, uid) {
+            return CmdResult::Fail;
+        }
+        if params[0].starts_with('#') {
+            // channel modes with services authority — same path as SAMODE
+            s.mode_sudo = true;
+            let r = apply_mode(s, uid, params);
+            s.mode_sudo = false;
+            return r;
+        }
+        let Some(tuid) = s.find_nick(&params[0]) else {
+            s.numeric(
+                uid,
+                ERR_NOSUCHNICK,
+                &format!("{} :No such nick/channel", params[0]),
+            );
+            return CmdResult::Fail;
+        };
+        svs_set_user_modes(s, tuid, &params[1]);
         CmdResult::Ok
     }
 }
