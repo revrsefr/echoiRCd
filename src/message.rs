@@ -17,6 +17,29 @@ pub struct Message {
     pub label: Option<String>,
 }
 
+impl Message {
+    /// Re-serialise to a wire line, for forwarding across links. The last param is
+    /// emitted as a trailing `:param` when it's empty, has a space, or starts `:`.
+    pub fn to_wire(&self) -> String {
+        let mut out = String::new();
+        if let Some(src) = &self.source {
+            out.push(':');
+            out.push_str(src);
+            out.push(' ');
+        }
+        out.push_str(&self.command);
+        let n = self.params.len();
+        for (i, p) in self.params.iter().enumerate() {
+            out.push(' ');
+            if i + 1 == n && (p.is_empty() || p.contains(' ') || p.starts_with(':')) {
+                out.push(':');
+            }
+            out.push_str(p);
+        }
+        out
+    }
+}
+
 /// Parse one wire line. Returns `None` for an empty/garbage line.
 pub fn parse(line: &str) -> Option<Message> {
     let mut rest = line.trim_start();

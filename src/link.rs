@@ -162,16 +162,16 @@ impl Server {
             "MODE" | "FMODE" if registered => self.link_mode_recv(uid, msg),
             "FJOIN" if registered => self.link_fjoin_recv(uid, msg),
             // services (SVS*) enforcement + account login, driven by a linked
-            // services pseudoserver
-            "SVSNICK" if registered => self.link_svsnick(msg),
-            "SVSJOIN" if registered => self.link_svsjoin(msg),
-            "SVSPART" if registered => self.link_svspart(msg),
-            "SVSMODE" if registered => self.link_svsmode(msg),
-            "SVSLOGIN" if registered => self.link_svslogin(msg),
-            "SVSLOGOUT" if registered => self.link_svslogout(msg),
+            // services pseudoserver (forwarded on if the target is on another server)
+            "SVSNICK" if registered => self.link_svsnick(uid, msg),
+            "SVSJOIN" if registered => self.link_svsjoin(uid, msg),
+            "SVSPART" if registered => self.link_svspart(uid, msg),
+            "SVSMODE" if registered => self.link_svsmode(uid, msg),
+            "SVSLOGIN" if registered => self.link_svslogin(uid, msg),
+            "SVSLOGOUT" if registered => self.link_svslogout(uid, msg),
             "ENCAP" if registered => self.link_encap(uid, msg),
-            "METADATA" if registered => self.link_metadata(msg),
-            "SASL" if registered => self.link_sasl(msg),
+            "METADATA" if registered => self.link_metadata(uid, msg),
+            "SASL" if registered => self.link_sasl(uid, msg),
             "BURST" => {
                 if let Some(l) = self.links.get_mut(&uid) {
                     l.bursting = true;
@@ -387,11 +387,10 @@ impl Server {
 
     // --- services (SVS*) over S2S ---------------------------------------------
     // A linked services pseudoserver enforces nick/join/part/mode and account
-    // login on our users with these. Authority is the link itself — only
-    // registered peers reach `on_link`. Targets are network UUIDs or nicks; we
-    // act only on locally-present targets (multi-hop forwarding is still TODO,
-    // like the SVSLOGIN/SASL note in the module header). Each reuses the same
-    // primitive as the local SVS* command, so behaviour and propagation match.
+    // login with these. Authority is the link itself — only registered peers
+    // reach `on_link`. Targets are network UUIDs or nicks: a locally-present
+    // target is acted on directly (reusing the same primitive as the local SVS*
+    // command); a target on another server is forwarded one hop toward it.
 
     /// Resolve an S2S target token (network UUID or nickname) to a local user.
     fn link_local_target(&self, target: &str) -> Option<Uid> {
@@ -401,13 +400,37 @@ impl Server {
             .or_else(|| self.find_nick(target))
     }
 
+    /// The local link toward the server that owns `target` (a UUID or nick), if the
+    /// user is remote and reachable. `None` when the target is local or unknown.
+    fn link_toward(&self, target: &str) -> Option<Uid> {
+        let uuid = if self.remote_users.contains_key(target) {
+            target.to_string()
+        } else {
+            self.remote_nick.get(&target.to_ascii_lowercase())?.clone()
+        };
+        self.remote_users.get(&uuid).map(|ru| ru.via)
+    }
+
+    /// Route a services command aimed at a non-local `target` one hop onward.
+    /// Returns true if it was forwarded (never back down the link it came from).
+    fn forward_to_target(&self, target: &str, msg: &Message, from: Uid) -> bool {
+        match self.link_toward(target) {
+            Some(v) if v != from => {
+                self.link_out(v, msg.to_wire());
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// `:src SVSNICK <target> <newnick> [ts]` — force a nick change.
-    fn link_svsnick(&mut self, msg: &Message) {
+    fn link_svsnick(&mut self, from: Uid, msg: &Message) {
         if msg.params.len() < 2 {
             return;
         }
         let (target, newnick) = (&msg.params[0], &msg.params[1]);
         let Some(tuid) = self.link_local_target(target) else {
+            self.forward_to_target(target, msg, from);
             return;
         };
         if !valid_nick(newnick)
@@ -420,97 +443,139 @@ impl Server {
     }
 
     /// `:src SVSJOIN <target> <channel>` — force a join.
-    fn link_svsjoin(&mut self, msg: &Message) {
+    fn link_svsjoin(&mut self, from: Uid, msg: &Message) {
         if msg.params.len() < 2 {
             return;
         }
-        if let Some(tuid) = self.link_local_target(&msg.params[0]) {
-            self.join(tuid, &msg.params[1], None);
+        match self.link_local_target(&msg.params[0]) {
+            Some(tuid) => self.join(tuid, &msg.params[1], None),
+            None => {
+                self.forward_to_target(&msg.params[0], msg, from);
+            }
         }
     }
 
     /// `:src SVSPART <target> <channel> [reason]` — force a part.
-    fn link_svspart(&mut self, msg: &Message) {
+    fn link_svspart(&mut self, from: Uid, msg: &Message) {
         if msg.params.len() < 2 {
             return;
         }
-        if let Some(tuid) = self.link_local_target(&msg.params[0]) {
-            let reason = msg
-                .params
-                .get(2)
-                .cloned()
-                .unwrap_or_else(|| "Services forced part".to_string());
-            self.force_part(tuid, &msg.params[1], &reason);
+        match self.link_local_target(&msg.params[0]) {
+            Some(tuid) => {
+                let reason = msg
+                    .params
+                    .get(2)
+                    .cloned()
+                    .unwrap_or_else(|| "Services forced part".to_string());
+                self.force_part(tuid, &msg.params[1], &reason);
+            }
+            None => {
+                self.forward_to_target(&msg.params[0], msg, from);
+            }
         }
     }
 
     /// `:src SVSMODE <target> <modes>` — set a user's modes (e.g. `+r`). Channel
     /// modes travel as (F)MODE, so a `#` target is ignored here.
-    fn link_svsmode(&mut self, msg: &Message) {
+    fn link_svsmode(&mut self, from: Uid, msg: &Message) {
         if msg.params.len() < 2 || msg.params[0].starts_with('#') {
             return;
         }
-        if let Some(tuid) = self.link_local_target(&msg.params[0]) {
-            crate::coremods::core_mode::svs_set_user_modes(self, tuid, &msg.params[1]);
+        match self.link_local_target(&msg.params[0]) {
+            Some(tuid) => {
+                crate::coremods::core_mode::svs_set_user_modes(self, tuid, &msg.params[1])
+            }
+            None => {
+                self.forward_to_target(&msg.params[0], msg, from);
+            }
         }
     }
 
     /// `:src SVSLOGIN <target> <account>` — log a user into (or, with `*`/`0`, out
     /// of) a services account.
-    fn link_svslogin(&mut self, msg: &Message) {
+    fn link_svslogin(&mut self, from: Uid, msg: &Message) {
         if msg.params.len() < 2 {
             return;
         }
-        if let Some(tuid) = self.link_local_target(&msg.params[0]) {
-            let account = &msg.params[1];
-            if account == "*" || account == "0" {
-                self.logout(tuid);
-            } else {
-                self.set_login(tuid, account);
+        match self.link_local_target(&msg.params[0]) {
+            Some(tuid) => {
+                let account = &msg.params[1];
+                if account == "*" || account == "0" {
+                    self.logout(tuid);
+                } else {
+                    self.set_login(tuid, account);
+                }
+            }
+            None => {
+                self.forward_to_target(&msg.params[0], msg, from);
             }
         }
     }
 
     /// `:src SVSLOGOUT <target>` — log a user out of their account.
-    fn link_svslogout(&mut self, msg: &Message) {
+    fn link_svslogout(&mut self, from: Uid, msg: &Message) {
         if let Some(t) = msg.params.first() {
-            if let Some(tuid) = self.link_local_target(t) {
-                self.logout(tuid);
+            match self.link_local_target(t) {
+                Some(tuid) => self.logout(tuid),
+                None => {
+                    self.forward_to_target(t, msg, from);
+                }
             }
         }
     }
 
     /// `:src ENCAP <servermask> <subcommand> [params...]` — a command encapsulated
     /// for specific server(s); services wrap SVS*/SASL this way. If the mask
-    /// matches us, unwrap and dispatch the subcommand as if it arrived directly.
-    /// (Multi-hop forwarding to other servers is still TODO.)
-    fn link_encap(&mut self, via: Uid, msg: &Message) {
+    /// matches us we unwrap and dispatch the subcommand; a `*` mask is also flooded
+    /// onward (minus the origin), and a specific other-server mask is routed to it.
+    fn link_encap(&mut self, from: Uid, msg: &Message) {
         if msg.params.len() < 2 {
             return;
         }
         let mask = msg.params[0].as_str();
-        let for_us = mask == "*" || mask == self.sid || glob_match(mask, &self.name);
-        if for_us {
-            let sub = Message {
-                source: msg.source.clone(),
-                command: msg.params[1].to_ascii_uppercase(),
-                params: msg.params[2..].to_vec(),
-                ctags: String::new(),
-                label: None,
-            };
-            self.on_link(via, &sub);
+        if mask == "*" {
+            self.encap_unwrap(from, msg);
+            self.propagate(&msg.to_wire(), Some(from)); // spanning-tree flood
+        } else if mask == self.sid || glob_match(mask, &self.name) {
+            self.encap_unwrap(from, msg);
+        } else if let Some(v) = self.server_link(mask) {
+            if v != from {
+                self.link_out(v, msg.to_wire());
+            }
         }
+    }
+
+    /// Unwrap an ENCAP whose mask targets us and dispatch the inner subcommand as
+    /// if it had arrived directly on the link.
+    fn encap_unwrap(&mut self, from: Uid, msg: &Message) {
+        let sub = Message {
+            source: msg.source.clone(),
+            command: msg.params[1].to_ascii_uppercase(),
+            params: msg.params[2..].to_vec(),
+            ctags: String::new(),
+            label: None,
+        };
+        self.on_link(from, &sub);
+    }
+
+    /// The local link toward a server named/ided by `mask` (exact SID or name).
+    fn server_link(&self, mask: &str) -> Option<Uid> {
+        self.servers
+            .values()
+            .find(|sv| sv.sid == mask || sv.name.eq_ignore_ascii_case(mask))
+            .map(|sv| sv.via)
     }
 
     /// `:src METADATA <target> <key> :<value>` — services sync metadata onto a
     /// user. We apply `accountname` (login/logout); other keys are accepted and
-    /// ignored for now.
-    fn link_metadata(&mut self, msg: &Message) {
+    /// ignored for now. Forwarded on if the target is remote.
+    fn link_metadata(&mut self, from: Uid, msg: &Message) {
         if msg.params.len() < 3 {
             return;
         }
         let (target, key, value) = (&msg.params[0], &msg.params[1], &msg.params[2]);
         let Some(tuid) = self.link_local_target(target) else {
+            self.forward_to_target(target, msg, from);
             return;
         };
         if key == "accountname" {
@@ -550,12 +615,14 @@ impl Server {
     /// A SASL message from services: `:<svcsid> SASL <client-uuid> <type> …`.
     ///   `C <data>` → relay a server challenge to the client as `AUTHENTICATE`;
     ///   `D S [account]` → success (log in + 900/903); `D <other>` → fail (904).
-    fn link_sasl(&mut self, msg: &Message) {
+    fn link_sasl(&mut self, from: Uid, msg: &Message) {
         if msg.params.len() < 2 {
             return;
         }
         let Some(&uid) = self.uuid_local.get(&msg.params[0]) else {
-            return; // not one of our clients
+            // not our client — route toward the server that owns them
+            self.forward_to_target(&msg.params[0], msg, from);
+            return;
         };
         match msg.params[1].as_str() {
             "C" => {
