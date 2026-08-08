@@ -23,7 +23,7 @@ use std::net::{SocketAddr, TcpStream};
 
 use std::collections::HashSet;
 
-use crate::channels::{Ban, Channel, Member, Topic};
+use crate::channels::{glob_match, Ban, Channel, Member, Topic};
 use crate::message::Message;
 use crate::server::{now, Server};
 use crate::socketengine::OutSink;
@@ -169,6 +169,8 @@ impl Server {
             "SVSMODE" if registered => self.link_svsmode(msg),
             "SVSLOGIN" if registered => self.link_svslogin(msg),
             "SVSLOGOUT" if registered => self.link_svslogout(msg),
+            "ENCAP" if registered => self.link_encap(uid, msg),
+            "METADATA" if registered => self.link_metadata(msg),
             "BURST" => {
                 if let Some(l) = self.links.get_mut(&uid) {
                     l.bursting = true;
@@ -473,6 +475,47 @@ impl Server {
         if let Some(t) = msg.params.first() {
             if let Some(tuid) = self.link_local_target(t) {
                 self.logout(tuid);
+            }
+        }
+    }
+
+    /// `:src ENCAP <servermask> <subcommand> [params...]` — a command encapsulated
+    /// for specific server(s); services wrap SVS*/SASL this way. If the mask
+    /// matches us, unwrap and dispatch the subcommand as if it arrived directly.
+    /// (Multi-hop forwarding to other servers is still TODO.)
+    fn link_encap(&mut self, via: Uid, msg: &Message) {
+        if msg.params.len() < 2 {
+            return;
+        }
+        let mask = msg.params[0].as_str();
+        let for_us = mask == "*" || mask == self.sid || glob_match(mask, &self.name);
+        if for_us {
+            let sub = Message {
+                source: msg.source.clone(),
+                command: msg.params[1].to_ascii_uppercase(),
+                params: msg.params[2..].to_vec(),
+                ctags: String::new(),
+            };
+            self.on_link(via, &sub);
+        }
+    }
+
+    /// `:src METADATA <target> <key> :<value>` — services sync metadata onto a
+    /// user. We apply `accountname` (login/logout); other keys are accepted and
+    /// ignored for now.
+    fn link_metadata(&mut self, msg: &Message) {
+        if msg.params.len() < 3 {
+            return;
+        }
+        let (target, key, value) = (&msg.params[0], &msg.params[1], &msg.params[2]);
+        let Some(tuid) = self.link_local_target(target) else {
+            return;
+        };
+        if key == "accountname" {
+            if value.is_empty() || value == "*" {
+                self.logout(tuid);
+            } else {
+                self.set_login(tuid, value);
             }
         }
     }
