@@ -127,11 +127,6 @@ pub fn commands() -> Vec<Box<dyn Command>> {
     ]
 }
 
-/// CHATHISTORY — replay recent channel messages (draft/chathistory), leveraging
-/// BATCH. `CHATHISTORY <LATEST|BEFORE|AFTER> <#chan> <selector> <limit>`, where
-/// `<selector>` is `*`, `timestamp=<iso>` or `msgid=<id>`. Only members get a
-/// channel's history; the reply is a `chathistory` batch of the original
-/// PRIVMSG/NOTICE lines, each carrying its stored server-time + msgid.
 /// Canonical CHATHISTORY key for a DM between two nicks (order-independent; the
 /// `\0` prefix keeps it from ever colliding with a `#channel` key).
 fn dm_key(a: &str, b: &str) -> String {
@@ -143,6 +138,11 @@ fn dm_key(a: &str, b: &str) -> String {
     }
 }
 
+/// CHATHISTORY — replay recent messages (draft/chathistory), leveraging BATCH.
+/// `CHATHISTORY <LATEST|BEFORE|AFTER|AROUND|BETWEEN> <#chan|nick> <selector..>
+/// <limit>`; a `<selector>` is `*`, `timestamp=<iso>` or `msgid=<id>`. Channel
+/// history is members-only; a nick target replays that DM conversation. The reply
+/// is a `chathistory` batch of the original lines with their server-time + msgid.
 struct ChatHistory;
 impl Command for ChatHistory {
     fn name(&self) -> &'static str {
@@ -592,7 +592,7 @@ fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool) -> CmdResu
                 &prefix,
                 cmd,
                 target,
-                &text,
+                text,
                 &msgid,
             );
         }
