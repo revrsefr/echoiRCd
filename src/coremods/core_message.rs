@@ -153,6 +153,71 @@ impl Command for ChatHistory {
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         let sub = params[0].to_ascii_uppercase();
+        // CHATHISTORY TARGETS <t1> <t2> <limit> — list conversations with activity
+        // in the window, newest-in-window timestamp each. No target param.
+        if sub == "TARGETS" {
+            let bound = |i: usize, dflt: u64| {
+                params
+                    .get(i)
+                    .and_then(|s| s.strip_prefix("timestamp="))
+                    .and_then(parse_iso)
+                    .unwrap_or(dflt)
+            };
+            let (a, b) = (bound(1, 0), bound(2, u64::MAX));
+            let (lo, hi) = (a.min(b), a.max(b));
+            let limit = params
+                .get(3)
+                .and_then(|l| l.parse::<usize>().ok())
+                .unwrap_or(50)
+                .clamp(1, HISTORY_CAP);
+            let me = s
+                .users
+                .get(&uid)
+                .map(|u| u.nick.to_ascii_lowercase())
+                .unwrap_or_default();
+            let mut targets: Vec<(String, u64)> = Vec::new();
+            for (key, buf) in &s.history {
+                let Some(ts) = buf
+                    .iter()
+                    .rev()
+                    .find(|m| m.ts >= lo && m.ts <= hi)
+                    .map(|m| m.ts)
+                else {
+                    continue;
+                };
+                if key.starts_with('#') {
+                    if s.is_member(uid, key) {
+                        let name = buf.back().map(|m| m.target.clone()).unwrap_or_else(|| key.clone());
+                        targets.push((name, ts));
+                    }
+                } else if let Some(rest) = key.strip_prefix('\0') {
+                    let p: Vec<&str> = rest.split('\0').collect();
+                    if p.len() == 2 && (p[0] == me || p[1] == me) {
+                        let other = if p[0] == me { p[1] } else { p[0] };
+                        targets.push((other.to_string(), ts));
+                    }
+                }
+            }
+            targets.sort_by_key(|(_, ts)| *ts);
+            let start = targets.len().saturating_sub(limit);
+            let bref = s.next_msgid().replace('-', "");
+            s.send(
+                uid,
+                format!(":{} BATCH +{bref} draft/chathistory-targets", s.name),
+            );
+            for (t, ts) in &targets[start..] {
+                s.send(
+                    uid,
+                    format!(
+                        "@batch={bref} :{} CHATHISTORY TARGETS {t} {}",
+                        s.name,
+                        iso_time(*ts)
+                    ),
+                );
+            }
+            s.send(uid, format!(":{} BATCH -{bref}", s.name));
+            return CmdResult::Ok;
+        }
         let target = params[1].clone();
         // channel target → channel key (members only); a nick → the DM pair key
         // (the requester is inherently part of it, so no membership check)
