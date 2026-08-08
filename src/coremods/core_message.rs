@@ -132,6 +132,17 @@ pub fn commands() -> Vec<Box<dyn Command>> {
 /// `<selector>` is `*`, `timestamp=<iso>` or `msgid=<id>`. Only members get a
 /// channel's history; the reply is a `chathistory` batch of the original
 /// PRIVMSG/NOTICE lines, each carrying its stored server-time + msgid.
+/// Canonical CHATHISTORY key for a DM between two nicks (order-independent; the
+/// `\0` prefix keeps it from ever colliding with a `#channel` key).
+fn dm_key(a: &str, b: &str) -> String {
+    let (a, b) = (a.to_ascii_lowercase(), b.to_ascii_lowercase());
+    if a <= b {
+        format!("\0{a}\0{b}")
+    } else {
+        format!("\0{b}\0{a}")
+    }
+}
+
 struct ChatHistory;
 impl Command for ChatHistory {
     fn name(&self) -> &'static str {
@@ -143,7 +154,19 @@ impl Command for ChatHistory {
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         let sub = params[0].to_ascii_uppercase();
         let target = params[1].clone();
-        let key = target.to_ascii_lowercase();
+        // channel target → channel key (members only); a nick → the DM pair key
+        // (the requester is inherently part of it, so no membership check)
+        let is_channel = target.starts_with('#');
+        let key = if is_channel {
+            target.to_ascii_lowercase()
+        } else {
+            let me = s
+                .users
+                .get(&uid)
+                .map(|u| u.nick.clone())
+                .unwrap_or_default();
+            dm_key(&me, &target)
+        };
         // BETWEEN takes two selectors then the limit; the rest take one + the limit
         let (sel, sel2, limit_s) = if sub == "BETWEEN" {
             (
@@ -161,7 +184,7 @@ impl Command for ChatHistory {
 
         let bref = s.next_msgid().replace('-', "");
         let mut lines: Vec<String> = Vec::new();
-        if s.is_member(uid, &key) {
+        if !is_channel || s.is_member(uid, &key) {
             if let Some(buf) = s.history.get(&key) {
                 // Resolve the selector to a reference position. `msgid=` matches an
                 // exact buffer index (so same-second messages aren't lost);
@@ -232,11 +255,12 @@ impl Command for ChatHistory {
                 };
                 for m in picked {
                     lines.push(format!(
-                        "@time={};msgid={};batch={bref} :{} {} {target} :{}",
+                        "@time={};msgid={};batch={bref} :{} {} {} :{}",
                         iso_time(m.ts),
                         m.msgid,
                         m.prefix,
                         m.verb,
+                        m.target,
                         m.text
                     ));
                 }
@@ -440,7 +464,7 @@ fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool) -> CmdResu
         let line = format!(":{prefix} {cmd} {target} :{body}");
         let ctags = s.line_ctags.clone();
         let msgid = s.next_msgid(); // one id shared by every recipient of this message
-        s.store_history(&key, &prefix, cmd, &body, &msgid); // for CHATHISTORY
+        s.store_history(&key, &prefix, cmd, target, &body, &msgid); // for CHATHISTORY
         let members: Vec<Uid> = s
             .channels
             .get(&key)
@@ -561,6 +585,16 @@ fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool) -> CmdResu
         let msgid = s.next_msgid();
         if !silenced {
             s.send_tagged(tuid, uid, &ctags, &msgid, &pm);
+            // store for CHATHISTORY under the canonical pair key (both parties share it)
+            let sender_nick = prefix.split('!').next().unwrap_or_default();
+            s.store_history(
+                &dm_key(sender_nick, target),
+                &prefix,
+                cmd,
+                target,
+                &text,
+                &msgid,
+            );
         }
         if s.users
             .get(&uid)

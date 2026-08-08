@@ -87,12 +87,13 @@ pub fn parse_iso(s: &str) -> Option<u64> {
     Some((days * 86400 + h * 3600 + mi * 60 + se).max(0) as u64)
 }
 
-/// One stored channel message, replayed by CHATHISTORY.
+/// One stored message, replayed by CHATHISTORY.
 pub struct HistMsg {
     pub ts: u64,
     pub msgid: String,
     pub prefix: String,     // sender's nick!user@host at send time
     pub verb: &'static str, // "PRIVMSG" or "NOTICE"
+    pub target: String,     // original target (channel, or the DM recipient)
     pub text: String,
 }
 
@@ -229,6 +230,7 @@ impl Server {
         key: &str,
         prefix: &str,
         verb: &'static str,
+        target: &str,
         text: &str,
         msgid: &str,
     ) {
@@ -238,6 +240,7 @@ impl Server {
             msgid: msgid.to_string(),
             prefix: prefix.to_string(),
             verb,
+            target: target.to_string(),
             text: text.to_string(),
         });
         while buf.len() > HISTORY_CAP {
