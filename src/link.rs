@@ -27,7 +27,7 @@ use crate::channels::{Ban, Channel, Member, Topic};
 use crate::message::Message;
 use crate::server::{now, Server};
 use crate::socketengine::OutSink;
-use crate::users::User;
+use crate::users::{valid_nick, User};
 use crate::Uid;
 
 /// A local server-link connection (one hop away). Distinct from a client `User`.
@@ -161,6 +161,14 @@ impl Server {
             "KICK" if registered => self.link_kick_recv(uid, msg),
             "MODE" | "FMODE" if registered => self.link_mode_recv(uid, msg),
             "FJOIN" if registered => self.link_fjoin_recv(uid, msg),
+            // services (SVS*) enforcement + account login, driven by a linked
+            // services pseudoserver
+            "SVSNICK" if registered => self.link_svsnick(msg),
+            "SVSJOIN" if registered => self.link_svsjoin(msg),
+            "SVSPART" if registered => self.link_svspart(msg),
+            "SVSMODE" if registered => self.link_svsmode(msg),
+            "SVSLOGIN" if registered => self.link_svslogin(msg),
+            "SVSLOGOUT" if registered => self.link_svslogout(msg),
             "BURST" => {
                 if let Some(l) = self.links.get_mut(&uid) {
                     l.bursting = true;
@@ -371,6 +379,101 @@ impl Server {
     pub fn send_to_remote(&self, sender: Uid, target_uuid: &str, via: Uid, cmd: &str, text: &str) {
         if let Some(u) = self.users.get(&sender) {
             self.link_out(via, format!(":{} {cmd} {target_uuid} :{text}", u.uuid));
+        }
+    }
+
+    // --- services (SVS*) over S2S ---------------------------------------------
+    // A linked services pseudoserver enforces nick/join/part/mode and account
+    // login on our users with these. Authority is the link itself — only
+    // registered peers reach `on_link`. Targets are network UUIDs or nicks; we
+    // act only on locally-present targets (multi-hop forwarding is still TODO,
+    // like the SVSLOGIN/SASL note in the module header). Each reuses the same
+    // primitive as the local SVS* command, so behaviour and propagation match.
+
+    /// Resolve an S2S target token (network UUID or nickname) to a local user.
+    fn link_local_target(&self, target: &str) -> Option<Uid> {
+        self.uuid_local
+            .get(target)
+            .copied()
+            .or_else(|| self.find_nick(target))
+    }
+
+    /// `:src SVSNICK <target> <newnick> [ts]` — force a nick change.
+    fn link_svsnick(&mut self, msg: &Message) {
+        if msg.params.len() < 2 {
+            return;
+        }
+        let (target, newnick) = (&msg.params[0], &msg.params[1]);
+        let Some(tuid) = self.link_local_target(target) else {
+            return;
+        };
+        if !valid_nick(newnick)
+            || self.find_nick(newnick).is_some()
+            || self.remote_nick.contains_key(&newnick.to_ascii_lowercase())
+        {
+            return; // collision / invalid — services should pick a free nick
+        }
+        self.set_nick(tuid, newnick);
+    }
+
+    /// `:src SVSJOIN <target> <channel>` — force a join.
+    fn link_svsjoin(&mut self, msg: &Message) {
+        if msg.params.len() < 2 {
+            return;
+        }
+        if let Some(tuid) = self.link_local_target(&msg.params[0]) {
+            self.join(tuid, &msg.params[1], None);
+        }
+    }
+
+    /// `:src SVSPART <target> <channel> [reason]` — force a part.
+    fn link_svspart(&mut self, msg: &Message) {
+        if msg.params.len() < 2 {
+            return;
+        }
+        if let Some(tuid) = self.link_local_target(&msg.params[0]) {
+            let reason = msg
+                .params
+                .get(2)
+                .cloned()
+                .unwrap_or_else(|| "Services forced part".to_string());
+            self.force_part(tuid, &msg.params[1], &reason);
+        }
+    }
+
+    /// `:src SVSMODE <target> <modes>` — set a user's modes (e.g. `+r`). Channel
+    /// modes travel as (F)MODE, so a `#` target is ignored here.
+    fn link_svsmode(&mut self, msg: &Message) {
+        if msg.params.len() < 2 || msg.params[0].starts_with('#') {
+            return;
+        }
+        if let Some(tuid) = self.link_local_target(&msg.params[0]) {
+            crate::coremods::core_mode::svs_set_user_modes(self, tuid, &msg.params[1]);
+        }
+    }
+
+    /// `:src SVSLOGIN <target> <account>` — log a user into (or, with `*`/`0`, out
+    /// of) a services account.
+    fn link_svslogin(&mut self, msg: &Message) {
+        if msg.params.len() < 2 {
+            return;
+        }
+        if let Some(tuid) = self.link_local_target(&msg.params[0]) {
+            let account = &msg.params[1];
+            if account == "*" || account == "0" {
+                self.logout(tuid);
+            } else {
+                self.set_login(tuid, account);
+            }
+        }
+    }
+
+    /// `:src SVSLOGOUT <target>` — log a user out of their account.
+    fn link_svslogout(&mut self, msg: &Message) {
+        if let Some(t) = msg.params.first() {
+            if let Some(tuid) = self.link_local_target(t) {
+                self.logout(tuid);
+            }
         }
     }
 
