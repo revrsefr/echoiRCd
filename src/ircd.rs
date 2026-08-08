@@ -66,9 +66,13 @@ pub struct Ircd {
 }
 
 impl Ircd {
-    pub fn new(cfg: Config, event_tx: Sender<Event>) -> Ircd {
+    pub fn new(
+        cfg: Config,
+        event_tx: Sender<Event>,
+        conn_counter: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    ) -> Ircd {
         Ircd {
-            server: Server::new(cfg, event_tx),
+            server: Server::new(cfg, event_tx, conn_counter),
             commands: command_table(),
             modules: crate::modules::default_modules(),
         }

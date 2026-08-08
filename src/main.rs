@@ -44,10 +44,14 @@ fn main() {
         cfg.servername
     );
 
+    // one uid counter shared by every listener (and by CONNECT) so ids stay unique
+    let counter = Arc::new(AtomicU64::new(1));
+
     let (tx, rx) = mpsc::channel();
     let core_cfg = cfg.clone();
     let core_tx = tx.clone(); // the core self-injects events (DNS results)
-    let core = thread::spawn(move || Ircd::new(core_cfg, core_tx).run(rx));
+    let core_counter = counter.clone();
+    let core = thread::spawn(move || Ircd::new(core_cfg, core_tx, core_counter).run(rx));
 
     // background timer: drives ping/idle timeouts
     let tick_tx = tx.clone();
@@ -57,9 +61,6 @@ fn main() {
             break;
         }
     });
-
-    // one uid counter shared by every listener so ids stay unique
-    let counter = Arc::new(AtomicU64::new(1));
 
     // optional TLS listener (bind_tls + tls_cert + tls_key). A cert/bind problem
     // disables TLS but never takes the plaintext listener down.

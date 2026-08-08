@@ -34,6 +34,7 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(Eline),
         Box::new(Shun),
         Box::new(Qline),
+        Box::new(Connect),
         Box::new(ChgHost),
         Box::new(ChgIdent),
         Box::new(SetHost),
@@ -668,6 +669,48 @@ impl Command for Qline {
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         do_xline(s, uid, params, XKind::Qline)
+    }
+}
+
+/// CONNECT — dial a configured server link on demand. `CONNECT <servername>`.
+struct Connect;
+impl Command for Connect {
+    fn name(&self) -> &'static str {
+        "CONNECT"
+    }
+    fn min_params(&self) -> usize {
+        1
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        if !require_oper(s, uid) {
+            return CmdResult::Fail;
+        }
+        let name = &params[0];
+        let Some(b) = s
+            .link_blocks
+            .iter()
+            .find(|b| b.name.eq_ignore_ascii_case(name))
+            .cloned()
+        else {
+            onotice(s, uid, &format!("CONNECT: no link block named {name}"));
+            return CmdResult::Fail;
+        };
+        if s.servers
+            .values()
+            .any(|sv| sv.name.eq_ignore_ascii_case(&b.name))
+        {
+            onotice(s, uid, &format!("CONNECT: {} is already linked", b.name));
+            return CmdResult::Fail;
+        }
+        let addr = format!("{}:{}", b.ip, b.port);
+        let (tx, counter) = (s.event_tx.clone(), s.conn_counter.clone());
+        std::thread::spawn(move || crate::socketengine::connect_link(&addr, tx, counter));
+        let by = oper_nick(s, uid);
+        s.snotice(&format!(
+            "{by} used CONNECT to {} ({}:{})",
+            b.name, b.ip, b.port
+        ));
+        CmdResult::Ok
     }
 }
 

@@ -8,7 +8,9 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{SocketAddr, TcpStream};
+use std::sync::atomic::AtomicU64;
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -148,10 +150,11 @@ pub struct Server {
     pub label_capture: RefCell<Option<(Uid, Vec<String>)>>,
     pub history: HashMap<String, VecDeque<HistMsg>>, // channel key -> recent messages (CHATHISTORY)
     pub event_tx: Sender<Event>,                     // self-inject events (DNS results)
+    pub conn_counter: Arc<AtomicU64>,                // mints connection uids (for CONNECT dials)
 }
 
 impl Server {
-    pub fn new(cfg: Config, event_tx: Sender<Event>) -> Server {
+    pub fn new(cfg: Config, event_tx: Sender<Event>, conn_counter: Arc<AtomicU64>) -> Server {
         Server {
             name: cfg.servername,
             network: cfg.network,
@@ -191,6 +194,7 @@ impl Server {
             label_capture: RefCell::new(None),
             history: HashMap::new(),
             event_tx,
+            conn_counter,
         }
     }
 
@@ -783,7 +787,7 @@ mod tests {
 
     fn srv() -> Server {
         let (tx, _rx) = mpsc::channel();
-        Server::new(Config::default(), tx)
+        Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)))
     }
 
     #[test]
