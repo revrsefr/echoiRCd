@@ -144,9 +144,6 @@ pub struct Server {
     pub dnsbl_reason: String,                      // ban reason on a DNSBL hit
     pub sasl_server: String,                       // services server that handles SASL
     pub webirc: Vec<(String, String, String)>,     // web gateways: (password, name, ip-mask)
-    pub sts_duration: u64,                         // IRCv3 STS: TLS-only duration (0 = off)
-    pub sts_port: u16,                             // STS TLS port advertised to insecure clients
-    pub sts_preload: bool,                         // STS preload flag
     // labeled-response: while Some((uid, buf)), that client's own responses are
     // diverted into `buf` instead of the socket, so `on_line` can wrap them with
     // the command's `label` (single tag, BATCH, or ACK). RefCell because the
@@ -196,9 +193,6 @@ impl Server {
             dnsbl_reason: cfg.dnsbl_reason,
             sasl_server: cfg.sasl_server,
             webirc: cfg.webirc,
-            sts_duration: cfg.sts_duration,
-            sts_port: cfg.sts_port,
-            sts_preload: cfg.sts_preload,
             label_capture: RefCell::new(None),
             history: HashMap::new(),
             read_markers: HashMap::new(),
@@ -253,26 +247,6 @@ impl Server {
         });
         while buf.len() > HISTORY_CAP {
             buf.pop_front();
-        }
-    }
-
-    /// The IRCv3 `sts=` cap value for a connection, or `None` when STS is off.
-    /// Insecure clients get `port=<tlsport>` (reconnect over TLS); secure clients
-    /// get `duration=<n>[,preload]` (remember to always use TLS).
-    pub fn sts_token(&self, secure: bool) -> Option<String> {
-        if self.sts_duration == 0 {
-            return None;
-        }
-        if secure {
-            let mut v = format!("sts=duration={}", self.sts_duration);
-            if self.sts_preload {
-                v.push_str(",preload");
-            }
-            Some(v)
-        } else if self.sts_port != 0 {
-            Some(format!("sts=port={}", self.sts_port))
-        } else {
-            None
         }
     }
 

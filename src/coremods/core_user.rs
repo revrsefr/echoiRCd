@@ -124,12 +124,14 @@ impl Command for Cap {
                     u.cap = true; // hold registration until CAP END
                     u.cap_302 |= cap302;
                 }
-                let mut caps = Caps::ls_line(cap302, secure);
-                if let Some(sts) = s.sts_token(secure) {
-                    caps.push(' ');
-                    caps.push_str(&sts); // IRCv3 STS — advertised, not REQ-able
-                }
-                s.send(uid, format!(":{} CAP {who} LS :{caps}", s.name));
+                s.send(
+                    uid,
+                    format!(
+                        ":{} CAP {who} LS :{}",
+                        s.name,
+                        Caps::ls_line(cap302, secure)
+                    ),
+                );
             }
             "REQ" => {
                 if let Some(u) = s.users.get_mut(&uid) {
