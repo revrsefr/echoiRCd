@@ -78,6 +78,9 @@ impl Command for Away {
     fn name(&self) -> &'static str {
         "AWAY"
     }
+    fn before_reg(&self) -> bool {
+        true // draft/pre-away: clients may set AWAY during CAP negotiation
+    }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         let msg = params.first().cloned().filter(|m| !m.is_empty());
         let now_away = msg.is_some();
