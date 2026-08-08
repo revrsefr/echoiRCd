@@ -106,9 +106,27 @@ impl Config {
             conf_path: path.to_string(),
             ..Config::default()
         };
-        let Ok(text) = std::fs::read_to_string(path) else {
-            return c;
+        if let Ok(text) = std::fs::read_to_string(path) {
+            Self::parse_into(&mut c, &text);
+        }
+        c
+    }
+
+    /// Like [`load`](Config::load) but returns `None` if the file can't be read,
+    /// so REHASH can keep the running config instead of resetting to defaults —
+    /// the way InspIRCd keeps the old config when a reload fails.
+    pub fn try_load(path: &str) -> Option<Config> {
+        let text = std::fs::read_to_string(path).ok()?;
+        let mut c = Config {
+            conf_path: path.to_string(),
+            ..Config::default()
         };
+        Self::parse_into(&mut c, &text);
+        Some(c)
+    }
+
+    /// Parse `key = value` lines into `c`; unknown keys and comments are ignored.
+    fn parse_into(c: &mut Config, text: &str) {
         for line in text.lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
@@ -204,6 +222,5 @@ impl Config {
                 _ => {}
             }
         }
-        c
     }
 }

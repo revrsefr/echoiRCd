@@ -9,6 +9,7 @@ pub mod core_info;
 pub mod core_message;
 pub mod core_mode;
 pub mod core_oper;
+pub mod core_rehash;
 pub mod core_user;
 pub mod core_watch;
 
@@ -24,6 +25,7 @@ pub fn command_table() -> HashMap<&'static str, Box<dyn Command>> {
         .chain(core_message::commands())
         .chain(core_mode::commands())
         .chain(core_oper::commands())
+        .chain(core_rehash::commands())
         .chain(core_info::commands())
         .chain(core_extra::commands())
         .chain(core_watch::commands())

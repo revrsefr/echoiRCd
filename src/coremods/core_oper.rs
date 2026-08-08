@@ -3,7 +3,6 @@
 
 use crate::channels::Topic;
 use crate::command::{CmdResult, Command};
-use crate::config::Config;
 use crate::coremods::core_mode::apply_mode;
 use crate::module::Hook;
 use crate::numeric::*;
@@ -19,7 +18,6 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(Wallops),
         Box::new(SvsLogin),
         Box::new(SvsLogout),
-        Box::new(Rehash),
         Box::new(GlobOps),
         Box::new(SaJoin),
         Box::new(SaPart),
@@ -209,29 +207,6 @@ impl Command for Wallops {
             .map(|u| u.nick.clone())
             .unwrap_or_default();
         s.wallops(&from, &params[0]);
-        CmdResult::Ok
-    }
-}
-
-/// REHASH — reload the config file (MOTD, oper blocks, cloak key).
-struct Rehash;
-impl Command for Rehash {
-    fn name(&self) -> &'static str {
-        "REHASH"
-    }
-    fn handle(&self, s: &mut Server, uid: Uid, _params: &[String]) -> CmdResult {
-        if !require_oper(s, uid) {
-            return CmdResult::Fail;
-        }
-        let fresh = Config::load(&s.conf_path);
-        s.motd = fresh.motd;
-        s.opers = fresh.opers;
-        s.cloak_key = fresh.cloak_key;
-        s.censor = fresh.censor;
-        s.amu = fresh.amu;
-        s.resolve_hosts = fresh.resolve_hosts;
-        s.use_resolved_host = fresh.use_resolved_host;
-        s.numeric(uid, RPL_REHASHING, &format!("{} :Rehashing", s.conf_path));
         CmdResult::Ok
     }
 }
