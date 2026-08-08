@@ -83,6 +83,7 @@ static CHAN_MODES: &[&(dyn ChanMode + Sync)] = &[
     &JOINFLOOD,
     &NICKFLOOD,
     &REDIRECT,
+    &CHANHISTORY,
 ];
 
 // --- prefix modes (+q/+a/+o/+h/+v): a per-member rank, needs a nick ----------
@@ -384,6 +385,49 @@ impl ChanMode for Limit {
         } else {
             if let Some(c) = s.channels.get_mut(key) {
                 c.modes.limit = None;
+            }
+            Applied::Yes(None)
+        }
+    }
+}
+
+// --- +H chanhistory: replay recent messages to joiners ----------------------
+
+struct ChanHistory;
+static CHANHISTORY: ChanHistory = ChanHistory;
+impl ChanMode for ChanHistory {
+    fn letter(&self) -> char {
+        'H'
+    }
+    fn wants_param(&self, adding: bool) -> bool {
+        adding // +H <lines>[:<secs>]; -H takes nothing
+    }
+    fn apply(
+        &self,
+        s: &mut Server,
+        _chan: &str,
+        key: &str,
+        _uid: Uid,
+        adding: bool,
+        param: Option<&str>,
+    ) -> Applied {
+        if adding {
+            let Some(p) = param else {
+                return Applied::No;
+            };
+            let (lines_s, secs_s) = p.split_once(':').unwrap_or((p, "0"));
+            let Some(lines) = lines_s.parse::<u32>().ok().filter(|&n| n > 0) else {
+                return Applied::No;
+            };
+            let lines = lines.min(crate::server::HISTORY_CAP as u32);
+            let secs = secs_s.parse::<u64>().unwrap_or(0);
+            if let Some(c) = s.channels.get_mut(key) {
+                c.modes.history = Some((lines, secs));
+            }
+            Applied::Yes(Some(format!("{lines}:{secs}")))
+        } else {
+            if let Some(c) = s.channels.get_mut(key) {
+                c.modes.history = None;
             }
             Applied::Yes(None)
         }

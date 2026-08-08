@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::module::Hook;
 use crate::numeric::*;
-use crate::server::{now, Server};
+use crate::server::{iso_time, now, HistMsg, Server};
 use crate::Uid;
 
 /// Per-member prefix modes (+q/+a/+o/+h/+v). Flag modes live in [`ChanModes`].
@@ -123,29 +123,30 @@ pub struct Rate {
 /// Channel modes other than the per-member prefixes.
 #[derive(Default)]
 pub struct ChanModes {
-    pub moderated: bool,          // +m — only +o/+v may speak
-    pub topic_ops: bool,          // +t — only ops may set the topic
-    pub no_external: bool,        // +n — must be a member to message it
-    pub invite_only: bool,        // +i
-    pub secret: bool,             // +s
-    pub key: Option<String>,      // +k <key>
-    pub limit: Option<u32>,       // +l <n>
-    pub secure_only: bool,        // +z — only TLS-connected users may join
-    pub private: bool,            // +p — private (hidden from WHOIS channel list)
-    pub oper_only: bool,          // +O — only IRC operators may join
-    pub no_nick: bool,            // +N — members can't change nick while here
-    pub no_ctcp: bool,            // +C — block CTCP to the channel
-    pub no_notice: bool,          // +T — block NOTICEs to the channel
-    pub no_color: bool,           // +c — reject messages with formatting/colour
-    pub strip_color: bool,        // +S — strip formatting/colour from messages
-    pub reg_only: bool,           // +R — only logged-in (account) users may join
-    pub reg_moderated: bool,      // +M — only logged-in users may speak
-    pub censor: bool,             // +G — replace configured bad words
-    pub auditorium: bool,         // +u — hide non-ops from non-ops
-    pub flood: Option<MsgFlood>,  // +f
-    pub joinflood: Option<Rate>,  // +j
-    pub nickflood: Option<Rate>,  // +F
-    pub redirect: Option<String>, // +L <#target> — when full, send there
+    pub moderated: bool,             // +m — only +o/+v may speak
+    pub topic_ops: bool,             // +t — only ops may set the topic
+    pub no_external: bool,           // +n — must be a member to message it
+    pub invite_only: bool,           // +i
+    pub secret: bool,                // +s
+    pub key: Option<String>,         // +k <key>
+    pub limit: Option<u32>,          // +l <n>
+    pub secure_only: bool,           // +z — only TLS-connected users may join
+    pub private: bool,               // +p — private (hidden from WHOIS channel list)
+    pub oper_only: bool,             // +O — only IRC operators may join
+    pub no_nick: bool,               // +N — members can't change nick while here
+    pub no_ctcp: bool,               // +C — block CTCP to the channel
+    pub no_notice: bool,             // +T — block NOTICEs to the channel
+    pub no_color: bool,              // +c — reject messages with formatting/colour
+    pub strip_color: bool,           // +S — strip formatting/colour from messages
+    pub reg_only: bool,              // +R — only logged-in (account) users may join
+    pub reg_moderated: bool,         // +M — only logged-in users may speak
+    pub censor: bool,                // +G — replace configured bad words
+    pub auditorium: bool,            // +u — hide non-ops from non-ops
+    pub flood: Option<MsgFlood>,     // +f
+    pub joinflood: Option<Rate>,     // +j
+    pub nickflood: Option<Rate>,     // +F
+    pub redirect: Option<String>,    // +L <#target> — when full, send there
+    pub history: Option<(u32, u64)>, // +H <lines>:<secs> — replay recent messages to joiners
 }
 
 impl ChanModes {
@@ -217,6 +218,9 @@ impl ChanModes {
         if self.redirect.is_some() {
             s.push('L');
         }
+        if self.history.is_some() {
+            s.push('H');
+        }
         if params {
             if let Some(k) = &self.key {
                 s.push(' ');
@@ -239,6 +243,9 @@ impl ChanModes {
             if let Some(t) = &self.redirect {
                 s.push(' ');
                 s.push_str(t);
+            }
+            if let Some((n, t)) = &self.history {
+                s.push_str(&format!(" {n}:{t}"));
             }
         }
         s
@@ -518,8 +525,62 @@ impl Server {
             self.numeric(uid, RPL_TOPIC, &format!("{name} :{text}"));
         }
         self.send_names(uid, &key);
+        self.replay_chanhistory(uid, &key); // +H: replay recent messages to the joiner
         self.propagate_join(uid, name); // tell linked servers this user joined
         self.events.push_back(Hook::Join(uid, key));
+    }
+
+    /// +H chanhistory: replay a channel's recent messages to a user who just
+    /// joined — the last `<lines>` (within `<secs>`, 0 = no limit) from the store,
+    /// wrapped in a `chathistory` batch for batch-capable clients.
+    fn replay_chanhistory(&mut self, uid: Uid, key: &str) {
+        let Some((lines, secs)) = self.channels.get(key).and_then(|c| c.modes.history) else {
+            return;
+        };
+        let Some(name) = self.channels.get(key).map(|c| c.name.clone()) else {
+            return;
+        };
+        let batch = self.users.get(&uid).map(|u| u.caps.batch).unwrap_or(false);
+        let cutoff = if secs > 0 {
+            now().saturating_sub(secs)
+        } else {
+            0
+        };
+        let bref = if batch {
+            Some(self.next_msgid().replace('-', ""))
+        } else {
+            None
+        };
+        let out: Vec<String> = match self.history.get(key) {
+            Some(buf) => {
+                let mut recent: Vec<&HistMsg> = buf.iter().filter(|m| m.ts >= cutoff).collect();
+                let start = recent.len().saturating_sub(lines as usize);
+                recent.drain(..start);
+                recent
+                    .iter()
+                    .map(|m| {
+                        let mut tags = format!("time={};msgid={}", iso_time(m.ts), m.msgid);
+                        if let Some(b) = &bref {
+                            tags.push_str(&format!(";batch={b}"));
+                        }
+                        format!("@{tags} :{} {} {name} :{}", m.prefix, m.verb, m.text)
+                    })
+                    .collect()
+            }
+            None => return,
+        };
+        if out.is_empty() {
+            return;
+        }
+        if let Some(b) = &bref {
+            self.send(uid, format!(":{} BATCH +{b} chathistory {name}", self.name));
+        }
+        for l in out {
+            self.send(uid, l);
+        }
+        if let Some(b) = &bref {
+            self.send(uid, format!(":{} BATCH -{b}", self.name));
+        }
     }
 
     pub fn send_names(&self, uid: Uid, key: &str) {
