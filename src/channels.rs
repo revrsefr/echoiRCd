@@ -5,8 +5,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::module::Hook;
+use crate::modules::chathistory::{HistMsg, History};
 use crate::numeric::*;
-use crate::server::{iso_time, now, HistMsg, Server};
+use crate::server::{iso_time, now, Server};
 use crate::Uid;
 
 /// Per-member prefix modes (+q/+a/+o/+h/+v). Flag modes live in [`ChanModes`].
@@ -551,7 +552,7 @@ impl Server {
         } else {
             None
         };
-        let out: Vec<String> = match self.history.get(key) {
+        let out: Vec<String> = match self.ext.get::<History>().and_then(|h| h.0.get(key)) {
             Some(buf) => {
                 let mut recent: Vec<&HistMsg> = buf.iter().filter(|m| m.ts >= cutoff).collect();
                 let start = recent.len().saturating_sub(lines as usize);

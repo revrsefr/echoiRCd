@@ -34,8 +34,6 @@ pub const TICK_SECS: u64 = 15;
 pub const PING_AFTER: u64 = 90;
 pub const PING_TIMEOUT: u64 = 60;
 pub const REG_TIMEOUT: u64 = 60;
-/// Recent messages CHATHISTORY keeps per channel.
-pub const HISTORY_CAP: usize = 256;
 
 pub fn now() -> u64 {
     SystemTime::now()
@@ -85,16 +83,6 @@ pub fn parse_iso(s: &str) -> Option<u64> {
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146097 + doe - 719468;
     Some((days * 86400 + h * 3600 + mi * 60 + se).max(0) as u64)
-}
-
-/// One stored message, replayed by CHATHISTORY.
-pub struct HistMsg {
-    pub ts: u64,
-    pub msgid: String,
-    pub prefix: String,     // sender's nick!user@host at send time
-    pub verb: &'static str, // "PRIVMSG" or "NOTICE"
-    pub target: String,     // original target (channel, or the DM recipient)
-    pub text: String,
 }
 
 /// A recently-departed identity, kept for WHOWAS.
@@ -149,9 +137,8 @@ pub struct Server {
     // the command's `label` (single tag, BATCH, or ACK). RefCell because the
     // output primitives are `&self`.
     pub label_capture: RefCell<Option<(Uid, Vec<String>)>>,
-    pub history: HashMap<String, VecDeque<HistMsg>>, // channel key -> recent messages (CHATHISTORY)
-    pub event_tx: Sender<Event>,                     // self-inject events (DNS results)
-    pub conn_counter: Arc<AtomicU64>,    // mints connection uids (for CONNECT dials)
+    pub event_tx: Sender<Event>,      // self-inject events (DNS results)
+    pub conn_counter: Arc<AtomicU64>, // mints connection uids (for CONNECT dials)
     /// Module-owned server state, keyed by type — the InspIRCd `ExtensionItem`
     /// equivalent. Each `modules/*.rs` stores its own struct here so features live
     /// in their own file instead of bloating this one.
@@ -197,7 +184,6 @@ impl Server {
             sasl_server: cfg.sasl_server,
             webirc: cfg.webirc,
             label_capture: RefCell::new(None),
-            history: HashMap::new(),
             event_tx,
             conn_counter,
             ext: Extensible::default(),
@@ -226,30 +212,6 @@ impl Server {
         });
         while self.whowas.len() > 256 {
             self.whowas.pop_back();
-        }
-    }
-
-    /// Record a channel message for CHATHISTORY replay (capped ring per channel).
-    pub fn store_history(
-        &mut self,
-        key: &str,
-        prefix: &str,
-        verb: &'static str,
-        target: &str,
-        text: &str,
-        msgid: &str,
-    ) {
-        let buf = self.history.entry(key.to_string()).or_default();
-        buf.push_back(HistMsg {
-            ts: now(),
-            msgid: msgid.to_string(),
-            prefix: prefix.to_string(),
-            verb,
-            target: target.to_string(),
-            text: text.to_string(),
-        });
-        while buf.len() > HISTORY_CAP {
-            buf.pop_front();
         }
     }
 

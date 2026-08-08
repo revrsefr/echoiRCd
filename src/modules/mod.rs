@@ -4,6 +4,7 @@
 //! than the hook bus, but lives here as its own self-contained unit.
 
 pub mod antimixedutf8;
+pub mod chathistory;
 pub mod cloak;
 pub mod dnsbl;
 pub mod filter;
@@ -38,5 +39,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(metadata::commands())
         .chain(markread::commands())
         .chain(multiline::commands())
+        .chain(chathistory::commands())
         .collect()
 }

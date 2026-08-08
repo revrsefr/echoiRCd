@@ -419,7 +419,7 @@ impl ChanMode for ChanHistory {
             let Some(lines) = lines_s.parse::<u32>().ok().filter(|&n| n > 0) else {
                 return Applied::No;
             };
-            let lines = lines.min(crate::server::HISTORY_CAP as u32);
+            let lines = lines.min(crate::modules::chathistory::HISTORY_CAP as u32);
             let secs = secs_s.parse::<u64>().unwrap_or(0);
             if let Some(c) = s.channels.get_mut(key) {
                 c.modes.history = Some((lines, secs));
