@@ -117,6 +117,7 @@ impl Command for Whois {
             account,
             last_active,
             signon,
+            certfp,
         ) = {
             let u = &s.users[&tuid];
             (
@@ -134,6 +135,7 @@ impl Command for Whois {
                 u.account.clone(),
                 u.last_active,
                 u.signon,
+                u.certfp.clone(),
             )
         };
         let chans: Vec<String> = keys
@@ -192,6 +194,16 @@ impl Command for Whois {
                 RPL_WHOISSECURE,
                 &format!("{nick} :is using a secure connection"),
             );
+        }
+        // client-cert fingerprint (CertFP) — shown to the user themselves and opers
+        if let Some(fp) = &certfp {
+            if is_self || asker_oper {
+                s.numeric(
+                    uid,
+                    RPL_WHOISCERTFP,
+                    &format!("{nick} :has client certificate fingerprint {fp}"),
+                );
+            }
         }
         // 317: idle time + signon time
         let idle = crate::server::now().saturating_sub(last_active);

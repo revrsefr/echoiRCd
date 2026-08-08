@@ -89,6 +89,7 @@ pub const RPL_WHOISACCOUNT: u16 = 330; // "<nick> <account> :is logged in as"
 pub const ERR_NEEDREGGEDNICK: u16 = 477; // chan +R/+M — must be logged into an account
 pub const RPL_WHOISHOST: u16 = 378; // oper-only: real host/ip behind a cloak
 pub const RPL_WHOISSECURE: u16 = 671; // "is using a secure connection" (sslinfo)
+pub const RPL_WHOISCERTFP: u16 = 276; // "has client certificate fingerprint <fp>"
 pub const RPL_HOSTHIDDEN: u16 = 396; // "is now your displayed host" (cloak on/off)
 
 pub const RPL_CHANNELMODEIS: u16 = 324;
