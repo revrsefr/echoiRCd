@@ -12,7 +12,8 @@ use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::time::Duration;
 
-use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
+use openssl::hash::MessageDigest;
+use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream, SslVerifyMode};
 
 /// A live TLS connection: read/write plaintext, tune the read timeout (the
 /// socket engine polls with one to interleave reads and queued writes), and shut
@@ -23,6 +24,9 @@ pub trait TlsConn: Send {
     fn flush(&mut self) -> io::Result<()>;
     fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()>;
     fn shutdown(&self);
+    /// SHA-256 fingerprint (lowercase hex) of the peer's certificate, if it sent
+    /// one. Drives SASL EXTERNAL / CertFP.
+    fn peer_cert_fp(&self) -> Option<String>;
 }
 
 /// A TLS backend: performs the server-side handshake on an accepted socket.
@@ -47,6 +51,10 @@ impl OpensslBackend {
         b.set_private_key_file(key, SslFiletype::PEM).map_err(err)?;
         b.set_certificate_chain_file(cert).map_err(err)?;
         b.check_private_key().map_err(err)?;
+        // Request (but don't require) a client cert so SASL EXTERNAL / CertFP can
+        // read its fingerprint. We never validate the chain — services match the
+        // fingerprint to an account — so the callback always accepts.
+        b.set_verify_callback(SslVerifyMode::PEER, |_valid, _ctx| true);
         Ok(OpensslBackend {
             acceptor: b.build(),
         })
@@ -77,5 +85,10 @@ impl TlsConn for OpensslConn {
     }
     fn shutdown(&self) {
         let _ = self.0.get_ref().shutdown(Shutdown::Both);
+    }
+    fn peer_cert_fp(&self) -> Option<String> {
+        let cert = self.0.ssl().peer_certificate()?;
+        let digest = cert.digest(MessageDigest::sha256()).ok()?;
+        Some(digest.iter().map(|b| format!("{b:02x}")).collect())
     }
 }

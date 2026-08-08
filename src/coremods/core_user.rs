@@ -67,13 +67,18 @@ impl Command for Cap {
         match params[0].to_ascii_uppercase().as_str() {
             "LS" => {
                 let cap302 = params.get(1).map(|v| v == "302").unwrap_or(false);
+                let secure = s.users.get(&uid).map(|u| u.secure).unwrap_or(false);
                 if let Some(u) = s.users.get_mut(&uid) {
                     u.cap = true; // hold registration until CAP END
                     u.cap_302 |= cap302;
                 }
                 s.send(
                     uid,
-                    format!(":{} CAP {who} LS :{}", s.name, Caps::ls_line(cap302)),
+                    format!(
+                        ":{} CAP {who} LS :{}",
+                        s.name,
+                        Caps::ls_line(cap302, secure)
+                    ),
                 );
             }
             "REQ" => {
@@ -177,6 +182,28 @@ impl Command for Authenticate {
                     }
                     s.send(uid, "AUTHENTICATE +".to_string());
                     CmdResult::Ok
+                } else if arg.eq_ignore_ascii_case("EXTERNAL") {
+                    // CertFP: only works on TLS with a client cert; the fingerprint
+                    // goes to services, which map it to an account.
+                    let certfp = s.users.get(&uid).and_then(|u| u.certfp.clone());
+                    match certfp {
+                        Some(fp) if have_services => {
+                            if let Some(u) = s.users.get_mut(&uid) {
+                                u.sasl_mech = Some("EXTERNAL".to_string());
+                            }
+                            s.sasl_relay(uid, &format!("S EXTERNAL {fp}"));
+                            s.send(uid, "AUTHENTICATE +".to_string());
+                            CmdResult::Ok
+                        }
+                        _ => {
+                            s.numeric(
+                                uid,
+                                ERR_SASLFAIL,
+                                ":SASL EXTERNAL requires a client certificate",
+                            );
+                            CmdResult::Fail
+                        }
+                    }
                 } else {
                     s.numeric(uid, RPL_SASLMECHS, "PLAIN :are available SASL mechanisms");
                     s.numeric(uid, ERR_SASLFAIL, ":Unsupported SASL mechanism");

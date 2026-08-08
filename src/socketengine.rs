@@ -184,6 +184,7 @@ pub fn run_reactor(mut listener: MioListener, core: Sender<Event>, counter: Arc<
                                     out,
                                     sock: None,
                                     secure: false,
+                                    certfp: None,
                                     link: false,
                                     outbound: false,
                                 })
@@ -380,6 +381,7 @@ pub fn accept_loop(
                         out: OutSink::Thread(out_tx),
                         sock: Some(shutdown),
                         secure: false,
+                        certfp: None,
                         link,
                         outbound: false,
                     })
@@ -427,6 +429,7 @@ pub fn connect_link(addr: &str, core: Sender<Event>, counter: Arc<AtomicU64>) {
             out: OutSink::Thread(out_tx),
             sock: Some(shutdown),
             secure: false,
+            certfp: None,
             link: true,
             outbound: true,
         })
@@ -501,6 +504,7 @@ fn tls_conn(
             return; // handshake failed
         }
     };
+    let certfp = conn.peer_cert_fp();
     let (out_tx, out_rx) = mpsc::channel::<String>();
     if core
         .send(Event::Connect {
@@ -509,6 +513,7 @@ fn tls_conn(
             out: OutSink::Thread(out_tx),
             sock: Some(shutdown),
             secure: true,
+            certfp,
             link,
             outbound: false,
         })

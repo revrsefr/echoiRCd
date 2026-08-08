@@ -24,6 +24,11 @@ bind_server = 0.0.0.0:7000
 # link = <name> <ip> <port> <password> [autoconnect]   (the password is a shared secret)
 # link = peer.example.net 203.0.113.5 7000 CHANGE_THIS_LINK_SECRET autoconnect
 
+# services: the linked server that handles SASL (client AUTHENTICATE is relayed to
+# it). Leave unset to disable SASL. SASL EXTERNAL additionally needs the client on
+# TLS with a client certificate (its fingerprint is sent to services).
+# sasl_server = services.example.net
+
 # IRC operators — oper = <name> <password>
 oper = admin CHANGE_THIS_PASSWORD
 

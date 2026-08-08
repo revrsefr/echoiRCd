@@ -127,12 +127,17 @@ impl Caps {
     }
 
     /// The `CAP LS` token list; `sasl` carries its mechanisms for 302 clients.
-    pub fn ls_line(cap302: bool) -> String {
+    /// EXTERNAL is only offered on TLS connections (it needs a client cert).
+    pub fn ls_line(cap302: bool, secure: bool) -> String {
         SUPPORTED_CAPS
             .iter()
             .map(|c| {
                 if *c == "sasl" && cap302 {
-                    "sasl=PLAIN".to_string()
+                    if secure {
+                        "sasl=PLAIN,EXTERNAL".to_string()
+                    } else {
+                        "sasl=PLAIN".to_string()
+                    }
                 } else {
                     (*c).to_string()
                 }
@@ -209,6 +214,7 @@ pub struct User {
     pub cloak: String, // masked host shown under +x ("" until computed)
     pub vhost: Option<String>, // displayed-host override (CHGHOST/SETHOST vhost)
     pub secure: bool,  // connected over TLS (drives WHOIS 671 / sslinfo)
+    pub certfp: Option<String>, // TLS client-cert fingerprint (SASL EXTERNAL / CertFP)
     pub account: Option<String>, // logged-in account name (set by services)
     pub signon: u64,   // unix secs at registration (WHOIS 317)
     pub addr: SocketAddr,
@@ -465,8 +471,13 @@ mod tests {
         assert!(!c.set("bogus-cap", true)); // unknown cap rejected
         assert!(c.has("server-time") && c.has("multi-prefix") && !c.has("sasl"));
         assert_eq!(c.enabled(), "server-time multi-prefix"); // SUPPORTED order
-        assert!(Caps::ls_line(true).contains("sasl=PLAIN")); // 302 shows mechs
-        assert!(Caps::ls_line(false).contains("sasl") && !Caps::ls_line(false).contains("sasl="));
+        assert!(Caps::ls_line(true, false).contains("sasl=PLAIN")); // 302 shows mechs
+        assert!(!Caps::ls_line(true, false).contains("EXTERNAL")); // plaintext: no EXTERNAL
+        assert!(Caps::ls_line(true, true).contains("sasl=PLAIN,EXTERNAL")); // TLS offers it
+        assert!(
+            Caps::ls_line(false, false).contains("sasl")
+                && !Caps::ls_line(false, false).contains("sasl=")
+        );
         c.set("server-time", false);
         assert!(!c.has("server-time"));
     }

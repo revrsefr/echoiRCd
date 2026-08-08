@@ -24,8 +24,9 @@ pub enum Event {
         out: OutSink,
         sock: Option<TcpStream>,
         secure: bool,
-        link: bool,     // a server-to-server connection, not a client
-        outbound: bool, // (link) we dialed them
+        certfp: Option<String>, // TLS client-cert fingerprint (clients only)
+        link: bool,             // a server-to-server connection, not a client
+        outbound: bool,         // (link) we dialed them
     },
     Line {
         uid: Uid,
@@ -70,13 +71,14 @@ impl Ircd {
                     out,
                     sock,
                     secure,
+                    certfp,
                     link,
                     outbound,
                 } => {
                     if link {
                         self.server.add_link(uid, addr, out, sock, outbound);
                     } else {
-                        self.server.add_conn(uid, addr, out, sock, secure);
+                        self.server.add_conn(uid, addr, out, sock, secure, certfp);
                     }
                 }
                 Event::Line { uid, line } => {

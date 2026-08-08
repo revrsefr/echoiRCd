@@ -182,6 +182,7 @@ impl Server {
         out: OutSink,
         sock: Option<TcpStream>,
         secure: bool,
+        certfp: Option<String>,
     ) {
         let uuid = self.next_uuid();
         self.uuid_local.insert(uuid.clone(), uid);
@@ -198,6 +199,7 @@ impl Server {
                 cloak: String::new(),
                 vhost: None,
                 secure,
+                certfp,
                 account: None,
                 signon: now(),
                 addr,
@@ -666,6 +668,7 @@ mod tests {
                 cloak: String::new(),
                 vhost: None,
                 secure: false,
+                certfp: None,
                 account: None,
                 signon: 0,
                 addr: "127.0.0.1:1".parse().unwrap(),
