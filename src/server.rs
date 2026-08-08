@@ -151,7 +151,8 @@ pub struct Server {
     pub label_capture: RefCell<Option<(Uid, Vec<String>)>>,
     pub history: HashMap<String, VecDeque<HistMsg>>, // channel key -> recent messages (CHATHISTORY)
     pub read_markers: HashMap<String, HashMap<String, u64>>, // identity -> target -> read ts (MARKREAD)
-    pub event_tx: Sender<Event>,                             // self-inject events (DNS results)
+    pub metadata: HashMap<String, HashMap<String, String>>, // target key -> key -> value (draft/metadata-2)
+    pub event_tx: Sender<Event>,                            // self-inject events (DNS results)
     pub conn_counter: Arc<AtomicU64>, // mints connection uids (for CONNECT dials)
 }
 
@@ -196,6 +197,7 @@ impl Server {
             label_capture: RefCell::new(None),
             history: HashMap::new(),
             read_markers: HashMap::new(),
+            metadata: HashMap::new(),
             event_tx,
             conn_counter,
         }
@@ -247,6 +249,18 @@ impl Server {
         });
         while buf.len() > HISTORY_CAP {
             buf.pop_front();
+        }
+    }
+
+    /// Resolve a METADATA target (a nick or `#channel`) to its metadata storage
+    /// key, or `None` if it doesn't exist. User keys are `u<uid>` (stable across
+    /// nick changes); channel keys are the lowercased name.
+    pub fn meta_key(&self, target: &str) -> Option<String> {
+        if let Some(chan) = target.strip_prefix('#') {
+            let k = format!("#{}", chan.to_ascii_lowercase());
+            self.channels.contains_key(&k).then_some(k)
+        } else {
+            self.find_nick(target).map(|u| format!("u{u}"))
         }
     }
 
@@ -438,6 +452,7 @@ impl Server {
         };
         self.uuid_local.remove(&user.uuid);
         self.read_markers.remove(&format!("~{uid}")); // session read-markers (kept if account-keyed)
+        self.metadata.remove(&format!("u{uid}")); // per-user metadata
         if user.registered {
             self.push_whowas(
                 &user.nick,

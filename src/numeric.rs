@@ -99,6 +99,8 @@ pub const RPL_NOTOPIC: u16 = 331;
 pub const RPL_TOPIC: u16 = 332;
 pub const RPL_WHOREPLY: u16 = 352;
 pub const RPL_WHOSPCRPL: u16 = 354; // WHOX: field-selected WHO reply
+pub const RPL_KEYVALUE: u16 = 761; // draft/metadata-2: <target> <key> <vis> :<value>
+pub const RPL_KEYNOTSET: u16 = 766; // draft/metadata-2: key not set
 pub const RPL_NAMREPLY: u16 = 353;
 pub const RPL_ENDOFNAMES: u16 = 366;
 

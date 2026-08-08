@@ -100,6 +100,7 @@ pub const SUPPORTED_CAPS: &[&str] = &[
     "draft/chathistory",
     "draft/message-redaction",
     "draft/pre-away",
+    "draft/metadata-2",
     "cap-notify",
 ];
 
@@ -128,6 +129,7 @@ pub struct Caps {
     pub chathistory: bool,      // draft/chathistory — can request message history
     pub message_redaction: bool, // draft/message-redaction — understands REDACT
     pub pre_away: bool,         // draft/pre-away — may set AWAY before registration
+    pub metadata: bool,         // draft/metadata-2 — wants metadata + change notices
     pub cap_notify: bool,
 }
 
@@ -178,6 +180,7 @@ impl Caps {
             "draft/chathistory" => self.chathistory,
             "draft/message-redaction" => self.message_redaction,
             "draft/pre-away" => self.pre_away,
+            "draft/metadata-2" => self.metadata,
             "cap-notify" => self.cap_notify,
             _ => false,
         }
@@ -206,6 +209,7 @@ impl Caps {
             "draft/chathistory" => &mut self.chathistory,
             "draft/message-redaction" => &mut self.message_redaction,
             "draft/pre-away" => &mut self.pre_away,
+            "draft/metadata-2" => &mut self.metadata,
             "cap-notify" => &mut self.cap_notify,
             _ => return false,
         };
