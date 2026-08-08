@@ -187,7 +187,10 @@ impl Command for ChatHistory {
                 };
                 if key.starts_with('#') {
                     if s.is_member(uid, key) {
-                        let name = buf.back().map(|m| m.target.clone()).unwrap_or_else(|| key.clone());
+                        let name = buf
+                            .back()
+                            .map(|m| m.target.clone())
+                            .unwrap_or_else(|| key.clone());
                         targets.push((name, ts));
                     }
                 } else if let Some(rest) = key.strip_prefix('\0') {
