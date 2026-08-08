@@ -3,6 +3,7 @@
 use crate::command::{CmdResult, Command};
 use crate::numeric::*;
 use crate::server::{Server, VERSION};
+use crate::users::User;
 use crate::Uid;
 
 pub fn commands() -> Vec<Box<dyn Command>> {
@@ -214,14 +215,34 @@ impl Command for Who {
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         let target = &params[0];
-        if target.starts_with('#') {
-            let key = target.to_ascii_lowercase();
-            let multi = s
-                .users
-                .get(&uid)
-                .map(|u| u.caps.multi_prefix)
-                .unwrap_or(false);
-            let rows: Vec<(Uid, String, String)> = match s.channels.get(&key) {
+        // WHOX: an options token containing '%' selects the reply fields (354).
+        // `WHO <target> <filter>%<fields>[,<querytype>]`, e.g. `WHO #c %cuhnat,152`.
+        let whox = params
+            .get(1)
+            .and_then(|o| o.split_once('%'))
+            .map(|(_, spec)| {
+                let (fields, qtype) = spec.split_once(',').unwrap_or((spec, ""));
+                (fields.to_string(), qtype.to_string())
+            });
+        let asker_oper = s.is_oper(uid);
+        let multi = s
+            .users
+            .get(&uid)
+            .map(|u| u.caps.multi_prefix)
+            .unwrap_or(false);
+
+        // (uid, channel-name-or-"*", prefix-string) for each user to report
+        let rows: Vec<(Uid, String, String)> = if target.starts_with('#') {
+            match s.channels.get(&target.to_ascii_lowercase()) {
+                // +s/+p: don't reveal a secret/private channel's members to
+                // non-members (opers excepted)
+                Some(ch)
+                    if (ch.modes.secret || ch.modes.private)
+                        && !ch.members.contains_key(&uid)
+                        && !asker_oper =>
+                {
+                    Vec::new()
+                }
                 Some(ch) => {
                     let name = ch.name.clone();
                     ch.members
@@ -237,35 +258,129 @@ impl Command for Who {
                         .collect()
                 }
                 None => Vec::new(),
-            };
-            for (m, name, pfx) in rows {
-                if let Some(u) = s.users.get(&m) {
-                    let row = format!(
-                        "{name} {} {} {} {} H{pfx} :0 {}",
-                        u.ident,
-                        u.host_display(),
-                        s.name,
-                        u.nick,
-                        u.realname
-                    );
-                    s.numeric(uid, RPL_WHOREPLY, &row);
-                }
             }
         } else if let Some(tuid) = s.find_nick(target) {
-            let u = &s.users[&tuid];
-            let row = format!(
-                "* {} {} {} {} H :0 {}",
-                u.ident,
-                u.host_display(),
-                s.name,
-                u.nick,
-                u.realname
-            );
-            s.numeric(uid, RPL_WHOREPLY, &row);
+            vec![(tuid, "*".to_string(), String::new())]
+        } else {
+            Vec::new()
+        };
+
+        let now = crate::server::now();
+        for (m, chan, pfx) in rows {
+            let (code, row) = {
+                let Some(u) = s.users.get(&m) else { continue };
+                // flags: H (here) / G (gone/away), then * for opers, then prefixes
+                let mut flags = String::from(if u.flags.away.is_some() { "G" } else { "H" });
+                if u.flags.oper && (!u.flags.hideoper || asker_oper) {
+                    flags.push('*');
+                }
+                flags.push_str(&pfx);
+                match &whox {
+                    Some((fields, qtype)) => (
+                        RPL_WHOSPCRPL,
+                        whox_row(
+                            &s.name,
+                            u,
+                            &chan,
+                            &flags,
+                            fields,
+                            qtype,
+                            asker_oper,
+                            m == uid,
+                            now,
+                        ),
+                    ),
+                    None => (
+                        RPL_WHOREPLY,
+                        format!(
+                            "{chan} {} {} {} {} {flags} :0 {}",
+                            u.ident,
+                            u.host_display(),
+                            s.name,
+                            u.nick,
+                            u.realname
+                        ),
+                    ),
+                }
+            };
+            s.numeric(uid, code, &row);
         }
         s.numeric(uid, RPL_ENDOFWHO, &format!("{target} :End of /WHO list"));
         CmdResult::Ok
     }
+}
+
+/// Build a WHOX (354) reply body: the requested `fields` in their fixed output
+/// order (never the request order), realname always last. Unknown field letters
+/// are ignored. The real IP (`i`) is shown only to opers or to the user
+/// themselves, so host-cloaking isn't defeated.
+#[allow(clippy::too_many_arguments)]
+fn whox_row(
+    server: &str,
+    u: &User,
+    chan: &str,
+    flags: &str,
+    fields: &str,
+    qtype: &str,
+    asker_oper: bool,
+    is_self: bool,
+    now: u64,
+) -> String {
+    let has = |c: char| fields.contains(c);
+    let mut parts: Vec<String> = Vec::new();
+    if has('t') {
+        parts.push(if qtype.is_empty() {
+            "0".to_string()
+        } else {
+            qtype.to_string()
+        });
+    }
+    if has('c') {
+        parts.push(chan.to_string());
+    }
+    if has('u') {
+        parts.push(u.ident.clone());
+    }
+    if has('i') {
+        parts.push(if asker_oper || is_self {
+            u.addr.ip().to_string()
+        } else {
+            "255.255.255.255".to_string()
+        });
+    }
+    if has('h') {
+        parts.push(u.host_display().to_string());
+    }
+    if has('s') {
+        parts.push(server.to_string());
+    }
+    if has('n') {
+        parts.push(u.nick.clone());
+    }
+    if has('f') {
+        parts.push(flags.to_string());
+    }
+    if has('d') {
+        parts.push("0".to_string()); // hopcount (local users)
+    }
+    if has('l') {
+        parts.push(now.saturating_sub(u.last_active).to_string()); // idle seconds
+    }
+    if has('a') {
+        parts.push(u.account.clone().unwrap_or_else(|| "0".to_string()));
+    }
+    if has('o') {
+        parts.push("n/a".to_string()); // channel op-level
+    }
+    let mut row = parts.join(" ");
+    if has('r') {
+        if !row.is_empty() {
+            row.push(' ');
+        }
+        row.push(':');
+        row.push_str(&u.realname);
+    }
+    row
 }
 
 struct Lusers;

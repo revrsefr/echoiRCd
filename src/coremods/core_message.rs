@@ -317,7 +317,7 @@ fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool) -> CmdResu
             if m == uid || s.users.get(&m).map(|u| u.flags.deaf).unwrap_or(false) {
                 continue;
             }
-            s.send_tagged(m, &ctags, &msgid, &line);
+            s.send_tagged(m, uid, &ctags, &msgid, &line);
         }
         // echo-message: give the sender their own copy if they asked for one
         if s.users
@@ -325,7 +325,7 @@ fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool) -> CmdResu
             .map(|u| u.caps.echo_message)
             .unwrap_or(false)
         {
-            s.send_tagged(uid, &ctags, &msgid, &line);
+            s.send_tagged(uid, uid, &ctags, &msgid, &line);
         }
         // propagate to linked servers that have members in this channel
         s.send_channel_to_links(uid, &key, target, cmd, &body);
@@ -427,14 +427,14 @@ fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool) -> CmdResu
         let ctags = s.line_ctags.clone();
         let msgid = s.next_msgid();
         if !silenced {
-            s.send_tagged(tuid, &ctags, &msgid, &pm);
+            s.send_tagged(tuid, uid, &ctags, &msgid, &pm);
         }
         if s.users
             .get(&uid)
             .map(|u| u.caps.echo_message)
             .unwrap_or(false)
         {
-            s.send_tagged(uid, &ctags, &msgid, &pm);
+            s.send_tagged(uid, uid, &ctags, &msgid, &pm);
         }
         // if the recipient is away, tell the sender (PRIVMSG only, not if silenced)
         if !notice && !silenced {
@@ -467,6 +467,7 @@ fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool) -> CmdResu
             let ctags = s.line_ctags.clone();
             let msgid = s.next_msgid();
             s.send_tagged(
+                uid,
                 uid,
                 &ctags,
                 &msgid,
@@ -564,7 +565,7 @@ impl Command for TagMsg {
                     .map(|u| u.caps.message_tags)
                     .unwrap_or(false)
                 {
-                    s.send_tagged(m, &ctags, &msgid, &body);
+                    s.send_tagged(m, uid, &ctags, &msgid, &body);
                 }
             }
         } else if let Some(tuid) = s.find_nick(target) {
@@ -573,14 +574,14 @@ impl Command for TagMsg {
                 .map(|u| u.caps.message_tags)
                 .unwrap_or(false)
             {
-                s.send_tagged(tuid, &ctags, &msgid, &body);
+                s.send_tagged(tuid, uid, &ctags, &msgid, &body);
             }
             if s.users
                 .get(&uid)
                 .map(|u| u.caps.echo_message)
                 .unwrap_or(false)
             {
-                s.send_tagged(uid, &ctags, &msgid, &body);
+                s.send_tagged(uid, uid, &ctags, &msgid, &body);
             }
         }
         CmdResult::Ok

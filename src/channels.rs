@@ -507,6 +507,19 @@ impl Server {
             self.numeric(uid, RPL_ENDOFNAMES, &format!("{key} :End of /NAMES list"));
             return;
         };
+        // +s (secret) / +p (private): members are hidden from non-members. Reply as
+        // if the channel were empty (opers still see it).
+        if (ch.modes.secret || ch.modes.private)
+            && !ch.members.contains_key(&uid)
+            && !self.is_oper(uid)
+        {
+            self.numeric(
+                uid,
+                RPL_ENDOFNAMES,
+                &format!("{} :End of /NAMES list", ch.name),
+            );
+            return;
+        }
         // multi-prefix → all prefixes; userhost-in-names → full nick!user@host
         let (multi, uhost) = self
             .users

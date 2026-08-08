@@ -93,6 +93,8 @@ pub const SUPPORTED_CAPS: &[&str] = &[
     "invite-notify",
     "setname",
     "extended-monitor",
+    "account-tag",
+    "standard-replies",
     "cap-notify",
 ];
 
@@ -114,6 +116,8 @@ pub struct Caps {
     pub invite_notify: bool,
     pub setname: bool,
     pub extended_monitor: bool, // route away/account/chghost/setname for MONITOR targets
+    pub account_tag: bool,      // prepend account=<name> tag on messages from logged-in users
+    pub standard_replies: bool, // understands FAIL/WARN/NOTE structured replies
     pub cap_notify: bool,
 }
 
@@ -152,6 +156,8 @@ impl Caps {
             "invite-notify" => self.invite_notify,
             "setname" => self.setname,
             "extended-monitor" => self.extended_monitor,
+            "account-tag" => self.account_tag,
+            "standard-replies" => self.standard_replies,
             "cap-notify" => self.cap_notify,
             _ => false,
         }
@@ -173,6 +179,8 @@ impl Caps {
             "invite-notify" => &mut self.invite_notify,
             "setname" => &mut self.setname,
             "extended-monitor" => &mut self.extended_monitor,
+            "account-tag" => &mut self.account_tag,
+            "standard-replies" => &mut self.standard_replies,
             "cap-notify" => &mut self.cap_notify,
             _ => return false,
         };
@@ -370,7 +378,7 @@ impl Server {
             uid,
             RPL_ISUPPORT,
             &format!(
-                "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIg,k,lfjFL,CGMNORSTcimnpstuz EXTBAN=,cmn WATCH=128 MONITOR=128 SILENCE=32 CALLERID=g CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={} :are supported by this server",
+                "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIg,k,lfjFL,CGMNORSTcimnpstuz EXTBAN=,cmn WATCH=128 MONITOR=128 SILENCE=32 CALLERID=g WHOX CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={} :are supported by this server",
                 self.network
             ),
         );

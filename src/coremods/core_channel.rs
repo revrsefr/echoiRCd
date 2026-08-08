@@ -39,17 +39,11 @@ impl Command for Knock {
         }
         let can = s.channels[&key].modes.invite_only && !s.is_member(uid, &key);
         if !can {
-            let nick = s
-                .users
-                .get(&uid)
-                .map(|u| u.nick.clone())
-                .unwrap_or_default();
-            s.send(
+            s.fail(
                 uid,
-                format!(
-                    ":{} NOTICE {nick} :Can't KNOCK on {chan} (not invite-only, or you're on it)",
-                    s.name
-                ),
+                "KNOCK",
+                "CANNOT_KNOCK",
+                &format!("Can't KNOCK on {chan} (not invite-only, or you're on it)"),
             );
             return CmdResult::Fail;
         }

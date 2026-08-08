@@ -446,6 +446,46 @@ impl Server {
         }
     }
 
+    /// IRCv3 standard reply (`FAIL`/`WARN`/`NOTE`): structured, machine-readable
+    /// command feedback. Sent in the `:server FAIL <command> <code> :<desc>` form
+    /// to clients that negotiated `standard-replies`; others get the description as
+    /// a plain server NOTICE so the human-readable text still reaches them.
+    pub fn fail(&self, uid: Uid, command: &str, code: &str, desc: &str) {
+        self.standard_reply(uid, "FAIL", command, code, desc);
+    }
+    pub fn warn(&self, uid: Uid, command: &str, code: &str, desc: &str) {
+        self.standard_reply(uid, "WARN", command, code, desc);
+    }
+    pub fn note(&self, uid: Uid, command: &str, code: &str, desc: &str) {
+        self.standard_reply(uid, "NOTE", command, code, desc);
+    }
+    fn standard_reply(&self, uid: Uid, kind: &str, command: &str, code: &str, desc: &str) {
+        let cap = self
+            .users
+            .get(&uid)
+            .map(|u| u.caps.standard_replies)
+            .unwrap_or(false);
+        if cap {
+            self.send(
+                uid,
+                format!(":{} {kind} {command} {code} :{desc}", self.name),
+            );
+        } else {
+            let nick = self
+                .users
+                .get(&uid)
+                .map(|u| {
+                    if u.nick.is_empty() {
+                        "*".to_string()
+                    } else {
+                        u.nick.clone()
+                    }
+                })
+                .unwrap_or_else(|| "*".to_string());
+            self.send(uid, format!(":{} NOTICE {nick} :{desc}", self.name));
+        }
+    }
+
     /// Send a line to every member of a channel, optionally skipping one uid.
     pub fn to_channel(&self, key: &str, line: &str, except: Option<Uid>) {
         if let Some(ch) = self.channels.get(key) {
@@ -457,14 +497,22 @@ impl Server {
         }
     }
 
-    /// Send a message body (`:prefix CMD …`) to `uid`, composing its IRCv3 tag
-    /// prefix from that client's caps: `time=` (server-time) plus the client-only
-    /// tags `ctags` (message-tags). Used for PRIVMSG / NOTICE / TAGMSG delivery.
-    pub fn send_tagged(&self, uid: Uid, ctags: &str, msgid: &str, body: &str) {
+    /// Send a message body (`:prefix CMD …`) from `src` to `uid`, composing its
+    /// IRCv3 tag prefix from *that recipient's* caps: `time=` (server-time),
+    /// `account=` (account-tag, from the sender's login) plus the client-only tags
+    /// `ctags` and `msgid` (message-tags). For PRIVMSG / NOTICE / TAGMSG delivery.
+    pub fn send_tagged(&self, uid: Uid, src: Uid, ctags: &str, msgid: &str, body: &str) {
         if let Some(u) = self.users.get(&uid) {
             let mut tags: Vec<String> = Vec::new();
             if u.caps.server_time {
                 tags.push(format!("time={}", iso_time(now())));
+            }
+            // account-tag: label a message with the sender's services account, so
+            // recipients see who's authenticated without a separate WHOIS.
+            if u.caps.account_tag {
+                if let Some(acct) = self.users.get(&src).and_then(|su| su.account.as_deref()) {
+                    tags.push(format!("account={acct}"));
+                }
             }
             // msgid (IRCv3): a unique, server-assigned id per message so clients
             // can reference it (reactions, replies, redaction). Tag-only feature,
