@@ -125,7 +125,6 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(TagMsg),
         Box::new(ChatHistory),
         Box::new(Redact),
-        Box::new(MarkRead),
         Box::new(Batch),
     ]
 }
@@ -154,56 +153,6 @@ impl Command for Batch {
                 for line in lines {
                     deliver(s, uid, &[target.clone(), line], notice);
                 }
-            }
-        }
-        CmdResult::Ok
-    }
-}
-
-/// MARKREAD — draft/read-marker. `MARKREAD <target> [timestamp=<iso>]`. With a
-/// timestamp it sets the read marker (only ever advancing) and echoes it to every
-/// connection sharing the user's identity (multi-device); without one it returns
-/// the stored marker (`*` if unset).
-struct MarkRead;
-impl Command for MarkRead {
-    fn name(&self) -> &'static str {
-        "MARKREAD"
-    }
-    fn min_params(&self) -> usize {
-        1
-    }
-    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
-        let target = params[0].clone();
-        let tkey = target.to_ascii_lowercase();
-        let id = s.marker_id(uid);
-        match params.get(1).and_then(|p| p.strip_prefix("timestamp=")) {
-            Some(ts_str) => {
-                let cur = s
-                    .read_markers
-                    .get(&id)
-                    .and_then(|m| m.get(&tkey))
-                    .copied()
-                    .unwrap_or(0);
-                let ts = parse_iso(ts_str).unwrap_or(0).max(cur); // markers only advance
-                s.read_markers
-                    .entry(id.clone())
-                    .or_default()
-                    .insert(tkey, ts);
-                let line = format!(":{} MARKREAD {target} timestamp={}", s.name, iso_time(ts));
-                let uids: Vec<Uid> = s.users.keys().copied().collect();
-                for p in uids.into_iter().filter(|&p| s.marker_id(p) == id) {
-                    s.send(p, line.clone());
-                }
-            }
-            None => {
-                let val = s
-                    .read_markers
-                    .get(&id)
-                    .and_then(|m| m.get(&tkey))
-                    .copied()
-                    .map(|t| format!("timestamp={}", iso_time(t)))
-                    .unwrap_or_else(|| "*".to_string());
-                s.send(uid, format!(":{} MARKREAD {target} {val}", s.name));
             }
         }
         CmdResult::Ok

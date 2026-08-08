@@ -8,6 +8,7 @@ pub mod cloak;
 pub mod dnsbl;
 pub mod filter;
 pub mod flood;
+pub mod markread;
 pub mod metadata;
 pub mod snoop;
 
@@ -23,6 +24,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(antimixedutf8::AntiMixedUtf8),
         Box::new(filter::Filter),
         Box::new(metadata::Metadata),
+        Box::new(markread::MarkRead),
     ]
 }
 
@@ -32,5 +34,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
     filter::commands()
         .into_iter()
         .chain(metadata::commands())
+        .chain(markread::commands())
         .collect()
 }
