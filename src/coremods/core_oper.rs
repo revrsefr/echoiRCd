@@ -6,7 +6,7 @@ use crate::command::{CmdResult, Command};
 use crate::coremods::core_mode::{apply_mode, svs_set_user_modes};
 use crate::module::Hook;
 use crate::numeric::*;
-use crate::server::{now, Server};
+use crate::server::{iso_time, now, Server};
 use crate::users::{valid_host, valid_ident, valid_nick};
 use crate::xline::{parse_duration, XKind};
 use crate::Uid;
@@ -42,6 +42,11 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(SaMode),
         Box::new(SaTopic),
         Box::new(SaKick),
+        Box::new(SaQuit),
+        Box::new(ChgName),
+        Box::new(ClearChan),
+        Box::new(Check),
+        Box::new(AllTime),
     ]
 }
 
@@ -969,6 +974,230 @@ impl Command for SaKick {
             .push_back(Hook::Part(tuid, key, "kicked".to_string()));
         let by = oper_nick(s, uid);
         s.snotice(&format!("{by} used SAKICK on {victim} in {chan}"));
+        CmdResult::Ok
+    }
+}
+
+/// SAQUIT — force a user to quit the network (InspIRCd `m_saquit`). Looks to
+/// everyone like a normal client QUIT.
+struct SaQuit;
+impl Command for SaQuit {
+    fn name(&self) -> &'static str {
+        "SAQUIT"
+    }
+    fn min_params(&self) -> usize {
+        1
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        if !require_oper(s, uid) {
+            return CmdResult::Fail;
+        }
+        let Some(tuid) = oper_target(s, uid, &params[0]) else {
+            return CmdResult::Fail;
+        };
+        let reason = params
+            .get(1)
+            .cloned()
+            .unwrap_or_else(|| "Services forced quit".to_string());
+        s.send(tuid, format!("ERROR :Closing link: (SAQUIT: {reason})"));
+        s.remove_user(tuid, &format!("Quit: {reason}"));
+        let by = oper_nick(s, uid);
+        s.snotice(&format!("{by} used SAQUIT on {}: {reason}", params[0]));
+        CmdResult::Ok
+    }
+}
+
+/// CHGNAME — change another user's real name (InspIRCd `m_chgname`). The oper-driven
+/// counterpart to SETNAME; broadcast to `setname`-capable peers so clients update live.
+struct ChgName;
+impl Command for ChgName {
+    fn name(&self) -> &'static str {
+        "CHGNAME"
+    }
+    fn min_params(&self) -> usize {
+        2
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        if !require_oper(s, uid) {
+            return CmdResult::Fail;
+        }
+        let Some(t) = oper_target(s, uid, &params[0]) else {
+            return CmdResult::Fail;
+        };
+        let realname = params[1].clone();
+        let prefix = match s.users.get_mut(&t) {
+            Some(u) => {
+                u.realname = realname.clone();
+                u.prefix()
+            }
+            None => return CmdResult::Fail,
+        };
+        let line = format!(":{prefix} SETNAME :{realname}");
+        if s.users.get(&t).map(|u| u.caps.setname).unwrap_or(false) {
+            s.send(t, line.clone());
+        }
+        s.notify_peers(t, &line, |c| c.setname);
+        let by = oper_nick(s, uid);
+        s.snotice(&format!("{by} used CHGNAME on {}: {realname}", params[0]));
+        CmdResult::Ok
+    }
+}
+
+/// CLEARCHAN — kick every user out of a channel (InspIRCd `m_clearchan`). Each
+/// removal is a normal KICK, propagated like SAKICK.
+struct ClearChan;
+impl Command for ClearChan {
+    fn name(&self) -> &'static str {
+        "CLEARCHAN"
+    }
+    fn min_params(&self) -> usize {
+        1
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        if !require_oper(s, uid) {
+            return CmdResult::Fail;
+        }
+        let chan = params[0].clone();
+        let key = chan.to_ascii_lowercase();
+        if !s.channels.contains_key(&key) {
+            s.numeric(uid, ERR_NOSUCHCHANNEL, &format!("{chan} :No such channel"));
+            return CmdResult::Fail;
+        }
+        let reason = params
+            .get(1)
+            .cloned()
+            .unwrap_or_else(|| "Channel cleared by services".to_string());
+        let prefix = s.users[&uid].prefix();
+        let members: Vec<Uid> = s.channels[&key].members.keys().copied().collect();
+        for tuid in members {
+            let victim = s
+                .users
+                .get(&tuid)
+                .map(|u| u.nick.clone())
+                .unwrap_or_default();
+            if victim.is_empty() {
+                continue;
+            }
+            s.to_channel(
+                &key,
+                &format!(":{prefix} KICK {chan} {victim} :{reason}"),
+                None,
+            );
+            s.propagate_from_user(uid, &format!("KICK {chan} {victim} :{reason}"));
+            if let Some(ch) = s.channels.get_mut(&key) {
+                ch.members.remove(&tuid);
+            }
+            if let Some(u) = s.users.get_mut(&tuid) {
+                u.channels.remove(&key);
+            }
+            s.events
+                .push_back(Hook::Part(tuid, key.clone(), "cleared".to_string()));
+        }
+        s.channels.retain(|_, c| !c.is_empty());
+        let by = oper_nick(s, uid);
+        s.snotice(&format!("{by} used CLEARCHAN on {chan}"));
+        CmdResult::Ok
+    }
+}
+
+/// CHECK — oper diagnostic dump for a nick or channel (InspIRCd `m_check`).
+struct Check;
+impl Command for Check {
+    fn name(&self) -> &'static str {
+        "CHECK"
+    }
+    fn min_params(&self) -> usize {
+        1
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        if !require_oper(s, uid) {
+            return CmdResult::Fail;
+        }
+        let target = params[0].clone();
+        if target.starts_with('#') {
+            let key = target.to_ascii_lowercase();
+            let (count, topic, members) = match s.channels.get(&key) {
+                Some(ch) => (
+                    ch.members.len(),
+                    ch.topic
+                        .as_ref()
+                        .map(|t| t.text.clone())
+                        .unwrap_or_default(),
+                    ch.members
+                        .keys()
+                        .filter_map(|m| s.users.get(m).map(|u| u.nick.clone()))
+                        .collect::<Vec<_>>(),
+                ),
+                None => {
+                    s.numeric(
+                        uid,
+                        ERR_NOSUCHCHANNEL,
+                        &format!("{target} :No such channel"),
+                    );
+                    return CmdResult::Fail;
+                }
+            };
+            onotice(
+                s,
+                uid,
+                &format!("*** CHECK {target}: channel, {count} members"),
+            );
+            if !topic.is_empty() {
+                onotice(s, uid, &format!("*** topic: {topic}"));
+            }
+            onotice(s, uid, &format!("*** members: {}", members.join(" ")));
+        } else if let Some(t) = s.find_nick(&target) {
+            let lines = {
+                let u = &s.users[&t];
+                vec![
+                    format!("*** CHECK {target}: {}", u.prefix()),
+                    format!("*** realhost {} ip {}", u.host, u.addr.ip()),
+                    format!("*** realname: {}", u.realname),
+                    format!(
+                        "*** account: {}  secure: {}",
+                        u.account.clone().unwrap_or_else(|| "*".to_string()),
+                        u.secure
+                    ),
+                    format!("*** umodes: +{}", u.flags.umodes()),
+                    format!(
+                        "*** signon {} idle {}s",
+                        iso_time(u.signon),
+                        now().saturating_sub(u.last_active)
+                    ),
+                    format!(
+                        "*** channels: {}",
+                        u.channels.iter().cloned().collect::<Vec<_>>().join(" ")
+                    ),
+                ]
+            };
+            for l in lines {
+                onotice(s, uid, &l);
+            }
+        } else {
+            s.numeric(
+                uid,
+                ERR_NOSUCHNICK,
+                &format!("{target} :No such nick/channel"),
+            );
+            return CmdResult::Fail;
+        }
+        CmdResult::Ok
+    }
+}
+
+/// ALLTIME — show the current server time to the requesting oper (InspIRCd
+/// `m_alltime`; on a single server there's just the one time to report).
+struct AllTime;
+impl Command for AllTime {
+    fn name(&self) -> &'static str {
+        "ALLTIME"
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, _params: &[String]) -> CmdResult {
+        if !require_oper(s, uid) {
+            return CmdResult::Fail;
+        }
+        let msg = format!("ALLTIME: {} {}", s.name, iso_time(now()));
+        onotice(s, uid, &msg);
         CmdResult::Ok
     }
 }
