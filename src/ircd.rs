@@ -375,6 +375,7 @@ impl Ircd {
         self.server.ping_links(); // keepalive on every server link
         self.server.purge_xlines(); // drop expired server bans
         self.server.purge_tbans(); // lift expired timed channel bans (TBAN)
+        self.server.prune_conn_history(); // connflood bookkeeping
         let now = crate::server::now();
         let (to_ping, to_quit) = self.server.idle_check(now);
         for uid in to_ping {

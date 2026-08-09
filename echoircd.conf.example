@@ -80,3 +80,6 @@ amu_target    = both
 # --- command aliases: /NS ... -> PRIVMSG <target> :... (services shortcuts) ---
 # alias = NS NickServ
 # alias = CS ChanServ
+
+# --- connflood: refuse >max connections per <secs> from a single IP ---
+# connflood = 5 10

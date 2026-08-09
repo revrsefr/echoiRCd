@@ -7,7 +7,7 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{IpAddr, SocketAddr, TcpStream};
 use std::sync::atomic::AtomicU64;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
@@ -135,6 +135,8 @@ pub struct Server {
     pub opermotd: Vec<String>,                     // OPERMOTD text
     pub vhosts: Vec<(String, String, String)>,     // self-service vhosts: (user, pass, host)
     pub aliases: Vec<(String, String)>,            // command aliases: (name, target-nick)
+    pub connflood: Option<(u32, u64)>,             // (max, secs) connection throttle per IP
+    pub conn_history: HashMap<IpAddr, Vec<u64>>,   // recent connection times per IP (connflood)
     // labeled-response: while Some((uid, buf)), that client's own responses are
     // diverted into `buf` instead of the socket, so `on_line` can wrap them with
     // the command's `label` (single tag, BATCH, or ACK). RefCell because the
@@ -189,6 +191,8 @@ impl Server {
             opermotd: cfg.opermotd,
             vhosts: cfg.vhosts,
             aliases: cfg.aliases,
+            connflood: cfg.connflood,
+            conn_history: HashMap::new(),
             label_capture: RefCell::new(None),
             event_tx,
             conn_counter,
@@ -273,6 +277,22 @@ impl Server {
             },
         );
 
+        // connflood — refuse an IP that's opening connections too fast
+        if let Some((max, secs)) = self.connflood {
+            let n = now();
+            let hist = self.conn_history.entry(ip).or_default();
+            hist.retain(|&t| n.saturating_sub(t) < secs);
+            hist.push(n);
+            if hist.len() as u32 > max {
+                self.send(
+                    uid,
+                    "ERROR :Closing link: (Too many connections from your IP)".to_string(),
+                );
+                self.remove_user(uid, "Connection throttled");
+                return;
+            }
+        }
+
         // Pre-registration connection notices, InspIRCd / solanum style. Ident-113
         // is archaic and firewalled, so those two are cosmetic; the hostname lookup
         // is real (see `resolver`) — its result arrives later as an Event.
@@ -314,6 +334,17 @@ impl Server {
                 uid,
                 "Couldn't look up your hostname; using your IP address instead",
             );
+        }
+    }
+
+    /// Drop stale per-IP connflood bookkeeping (called on the background tick).
+    pub fn prune_conn_history(&mut self) {
+        if let Some((_, secs)) = self.connflood {
+            let n = now();
+            self.conn_history.retain(|_, times| {
+                times.retain(|&t| n.saturating_sub(t) < secs);
+                !times.is_empty()
+            });
         }
     }
 

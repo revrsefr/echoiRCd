@@ -79,6 +79,7 @@ pub struct Config {
     pub opermotd: Vec<String>,         // OPERMOTD text, one line per entry
     pub vhosts: Vec<(String, String, String)>, // self-service vhosts: (user, pass, host)
     pub aliases: Vec<(String, String)>, // command aliases: (name, target-nick)
+    pub connflood: Option<(u32, u64)>, // (max conns, per secs) from one IP before refusing
 }
 
 impl Default for Config {
@@ -110,6 +111,7 @@ impl Default for Config {
             opermotd: Vec::new(),
             vhosts: Vec::new(),
             aliases: Vec::new(),
+            connflood: None,
         }
     }
 }
@@ -266,6 +268,17 @@ impl Config {
                     if let (Some(name), Some(target)) = (it.next(), it.next()) {
                         c.aliases
                             .push((name.to_ascii_uppercase(), target.to_string()));
+                    }
+                }
+                "connflood" => {
+                    // connflood = <max> <secs>  — refuse >max connections/secs from one IP
+                    let mut it = v.split_whitespace();
+                    if let (Some(mx), Some(sc)) = (it.next(), it.next()) {
+                        if let (Ok(mx), Ok(sc)) = (mx.parse::<u32>(), sc.parse::<u64>()) {
+                            if mx > 0 && sc > 0 {
+                                c.connflood = Some((mx, sc));
+                            }
+                        }
                     }
                 }
                 _ => {}
