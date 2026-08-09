@@ -50,6 +50,8 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(AllTime),
         Box::new(SwhoisCmd),
         Box::new(SetIdle),
+        Box::new(NickLock),
+        Box::new(NickUnlock),
     ]
 }
 
@@ -696,6 +698,84 @@ impl Command for Cban {
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         do_xline(s, uid, params, XKind::Cban)
+    }
+}
+
+/// NICKLOCK — force a user's nick and lock it so they can't change it (InspIRCd
+/// `m_nicklock`). `NICKLOCK <nick> <newnick>`; opers/services still can.
+struct NickLock;
+impl Command for NickLock {
+    fn name(&self) -> &'static str {
+        "NICKLOCK"
+    }
+    fn min_params(&self) -> usize {
+        2
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        if !require_oper(s, uid) {
+            return CmdResult::Fail;
+        }
+        let Some(tuid) = oper_target(s, uid, &params[0]) else {
+            return CmdResult::Fail;
+        };
+        let newnick = &params[1];
+        if !valid_nick(newnick) {
+            s.numeric(
+                uid,
+                ERR_ERRONEUSNICKNAME,
+                &format!("{newnick} :Erroneous nickname"),
+            );
+            return CmdResult::Fail;
+        }
+        let cur = s
+            .users
+            .get(&tuid)
+            .map(|u| u.nick.clone())
+            .unwrap_or_default();
+        if !newnick.eq_ignore_ascii_case(&cur) {
+            if s.find_nick(newnick).is_some()
+                || s.remote_nick.contains_key(&newnick.to_ascii_lowercase())
+            {
+                s.numeric(
+                    uid,
+                    ERR_NICKNAMEINUSE,
+                    &format!("{newnick} :Nickname is already in use"),
+                );
+                return CmdResult::Fail;
+            }
+            s.set_nick(tuid, newnick);
+        }
+        if let Some(u) = s.users.get_mut(&tuid) {
+            u.flags.nick_locked = true;
+        }
+        let by = oper_nick(s, uid);
+        s.snotice(&format!("{by} used NICKLOCK on {newnick}"));
+        CmdResult::Ok
+    }
+}
+
+/// NICKUNLOCK — release a NICKLOCK so the user may change nick again.
+struct NickUnlock;
+impl Command for NickUnlock {
+    fn name(&self) -> &'static str {
+        "NICKUNLOCK"
+    }
+    fn min_params(&self) -> usize {
+        1
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        if !require_oper(s, uid) {
+            return CmdResult::Fail;
+        }
+        let Some(tuid) = oper_target(s, uid, &params[0]) else {
+            return CmdResult::Fail;
+        };
+        if let Some(u) = s.users.get_mut(&tuid) {
+            u.flags.nick_locked = false;
+        }
+        let by = oper_nick(s, uid);
+        s.snotice(&format!("{by} used NICKUNLOCK on {}", params[0]));
+        CmdResult::Ok
     }
 }
 

@@ -353,6 +353,20 @@ impl Command for Nick {
             );
             return CmdResult::Fail;
         }
+        // NICKLOCK: a services-held nick can't be changed by the user (opers bypass)
+        if s.users
+            .get(&uid)
+            .map(|u| u.flags.nick_locked)
+            .unwrap_or(false)
+            && !s.is_oper(uid)
+        {
+            s.numeric(
+                uid,
+                ERR_CANTCHANGENICK,
+                ":Your nickname is locked and cannot be changed",
+            );
+            return CmdResult::Fail;
+        }
         // Q-line: a reserved nick is refused (opers and services bypass)
         if !s.is_oper(uid) {
             if let Some(reason) = s.matched_qline(newnick) {

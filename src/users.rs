@@ -32,6 +32,7 @@ pub struct UserFlags {
     pub callerid: bool,       // +g (only accept PMs from users on the ACCEPT list)
     pub showwhois: bool,      // +W (get a notice when someone WHOISes you)
     pub deny_uncommon: bool,  // +c (only users sharing a channel may PM you)
+    pub nick_locked: bool,    // NICKLOCK: services/oper holds this nick (no self-change)
     pub away: Option<String>, // AWAY message, if set
 }
 
