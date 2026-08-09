@@ -224,6 +224,24 @@ impl Server {
             .unwrap_or(default)
     }
 
+    /// Apply a freshly-loaded config to the running server — the shared body of
+    /// REHASH and the `server.rehash` RPC. Reloads the typed fields **and**
+    /// `raw_config`, so modules reading via `conf*` see the new values too.
+    pub fn apply_config(&mut self, fresh: crate::config::Config) {
+        self.motd = fresh.motd;
+        self.opers = fresh.opers;
+        self.cloak_key = fresh.cloak_key;
+        self.censor = fresh.censor;
+        self.amu = fresh.amu;
+        self.resolve_hosts = fresh.resolve_hosts;
+        self.use_resolved_host = fresh.use_resolved_host;
+        self.dnsbl_zones = fresh.dnsbl_zones;
+        self.dnsbl_action = fresh.dnsbl_action;
+        self.dnsbl_reason = fresh.dnsbl_reason;
+        self.sasl_server = fresh.sasl_server;
+        self.raw_config = fresh.raw;
+    }
+
     /// Remember an identity for WHOWAS (capped ring, newest first).
     pub fn push_whowas(
         &mut self,

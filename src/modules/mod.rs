@@ -67,6 +67,14 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
     ]
 }
 
+/// The names of the modules loaded at boot (drives the `module.list` RPC).
+pub fn module_names() -> Vec<String> {
+    default_modules()
+        .iter()
+        .map(|m| m.name().to_string())
+        .collect()
+}
+
 /// Commands contributed by modules (chained into the core command table), so a
 /// module that adds a command keeps it in its own file, InspIRCd-style.
 pub fn module_commands() -> Vec<Box<dyn Command>> {

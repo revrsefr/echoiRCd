@@ -56,17 +56,7 @@ impl Command for Rehash {
                     "admin {who} has changed the configuration of the server."
                 ));
                 s.announce(&format!("{who} is rehashing the server config file."));
-                s.motd = fresh.motd;
-                s.opers = fresh.opers;
-                s.cloak_key = fresh.cloak_key;
-                s.censor = fresh.censor;
-                s.amu = fresh.amu;
-                s.resolve_hosts = fresh.resolve_hosts;
-                s.use_resolved_host = fresh.use_resolved_host;
-                s.dnsbl_zones = fresh.dnsbl_zones;
-                s.dnsbl_action = fresh.dnsbl_action;
-                s.dnsbl_reason = fresh.dnsbl_reason;
-                s.sasl_server = fresh.sasl_server;
+                s.apply_config(fresh);
                 s.announce("Server configuration reloaded.");
                 s.numeric(uid, RPL_REHASHING, &format!("{path} :Rehashing"));
             }
