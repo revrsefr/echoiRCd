@@ -23,6 +23,13 @@ const SEPARATOR: usize = 16;
 /// A loaded MaxMind DB, cached in `Server.ext`.
 pub struct GeoDb(pub Arc<Mmdb>);
 
+/// A resolved country: the ISO 3166-1 alpha-2 code (for the `G:` geoban) and the
+/// full English name (for display).
+pub struct Country {
+    pub iso: String,
+    pub name: String,
+}
+
 /// A parsed `.mmdb` file: the raw bytes plus the tree geometry from its metadata.
 pub struct Mmdb {
     data: Vec<u8>,
@@ -224,8 +231,8 @@ impl Mmdb {
         }
     }
 
-    /// The 2-letter ISO country code for `ip`, if the database has one.
-    pub fn country(&self, ip: IpAddr) -> Option<String> {
+    /// The country for `ip` — ISO code plus English name — if the database has one.
+    pub fn country(&self, ip: IpAddr) -> Option<Country> {
         // build the bit path; IPv4 in an IPv6 db is prefixed with 96 zero bits
         let mut bits: Vec<bool> = Vec::with_capacity(128);
         match ip {
@@ -264,7 +271,15 @@ impl Mmdb {
                     base: self.data_start,
                 };
                 let country = d.map_get(abs, "country")?;
-                return d.string(d.map_get(country, "iso_code")?);
+                let iso = d.string(d.map_get(country, "iso_code")?)?;
+                // country.names.en — the `names` submap is usually a shared pointer;
+                // map_get/string follow it. Fall back to the code if it's absent.
+                let name = d
+                    .map_get(country, "names")
+                    .and_then(|names| d.map_get(names, "en"))
+                    .and_then(|en| d.string(en))
+                    .unwrap_or_else(|| iso.clone());
+                return Some(Country { iso, name });
             }
             node = rec;
         }
@@ -286,32 +301,32 @@ pub fn init(s: &mut Server) {
     }
 }
 
-/// The ISO country code of `ip` per the loaded database, uppercased.
-pub fn country_of(s: &Server, ip: IpAddr) -> Option<String> {
-    s.ext
-        .get::<GeoDb>()
-        .and_then(|db| db.0.country(ip))
-        .map(|c| c.to_ascii_uppercase())
+/// The country of `ip` per the loaded database (ISO code uppercased).
+pub fn lookup(s: &Server, ip: IpAddr) -> Option<Country> {
+    s.ext.get::<GeoDb>().and_then(|db| db.0.country(ip)).map(|c| Country {
+        iso: c.iso.to_ascii_uppercase(),
+        name: c.name,
+    })
 }
 
-/// The `G:<cc>` geoban match: does `uid`'s country equal (case-insensitively) the
-/// country code in the extban? Dispatched from `Server::ban_list_hit`.
+/// The `G:<cc>` geoban match: does `uid`'s country code equal (case-insensitively)
+/// one of the codes in the extban? Dispatched from `Server::ban_list_hit`.
 pub fn geoban_match(s: &Server, uid: Uid, spec: &str) -> bool {
     let Some(ip) = s.users.get(&uid).map(|u| u.addr.ip()) else {
         return false;
     };
-    match country_of(s, ip) {
-        Some(cc) => spec
+    match lookup(s, ip) {
+        Some(c) => spec
             .split(',')
-            .any(|want| want.trim().eq_ignore_ascii_case(&cc)),
+            .any(|want| want.trim().eq_ignore_ascii_case(&c.iso)),
         None => false,
     }
 }
 
-/// A WHOIS line (opers only) showing the target's country.
+/// A WHOIS line (opers only) naming the target's country.
 pub fn whois_line(s: &Server, tuid: Uid) -> Option<String> {
     let ip = s.users.get(&tuid).map(|u| u.addr.ip())?;
-    country_of(s, ip).map(|cc| format!("is connecting from country {cc}"))
+    lookup(s, ip).map(|c| format!("is connecting from country {}", c.name))
 }
 
 pub fn commands() -> Vec<Box<dyn Command>> {
@@ -345,8 +360,8 @@ impl Command for GeoIpCmd {
         let nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
         let msg = match ip {
             None => format!("GEOIP: no such nick, and {target} is not an IP"),
-            Some(ip) => match country_of(s, ip) {
-                Some(cc) => format!("GEOIP: {target} ({ip}) is in country {cc}"),
+            Some(ip) => match lookup(s, ip) {
+                Some(c) => format!("GEOIP: {target} ({ip}) is in {} ({})", c.name, c.iso),
                 None => format!("GEOIP: no country found for {target} ({ip})"),
             },
         };
@@ -376,17 +391,16 @@ mod tests {
         let Some(db) = load() else {
             return;
         };
-        // 8.8.8.8 (Google DNS) is US in every GeoLite2 vintage.
-        assert_eq!(
-            db.country(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))).as_deref(),
-            Some("US")
-        );
+        // 8.8.8.8 (Google DNS) is US, "United States", in every GeoLite2 vintage.
+        let us = db.country(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))).unwrap();
+        assert_eq!(us.iso, "US");
+        assert_eq!(us.name, "United States");
         // A private address has no country record.
-        assert_eq!(db.country(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))), None);
+        assert!(db.country(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).is_none());
         // IPv6 traversal (Google public DNS) also resolves to US.
         assert_eq!(
-            db.country("2001:4860:4860::8888".parse().unwrap()).as_deref(),
-            Some("US")
+            db.country("2001:4860:4860::8888".parse().unwrap()).unwrap().iso,
+            "US"
         );
     }
 }
