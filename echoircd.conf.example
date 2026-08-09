@@ -117,6 +117,9 @@ amu_target    = both
 # hidewhois_hide_server = yes  # hide 312
 # hidewhois_hide_idle = yes    # hide 317
 # hidewhois_hide_secure = yes  # hide 671
+# --- chanlog (m_chanlog): mirror the oper server-notice stream into a channel so
+#     staff can watch it in a normal window. Set the channel (create/keep it opped):
+# chanlog = #snotices
 # --- banredirect (m_banredirect): no config needed — it extends ban syntax. A
 #     ban `+b <mask>$<#channel>` bounces a matching user into #channel instead of
 #     refusing them, e.g.  /MODE #main +b *!*@*.spammer.net$#quarantine

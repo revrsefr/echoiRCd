@@ -10,6 +10,7 @@ pub mod banredirect;
 pub mod blockamsg;
 pub mod channames;
 pub mod channelban;
+pub mod chanlog;
 pub mod chathistory;
 pub mod cloak;
 pub mod cloudflare_challenge;
