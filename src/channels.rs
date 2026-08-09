@@ -411,8 +411,12 @@ impl Server {
         {
             return; // unknown user, or already joined
         }
+        // IRC operators override the join restrictions below (m_override); each
+        // bypass sets `overrode`, snoticed once the join succeeds (accountability).
+        let is_oper = self.users.get(&uid).map(|u| u.flags.oper).unwrap_or(false);
+        let mut overrode = false;
         // CBAN — a forbidden channel name (opers bypass)
-        if !self.users.get(&uid).map(|u| u.flags.oper).unwrap_or(false) {
+        if !is_oper {
             if let Some(reason) = self.matched_cban(&key) {
                 self.numeric(
                     uid,
@@ -422,16 +426,19 @@ impl Server {
                 return;
             }
         }
-        // an existing channel can refuse the join (+k / +b / +i / +l)
+        // an existing channel can refuse the join (+k / +b / +i / +z / +R / +J)
         if let Some(ch) = self.channels.get(&key) {
             if let Some(k) = &ch.modes.key {
                 if key_arg != Some(k.as_str()) {
-                    self.numeric(
-                        uid,
-                        ERR_BADCHANNELKEY,
-                        &format!("{name} :Cannot join channel (+k)"),
-                    );
-                    return;
+                    if !is_oper {
+                        self.numeric(
+                            uid,
+                            ERR_BADCHANNELKEY,
+                            &format!("{name} :Cannot join channel (+k)"),
+                        );
+                        return;
+                    }
+                    overrode = true;
                 }
             }
             // +b — bans block even an invited user, unless a +e exception matches
@@ -439,36 +446,45 @@ impl Server {
             if ch.bans.iter().any(|b| glob_match(&b.mask, &mask))
                 && !ch.excepts.iter().any(|e| glob_match(&e.mask, &mask))
             {
-                self.numeric(
-                    uid,
-                    ERR_BANNEDFROMCHAN,
-                    &format!("{name} :Cannot join channel (+b)"),
-                );
-                return;
+                if !is_oper {
+                    self.numeric(
+                        uid,
+                        ERR_BANNEDFROMCHAN,
+                        &format!("{name} :Cannot join channel (+b)"),
+                    );
+                    return;
+                }
+                overrode = true;
             }
             // +i — unless invited or matched by a +I invite exception
             if ch.modes.invite_only
                 && !ch.invites.contains(&uid)
                 && !ch.invex.iter().any(|e| glob_match(&e.mask, &mask))
             {
-                self.numeric(
-                    uid,
-                    ERR_INVITEONLYCHAN,
-                    &format!("{name} :Cannot join channel (+i)"),
-                );
-                return;
+                if !is_oper {
+                    self.numeric(
+                        uid,
+                        ERR_INVITEONLYCHAN,
+                        &format!("{name} :Cannot join channel (+i)"),
+                    );
+                    return;
+                }
+                overrode = true;
             }
             // +z — TLS-connected users only
             if ch.modes.secure_only && !self.users.get(&uid).map(|u| u.secure).unwrap_or(false) {
-                self.numeric(
-                    uid,
-                    ERR_SECUREONLYCHAN,
-                    &format!("{name} :Cannot join channel; TLS users only (+z is set)"),
-                );
-                return;
+                if !is_oper {
+                    self.numeric(
+                        uid,
+                        ERR_SECUREONLYCHAN,
+                        &format!("{name} :Cannot join channel; TLS users only (+z is set)"),
+                    );
+                    return;
+                }
+                overrode = true;
             }
-            // +O — IRC operators only
-            if ch.modes.oper_only && !self.users.get(&uid).map(|u| u.flags.oper).unwrap_or(false) {
+            // +O — IRC operators only (opers are allowed by definition)
+            if ch.modes.oper_only && !is_oper {
                 self.numeric(
                     uid,
                     ERR_CANTJOINOPERSONLY,
@@ -484,32 +500,42 @@ impl Server {
                     .map(|u| u.account.is_none())
                     .unwrap_or(true)
             {
-                self.numeric(
-                    uid,
-                    ERR_NEEDREGGEDNICK,
-                    &format!("{name} :Cannot join channel; you must be logged in (+R is set)"),
-                );
-                return;
+                if !is_oper {
+                    self.numeric(
+                        uid,
+                        ERR_NEEDREGGEDNICK,
+                        &format!("{name} :Cannot join channel; you must be logged in (+R is set)"),
+                    );
+                    return;
+                }
+                overrode = true;
             }
             // +J <secs> — can't rejoin within N seconds of being kicked
             if let Some(secs) = ch.modes.kicknorejoin {
                 if let Some(&kt) = ch.recent_kicks.get(&uid) {
                     if now().saturating_sub(kt) < secs as u64 {
-                        self.numeric(
-                            uid,
-                            ERR_DELAYREJOIN,
-                            &format!("{name} :You must wait {secs}s after a kick to rejoin (+J)"),
-                        );
-                        return;
+                        if !is_oper {
+                            self.numeric(
+                                uid,
+                                ERR_DELAYREJOIN,
+                                &format!(
+                                    "{name} :You must wait {secs}s after a kick to rejoin (+J)"
+                                ),
+                            );
+                            return;
+                        }
+                        overrode = true;
                     }
                 }
             }
         }
-        // +l full — with +L redirect, bounce the user to the target instead
+        // +l full — with +L redirect, bounce the user to the target instead (opers override)
         if let Some(ch) = self.channels.get(&key) {
             let full = ch.modes.limit.is_some_and(|l| ch.members.len() as u32 >= l);
             let redirect = ch.modes.redirect.clone();
-            if full {
+            if full && is_oper {
+                overrode = true;
+            } else if full {
                 match redirect {
                     Some(t)
                         if !self.in_redirect
@@ -537,14 +563,22 @@ impl Server {
                 }
             }
         }
-        // +j join flood — once tripped, the channel locks new joins out for 60s
-        if self.channels.contains_key(&key) && self.joinflood_check(&key) {
+        // +j join flood — once tripped, the channel locks new joins out for 60s (opers exempt)
+        if !is_oper && self.channels.contains_key(&key) && self.joinflood_check(&key) {
             self.numeric(
                 uid,
                 ERR_UNAVAILRESOURCE,
                 &format!("{name} :This channel is temporarily unavailable (+j join flood)"),
             );
             return;
+        }
+        if overrode {
+            let nick = self
+                .users
+                .get(&uid)
+                .map(|u| u.nick.clone())
+                .unwrap_or_default();
+            self.snotice(&format!("{nick} used oper override to join {name}"));
         }
         let is_new = !self.channels.contains_key(&key);
         let ch = self
