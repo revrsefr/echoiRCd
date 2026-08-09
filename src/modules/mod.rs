@@ -18,6 +18,7 @@ pub mod filter;
 pub mod flood;
 pub mod hashident;
 pub mod hidewhois;
+pub mod jwt;
 pub mod markread;
 pub mod metadata;
 pub mod multiline;
@@ -25,6 +26,7 @@ pub mod network_icon;
 pub mod password_hash;
 pub mod profilelink;
 pub mod realnameban;
+pub mod recaptcha;
 pub mod reputation;
 pub mod restrictcommands;
 pub mod restrictmsg;
@@ -57,6 +59,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(connectban::ConnectBan),
         Box::new(securelist::SecureList),
         Box::new(hashident::HashIdent),
+        Box::new(recaptcha::ReCaptcha),
     ]
 }
 
@@ -73,5 +76,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(securitygroups::commands())
         .chain(password_hash::commands())
         .chain(account_registration::commands())
+        .chain(recaptcha::commands())
         .collect()
 }
