@@ -42,6 +42,16 @@ pub enum Event {
         host: Option<String>,
         dnsbl: crate::modules::dnsbl::Outcome,
     },
+    /// A module's async HTTP request finished. `tag` is `"<module>:<detail>"`
+    /// so the core can route the reply back to the module that issued it (e.g.
+    /// account registration, captcha verification). `status` is 0 on transport
+    /// failure.
+    HttpResult {
+        uid: Uid,
+        tag: String,
+        status: u16,
+        body: String,
+    },
     /// Background timer tick — drives ping/idle timeouts.
     Tick,
 }
@@ -129,6 +139,22 @@ impl Ircd {
                         self.on_line(uid, &line);
                     }
                     self.try_register(uid); // DNS may have been the last thing we waited on
+                }
+                Event::HttpResult {
+                    uid,
+                    tag,
+                    status,
+                    body,
+                } => {
+                    if let Some(detail) = tag.strip_prefix("acctreg:") {
+                        crate::modules::account_registration::on_http_result(
+                            &mut self.server,
+                            uid,
+                            detail,
+                            status,
+                            &body,
+                        );
+                    }
                 }
                 Event::Tick => self.on_tick(),
             }

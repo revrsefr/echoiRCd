@@ -113,6 +113,7 @@ pub const SUPPORTED_CAPS: &[&str] = &[
     "draft/pre-away",
     "draft/metadata-2",
     "draft/multiline",
+    "draft/account-registration",
     "cap-notify",
 ];
 
@@ -143,6 +144,7 @@ pub struct Caps {
     pub pre_away: bool,         // draft/pre-away — may set AWAY before registration
     pub metadata: bool,         // draft/metadata-2 — wants metadata + change notices
     pub multiline: bool,        // draft/multiline — may send multiline message batches
+    pub acct_registration: bool, // draft/account-registration — REGISTER/VERIFY understood
     pub cap_notify: bool,
 }
 
@@ -153,7 +155,7 @@ impl Caps {
 
     /// The `CAP LS` token list; `sasl` carries its mechanisms for 302 clients.
     /// EXTERNAL is only offered on TLS connections (it needs a client cert).
-    pub fn ls_line(cap302: bool, secure: bool) -> String {
+    pub fn ls_line(cap302: bool, secure: bool, acctreg: &str) -> String {
         SUPPORTED_CAPS
             .iter()
             .map(|c| {
@@ -167,6 +169,8 @@ impl Caps {
                     format!(
                         "draft/multiline=max-bytes={MLINE_MAX_BYTES},max-lines={MLINE_MAX_LINES}"
                     )
+                } else if *c == "draft/account-registration" && cap302 && !acctreg.is_empty() {
+                    format!("draft/account-registration={acctreg}")
                 } else {
                     (*c).to_string()
                 }
@@ -199,6 +203,7 @@ impl Caps {
             "draft/pre-away" => self.pre_away,
             "draft/metadata-2" => self.metadata,
             "draft/multiline" => self.multiline,
+            "draft/account-registration" => self.acct_registration,
             "cap-notify" => self.cap_notify,
             _ => false,
         }
@@ -229,6 +234,7 @@ impl Caps {
             "draft/pre-away" => &mut self.pre_away,
             "draft/metadata-2" => &mut self.metadata,
             "draft/multiline" => &mut self.multiline,
+            "draft/account-registration" => &mut self.acct_registration,
             "cap-notify" => &mut self.cap_notify,
             _ => return false,
         };
@@ -564,12 +570,12 @@ mod tests {
         assert!(!c.set("bogus-cap", true)); // unknown cap rejected
         assert!(c.has("server-time") && c.has("multi-prefix") && !c.has("sasl"));
         assert_eq!(c.enabled(), "server-time multi-prefix"); // SUPPORTED order
-        assert!(Caps::ls_line(true, false).contains("sasl=PLAIN")); // 302 shows mechs
-        assert!(!Caps::ls_line(true, false).contains("EXTERNAL")); // plaintext: no EXTERNAL
-        assert!(Caps::ls_line(true, true).contains("sasl=PLAIN,EXTERNAL")); // TLS offers it
+        assert!(Caps::ls_line(true, false, "").contains("sasl=PLAIN")); // 302 shows mechs
+        assert!(!Caps::ls_line(true, false, "").contains("EXTERNAL")); // plaintext: no EXTERNAL
+        assert!(Caps::ls_line(true, true, "").contains("sasl=PLAIN,EXTERNAL")); // TLS offers it
         assert!(
-            Caps::ls_line(false, false).contains("sasl")
-                && !Caps::ls_line(false, false).contains("sasl=")
+            Caps::ls_line(false, false, "").contains("sasl")
+                && !Caps::ls_line(false, false, "").contains("sasl=")
         );
         c.set("server-time", false);
         assert!(!c.has("server-time"));

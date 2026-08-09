@@ -358,6 +358,37 @@ impl Server {
         }
     }
 
+    /// Fire an HTTP POST on a worker thread and deliver `(status, body)` back to
+    /// the core as `Event::HttpResult { uid, tag, .. }` — the same self-injection
+    /// pattern as the DNS resolver, so a slow endpoint never blocks the main loop.
+    /// `tag` is `"<module>:<detail>"`; the core routes the reply by its prefix.
+    pub fn spawn_http(
+        &self,
+        uid: Uid,
+        tag: String,
+        url: String,
+        body: String,
+        headers: Vec<(String, String)>,
+    ) {
+        let tx = self.event_tx.clone();
+        std::thread::spawn(move || {
+            let (status, body) = crate::http::post(
+                &url,
+                "application/x-www-form-urlencoded",
+                &body,
+                &headers,
+                std::time::Duration::from_secs(10),
+            )
+            .unwrap_or((0, String::new()));
+            let _ = tx.send(crate::ircd::Event::HttpResult {
+                uid,
+                tag,
+                status,
+                body,
+            });
+        });
+    }
+
     /// A pre-registration `:server NOTICE * :*** <msg>` line.
     pub(crate) fn notice_star(&self, uid: Uid, msg: &str) {
         self.send(uid, format!(":{} NOTICE * :*** {msg}", self.name));

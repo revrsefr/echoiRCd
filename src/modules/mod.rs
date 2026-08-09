@@ -3,6 +3,7 @@
 //! is the exception — it's driven straight from the connection lifecycle rather
 //! than the hook bus, but lives here as its own self-contained unit.
 
+pub mod account_registration;
 pub mod antimixedutf8;
 pub mod antirandom;
 pub mod blockamsg;
@@ -71,5 +72,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(reputation::commands())
         .chain(securitygroups::commands())
         .chain(password_hash::commands())
+        .chain(account_registration::commands())
         .collect()
 }

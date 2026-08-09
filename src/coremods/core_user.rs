@@ -174,12 +174,13 @@ impl Command for Cap {
                     u.cap = true; // hold registration until CAP END
                     u.cap_302 |= cap302;
                 }
+                let acctreg = crate::modules::account_registration::cap_tokens(s);
                 s.send(
                     uid,
                     format!(
                         ":{} CAP {who} LS :{}",
                         s.name,
-                        Caps::ls_line(cap302, secure)
+                        Caps::ls_line(cap302, secure, &acctreg)
                     ),
                 );
             }
