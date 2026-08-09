@@ -13,12 +13,13 @@ use crate::Uid;
 /// Per-member prefix modes (+q/+a/+o/+h/+v). Flag modes live in [`ChanModes`].
 #[derive(Default)]
 pub struct Member {
-    pub owner: bool,  // +q (~)
-    pub admin: bool,  // +a (&)
-    pub op: bool,     // +o (@)
-    pub halfop: bool, // +h (%)
-    pub voice: bool,  // +v (+)
-    pub joined: u64,  // unix ts this member joined (for +d delaymsg; 0 = unknown)
+    pub owner: bool,              // +q (~)
+    pub admin: bool,              // +a (&)
+    pub op: bool,                 // +o (@)
+    pub halfop: bool,             // +h (%)
+    pub voice: bool,              // +v (+)
+    pub joined: u64,              // unix ts this member joined (for +d delaymsg; 0 = unknown)
+    pub recent_msgs: Vec<String>, // +K repeat: this member's last few lines here
 }
 
 /// Prefix ranks, high→low — gate who may grant a prefix / kick whom.
@@ -157,6 +158,7 @@ pub struct ChanModes {
     pub kicknorejoin: Option<u32>,   // +J <secs> — block rejoin for N secs after a kick
     pub opmoderated: bool,           // +U — unprivileged users' messages go to ops only
     pub delaymsg: Option<u32>,       // +d <secs> — new joiners can't speak for N secs
+    pub repeat: Option<u32>,         // +K <n> — block a line repeated within your last n
 }
 
 impl ChanModes {

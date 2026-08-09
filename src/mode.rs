@@ -91,6 +91,7 @@ static CHAN_MODES: &[&(dyn ChanMode + Sync)] = &[
     &KICKNOREJOIN,
     &OPMODERATED,
     &DELAYMSG,
+    &REPEAT,
 ];
 
 // --- prefix modes (+q/+a/+o/+h/+v): a per-member rank, needs a nick ----------
@@ -952,6 +953,47 @@ impl ChanMode for DelayMsgMode {
     }
 }
 
+/// +K `<n>` — block a message identical to one of the sender's previous `<n>`
+/// lines in this channel (InspIRCd `m_repeat`, simplified). Ops are exempt.
+struct RepeatMode;
+static REPEAT: RepeatMode = RepeatMode;
+impl ChanMode for RepeatMode {
+    fn letter(&self) -> char {
+        'K'
+    }
+    fn wants_param(&self, adding: bool) -> bool {
+        adding
+    }
+    fn apply(
+        &self,
+        s: &mut Server,
+        _chan: &str,
+        key: &str,
+        _uid: Uid,
+        adding: bool,
+        param: Option<&str>,
+    ) -> Applied {
+        if adding {
+            let Some(n) = param
+                .and_then(|p| p.parse::<u32>().ok())
+                .filter(|&n| n >= 1)
+            else {
+                return Applied::No;
+            };
+            let n = n.min(20);
+            if let Some(c) = s.channels.get_mut(key) {
+                c.modes.repeat = Some(n);
+            }
+            Applied::Yes(Some(n.to_string()))
+        } else {
+            if let Some(c) = s.channels.get_mut(key) {
+                c.modes.repeat = None;
+            }
+            Applied::Yes(None)
+        }
+    }
+}
+
 // === user modes ============================================================
 
 /// A user mode (+i/+w/+o) — same handler-object shape as [`ChanMode`], and the
@@ -1192,7 +1234,7 @@ mod tests {
 
     #[test]
     fn registry_covers_all_channel_modes() {
-        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuBQAPJUd".chars() {
+        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuBQAPJUdK".chars() {
             assert!(chan_mode(c).is_some(), "missing handler for +{c}");
         }
         assert!(chan_mode('y').is_none());

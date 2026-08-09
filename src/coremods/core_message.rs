@@ -361,6 +361,37 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
                 }
             }
         }
+        // +K repeat — reject a line the sender just repeated; else remember it (ops exempt)
+        if let Some(n) = s.channels.get(&key).and_then(|c| c.modes.repeat) {
+            if s.rank(uid, &key) < RANK_HALFOP {
+                let repeated = s
+                    .channels
+                    .get(&key)
+                    .and_then(|c| c.members.get(&uid))
+                    .map(|m| m.recent_msgs.iter().any(|p| p == &body))
+                    .unwrap_or(false);
+                if repeated {
+                    if !notice {
+                        s.numeric(
+                            uid,
+                            ERR_CANNOTSENDTOCHAN,
+                            &format!("{target} :Cannot send to channel (+K: repeated message)"),
+                        );
+                    }
+                    return CmdResult::Fail;
+                }
+                if let Some(m) = s
+                    .channels
+                    .get_mut(&key)
+                    .and_then(|c| c.members.get_mut(&uid))
+                {
+                    m.recent_msgs.push(body.clone());
+                    while m.recent_msgs.len() > n as usize {
+                        m.recent_msgs.remove(0);
+                    }
+                }
+            }
+        }
         // deliver to every member except the sender and +D (deaf) users, tagging
         // per-recipient (server-time + any client-only tags on the line)
         let line = format!(":{prefix} {cmd} {target} :{body}");
