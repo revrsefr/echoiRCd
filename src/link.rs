@@ -915,7 +915,7 @@ impl Server {
             format!(":{prefix} PART {chan} :{reason}")
         };
         self.to_channel(&key, &line, None);
-        self.channels.retain(|_, c| !c.is_empty());
+        self.channels.retain(|_, c| c.keep_alive());
         let fwd = if reason.is_empty() {
             format!(":{uuid} PART {chan}")
         } else {
@@ -950,7 +950,7 @@ impl Server {
         for m in notify {
             self.send(m, line.clone());
         }
-        self.channels.retain(|_, c| !c.is_empty());
+        self.channels.retain(|_, c| c.keep_alive());
         if let Some(ru) = self.remote_users.remove(uuid) {
             self.remote_nick.remove(&ru.nick.to_ascii_lowercase());
         }
@@ -1056,7 +1056,7 @@ impl Server {
             &format!(":{prefix} KICK {chan} {victim} :{reason}"),
             None,
         );
-        self.channels.retain(|_, c| !c.is_empty());
+        self.channels.retain(|_, c| c.keep_alive());
         self.propagate(&format!(":{src} KICK {chan} {victim} :{reason}"), Some(via));
     }
 

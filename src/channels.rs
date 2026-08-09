@@ -149,6 +149,9 @@ pub struct ChanModes {
     pub redirect: Option<String>,    // +L <#target> — when full, send there
     pub history: Option<(u32, u64)>, // +H <lines>:<secs> — replay recent messages to joiners
     pub anticaps: Option<u8>,        // +B <percent> — block messages that are mostly CAPS
+    pub nokicks: bool,               // +Q — KICK is disabled on the channel
+    pub allowinvite: bool,           // +A — any member (not just ops) may INVITE
+    pub permanent: bool,             // +P — channel persists with zero members
 }
 
 impl ChanModes {
@@ -172,6 +175,9 @@ impl ChanModes {
             'M' => self.reg_moderated = on,
             'G' => self.censor = on,
             'u' => self.auditorium = on,
+            'Q' => self.nokicks = on,
+            'A' => self.allowinvite = on,
+            'P' => self.permanent = on,
             _ => {}
         }
     }
@@ -305,6 +311,12 @@ impl Channel {
     pub fn is_empty(&self) -> bool {
         self.members.is_empty() && self.rmembers.is_empty()
     }
+
+    /// Whether to keep this channel in the table: it has members, or it's +P
+    /// (permanent). The predicate every `channels.retain` prune uses.
+    pub fn keep_alive(&self) -> bool {
+        !self.is_empty() || self.modes.permanent
+    }
 }
 
 impl Server {
@@ -350,7 +362,7 @@ impl Server {
         if let Some(u) = self.users.get_mut(&uid) {
             u.channels.remove(&key);
         }
-        self.channels.retain(|_, c| !c.is_empty());
+        self.channels.retain(|_, c| c.keep_alive());
     }
 
     /// Join a user to a channel (creating it if new, giving the creator +o),
@@ -745,7 +757,7 @@ impl Server {
         if let Some(u) = self.users.get_mut(&uid) {
             u.channels.remove(key);
         }
-        self.channels.retain(|_, c| !c.is_empty());
+        self.channels.retain(|_, c| c.keep_alive());
         self.events
             .push_back(Hook::Part(uid, key.to_string(), "flood".to_string()));
     }

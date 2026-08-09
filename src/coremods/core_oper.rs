@@ -975,7 +975,7 @@ impl Command for SaKick {
         if let Some(u) = s.users.get_mut(&tuid) {
             u.channels.remove(&key);
         }
-        s.channels.retain(|_, c| !c.is_empty());
+        s.channels.retain(|_, c| c.keep_alive());
         s.events
             .push_back(Hook::Part(tuid, key, "kicked".to_string()));
         let by = oper_nick(s, uid);
@@ -1099,7 +1099,7 @@ impl Command for ClearChan {
             s.events
                 .push_back(Hook::Part(tuid, key.clone(), "cleared".to_string()));
         }
-        s.channels.retain(|_, c| !c.is_empty());
+        s.channels.retain(|_, c| c.keep_alive());
         let by = oper_nick(s, uid);
         s.snotice(&format!("{by} used CLEARCHAN on {chan}"));
         CmdResult::Ok
@@ -1208,7 +1208,8 @@ impl Command for SwhoisCmd {
         let Some(t) = oper_target(s, uid, &params[0]) else {
             return CmdResult::Fail;
         };
-        let text = params[1].clone();
+        // everything after the nick is the line — works with or without a `:`
+        let text = params[1..].join(" ");
         if let Some(u) = s.users.get_mut(&t) {
             if text.is_empty() {
                 u.ext.take::<Swhois>();

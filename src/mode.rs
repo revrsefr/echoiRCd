@@ -85,6 +85,9 @@ static CHAN_MODES: &[&(dyn ChanMode + Sync)] = &[
     &REDIRECT,
     &CHANHISTORY,
     &ANTICAPS,
+    &NOKICKS,
+    &ALLOWINVITE,
+    &PERMANENT,
 ];
 
 // --- prefix modes (+q/+a/+o/+h/+v): a per-member rank, needs a nick ----------
@@ -293,6 +296,27 @@ static CENSOR: Flag = Flag {
 static AUDITORIUM: Flag = Flag {
     ch: 'u',
     set: set_auditorium,
+};
+fn set_nokicks(m: &mut ChanModes, v: bool) {
+    m.nokicks = v;
+}
+fn set_allowinvite(m: &mut ChanModes, v: bool) {
+    m.allowinvite = v;
+}
+fn set_permanent(m: &mut ChanModes, v: bool) {
+    m.permanent = v;
+}
+static NOKICKS: Flag = Flag {
+    ch: 'Q',
+    set: set_nokicks,
+};
+static ALLOWINVITE: Flag = Flag {
+    ch: 'A',
+    set: set_allowinvite,
+};
+static PERMANENT: Flag = Flag {
+    ch: 'P',
+    set: set_permanent,
 };
 
 impl ChanMode for Flag {
@@ -1059,7 +1083,7 @@ mod tests {
 
     #[test]
     fn registry_covers_all_channel_modes() {
-        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuB".chars() {
+        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuBQAP".chars() {
             assert!(chan_mode(c).is_some(), "missing handler for +{c}");
         }
         assert!(chan_mode('y').is_none());

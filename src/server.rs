@@ -423,7 +423,7 @@ impl Server {
             for m in seen {
                 self.send(m, line.clone());
             }
-            self.channels.retain(|_, c| !c.is_empty());
+            self.channels.retain(|_, c| c.keep_alive());
             self.watch_notify_offline(&user.nick); // tell WATCH/MONITOR watchers
         }
     }

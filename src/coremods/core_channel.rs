@@ -99,7 +99,7 @@ impl Command for Cycle {
         if let Some(u) = s.users.get_mut(&uid) {
             u.channels.remove(&key);
         }
-        s.channels.retain(|_, c| !c.is_empty());
+        s.channels.retain(|_, c| c.keep_alive());
         s.join(uid, chan, None);
         CmdResult::Ok
     }
@@ -167,7 +167,7 @@ impl Command for Remove {
         if let Some(u) = s.users.get_mut(&tuid) {
             u.channels.remove(&key);
         }
-        s.channels.retain(|_, c| !c.is_empty());
+        s.channels.retain(|_, c| c.keep_alive());
         CmdResult::Ok
     }
 }
@@ -195,8 +195,11 @@ impl Command for Invite {
             );
             return CmdResult::Fail;
         }
-        // only ops may invite into an +i channel
-        if s.channels[&key].modes.invite_only && !s.is_op(uid, &key) {
+        // only ops may invite into an +i channel — unless +A (allow anyone to invite)
+        if s.channels[&key].modes.invite_only
+            && !s.channels[&key].modes.allowinvite
+            && !s.is_op(uid, &key)
+        {
             s.numeric(
                 uid,
                 ERR_CHANOPRIVSNEEDED,
@@ -373,7 +376,7 @@ impl Command for Part {
             if let Some(u) = s.users.get_mut(&uid) {
                 u.channels.remove(&key);
             }
-            s.channels.retain(|_, c| !c.is_empty());
+            s.channels.retain(|_, c| c.keep_alive());
             s.events.push_back(Hook::Part(uid, key, reason.clone()));
         }
         CmdResult::Ok
@@ -428,6 +431,15 @@ impl Command for Kick {
             );
             return CmdResult::Fail;
         }
+        // +Q — kicks disabled (IRC operators bypass; SAKICK is a separate path)
+        if s.channels[&key].modes.nokicks && !s.is_oper(uid) {
+            s.numeric(
+                uid,
+                ERR_CHANOPRIVSNEEDED,
+                &format!("{chan} :Kicks are disabled here (+Q)"),
+            );
+            return CmdResult::Fail;
+        }
         let kicker = s.users[&uid].nick.clone();
         let reason = params.get(2).cloned().unwrap_or(kicker);
         let prefix = s.users[&uid].prefix();
@@ -443,7 +455,7 @@ impl Command for Kick {
         if let Some(u) = s.users.get_mut(&tuid) {
             u.channels.remove(&key);
         }
-        s.channels.retain(|_, c| !c.is_empty());
+        s.channels.retain(|_, c| c.keep_alive());
         s.events
             .push_back(Hook::Part(tuid, key, "kicked".to_string()));
         CmdResult::Ok

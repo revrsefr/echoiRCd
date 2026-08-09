@@ -175,9 +175,10 @@ impl Command for Whois {
                 &format!("{nick} :is an IRC operator"),
             );
         }
-        // 320: oper-set SWHOIS line
+        // 320: oper-set SWHOIS line. No redundant target-nick param — just the
+        // text — so clients that don't special-case 320 don't echo the nick.
         if let Some(line) = &swhois {
-            s.numeric(uid, RPL_WHOISSPECIAL, &format!("{nick} :{line}"));
+            s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));
         }
         // opers can see through the cloak to the real host/ip
         if asker_oper && disp != realhost {
