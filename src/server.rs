@@ -598,59 +598,90 @@ impl Server {
     }
 
     /// Send a server notice to every operator who has snomask (+s) on.
-    pub fn snotice(&self, msg: &str) {
-        // record it in the rolling server log (for RPC log.tail / log.events)
-        {
-            let mut lg = self.log.borrow_mut();
-            lg.seq += 1;
-            let id = lg.seq;
-            lg.ring.push_back(LogLine {
-                id,
-                ts: now(),
-                msg: msg.to_string(),
-            });
-            while lg.ring.len() > 1000 {
-                lg.ring.pop_front();
-            }
+    /// Record one server-notice line in the rolling log (for RPC log.tail/events).
+    fn log_push(&self, msg: &str) {
+        let mut lg = self.log.borrow_mut();
+        lg.seq += 1;
+        let id = lg.seq;
+        lg.ring.push_back(LogLine {
+            id,
+            ts: now(),
+            msg: msg.to_string(),
+        });
+        while lg.ring.len() > 1000 {
+            lg.ring.pop_front();
         }
+    }
+
+    /// Deliver a `*** msg` server notice to `uid`, folding in that recipient's
+    /// server-time + `draft/json-log` tags — the two tags every server notice may
+    /// carry. `jval` is the per-notice escaped json-log value, shared across
+    /// recipients (`""` when nobody negotiated the cap). One path for both
+    /// `snotice` and `announce`, so tagging is consistent no matter the caller.
+    fn deliver_server_notice(&self, uid: Uid, msg: &str, jval: &str) {
+        let Some(u) = self.users.get(&uid) else {
+            return;
+        };
+        let nick = u.nick.clone();
+        let mut tags: Vec<String> = Vec::new();
+        if u.caps.server_time {
+            tags.push(format!("time={}", iso_time(now())));
+        }
+        if u.caps.json_log && !jval.is_empty() {
+            tags.push(format!("draft/json-log={jval}"));
+        }
+        let base = format!(":{} NOTICE {nick} :*** {msg}", self.name);
+        let line = if tags.is_empty() {
+            base
+        } else {
+            format!("@{} {base}", tags.join(";"))
+        };
+        self.emit_to(uid, line);
+    }
+
+    /// The escaped json-log value for `msg`, or `""` if none of `targets` want it
+    /// (so we skip building the JSON when no recipient has the cap).
+    fn json_log_value(&self, msg: &str, targets: &[Uid]) -> String {
+        let wanted = targets
+            .iter()
+            .any(|u| self.users.get(u).map(|x| x.caps.json_log).unwrap_or(false));
+        if wanted {
+            crate::modules::jsonlog::tag_value(self, msg)
+        } else {
+            String::new()
+        }
+    }
+
+    /// Send a server notice to every operator who has snomask (+s) on.
+    pub fn snotice(&self, msg: &str) {
+        self.log_push(msg);
         let opers: Vec<Uid> = self
             .users
             .iter()
             .filter(|(_, u)| u.flags.oper && u.flags.snomask)
             .map(|(&u, _)| u)
             .collect();
-        // draft/json-log: the structured tag value is the same for every recipient
-        let jval = crate::modules::jsonlog::tag_value(self, msg);
+        let jval = self.json_log_value(msg, &opers);
         for o in opers {
-            let (nick, json_cap, time_cap) = self
-                .users
-                .get(&o)
-                .map(|u| (u.nick.clone(), u.caps.json_log, u.caps.server_time))
-                .unwrap_or_default();
-            let base = format!(":{} NOTICE {nick} :*** {msg}", self.name);
-            if json_cap {
-                // build one tag block (server-time too, if negotiated) and emit raw,
-                // so we don't collide with the auto server-time tagging in `send`
-                let mut tags = String::new();
-                if time_cap {
-                    tags.push_str(&format!("time={};", iso_time(now())));
-                }
-                tags.push_str(&format!("draft/json-log={jval}"));
-                self.emit_to(o, format!("@{tags} {base}"));
-            } else {
-                self.send(o, base);
-            }
+            self.deliver_server_notice(o, msg, &jval);
         }
     }
 
     /// Broadcast a `*** msg` server NOTICE to *every* registered local user — for
-    /// server-wide announcements everyone should see (e.g. a config reload).
+    /// server-wide announcements everyone should see (e.g. a config reload). Goes
+    /// through the same tagged path as `snotice`, so cap-holders get the server-time
+    /// + `draft/json-log` tags and the line is recorded in the server log.
     pub fn announce(&self, msg: &str) {
-        for u in self.users.values() {
-            if u.registered && !u.nick.is_empty() {
-                u.out
-                    .send(format!(":{} NOTICE {} :*** {msg}", self.name, u.nick));
-            }
+        self.log_push(msg);
+        let targets: Vec<Uid> = self
+            .users
+            .iter()
+            .filter(|(_, u)| u.registered && !u.nick.is_empty())
+            .map(|(&u, _)| u)
+            .collect();
+        let jval = self.json_log_value(msg, &targets);
+        for u in targets {
+            self.deliver_server_notice(u, msg, &jval);
         }
     }
 
