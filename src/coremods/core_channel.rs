@@ -451,6 +451,9 @@ impl Command for Kick {
         s.propagate_from_user(uid, &format!("KICK {chan} {victim} :{reason}")); // tell links
         if let Some(ch) = s.channels.get_mut(&key) {
             ch.members.remove(&tuid);
+            if ch.modes.kicknorejoin.is_some() {
+                ch.recent_kicks.insert(tuid, now()); // +J rejoin-delay clock
+            }
         }
         if let Some(u) = s.users.get_mut(&tuid) {
             u.channels.remove(&key);

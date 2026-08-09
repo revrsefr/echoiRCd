@@ -152,6 +152,7 @@ pub struct ChanModes {
     pub nokicks: bool,               // +Q — KICK is disabled on the channel
     pub allowinvite: bool,           // +A — any member (not just ops) may INVITE
     pub permanent: bool,             // +P — channel persists with zero members
+    pub kicknorejoin: Option<u32>,   // +J <secs> — block rejoin for N secs after a kick
 }
 
 impl ChanModes {
@@ -278,6 +279,7 @@ pub struct Channel {
     pub joinflood_until: u64,                  // +j locked out until this unix ts
     pub nickflood_hits: Vec<u64>,              // +F recent nick-change times
     pub nickflood_until: u64,                  // +F locked out until this unix ts
+    pub recent_kicks: HashMap<Uid, u64>,       // +J uid -> unix ts of last kick (rejoin delay)
 }
 
 impl Channel {
@@ -304,6 +306,7 @@ impl Channel {
             joinflood_until: 0,
             nickflood_hits: Vec::new(),
             nickflood_until: 0,
+            recent_kicks: HashMap::new(),
         }
     }
 
@@ -450,6 +453,19 @@ impl Server {
                 );
                 return;
             }
+            // +J <secs> — can't rejoin within N seconds of being kicked
+            if let Some(secs) = ch.modes.kicknorejoin {
+                if let Some(&kt) = ch.recent_kicks.get(&uid) {
+                    if now().saturating_sub(kt) < secs as u64 {
+                        self.numeric(
+                            uid,
+                            ERR_DELAYREJOIN,
+                            &format!("{name} :You must wait {secs}s after a kick to rejoin (+J)"),
+                        );
+                        return;
+                    }
+                }
+            }
         }
         // +l full — with +L redirect, bounce the user to the target instead
         if let Some(ch) = self.channels.get(&key) {
@@ -505,6 +521,7 @@ impl Server {
             },
         );
         ch.invites.remove(&uid); // consume any pending invite
+        ch.recent_kicks.remove(&uid); // they got back in; clear any +J rejoin timer
         if let Some(u) = self.users.get_mut(&uid) {
             u.channels.insert(key.clone());
         }

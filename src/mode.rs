@@ -88,6 +88,7 @@ static CHAN_MODES: &[&(dyn ChanMode + Sync)] = &[
     &NOKICKS,
     &ALLOWINVITE,
     &PERMANENT,
+    &KICKNOREJOIN,
 ];
 
 // --- prefix modes (+q/+a/+o/+h/+v): a per-member rank, needs a nick ----------
@@ -859,6 +860,47 @@ impl ChanMode for AntiCapsMode {
     }
 }
 
+/// +J `<secs>` — after being kicked, a user can't rejoin for `<secs>` seconds
+/// (InspIRCd `m_kicknorejoin`). Enforced in `Server::join`.
+struct KickNoRejoinMode;
+static KICKNOREJOIN: KickNoRejoinMode = KickNoRejoinMode;
+impl ChanMode for KickNoRejoinMode {
+    fn letter(&self) -> char {
+        'J'
+    }
+    fn wants_param(&self, adding: bool) -> bool {
+        adding
+    }
+    fn apply(
+        &self,
+        s: &mut Server,
+        _chan: &str,
+        key: &str,
+        _uid: Uid,
+        adding: bool,
+        param: Option<&str>,
+    ) -> Applied {
+        if adding {
+            let Some(secs) = param
+                .and_then(|p| p.parse::<u32>().ok())
+                .filter(|&n| n >= 1)
+            else {
+                return Applied::No; // needs a positive seconds value
+            };
+            let secs = secs.min(3600);
+            if let Some(c) = s.channels.get_mut(key) {
+                c.modes.kicknorejoin = Some(secs);
+            }
+            Applied::Yes(Some(secs.to_string()))
+        } else {
+            if let Some(c) = s.channels.get_mut(key) {
+                c.modes.kicknorejoin = None;
+            }
+            Applied::Yes(None)
+        }
+    }
+}
+
 // === user modes ============================================================
 
 /// A user mode (+i/+w/+o) — same handler-object shape as [`ChanMode`], and the
@@ -1083,7 +1125,7 @@ mod tests {
 
     #[test]
     fn registry_covers_all_channel_modes() {
-        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuBQAP".chars() {
+        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuBQAPJ".chars() {
             assert!(chan_mode(c).is_some(), "missing handler for +{c}");
         }
         assert!(chan_mode('y').is_none());
