@@ -90,6 +90,7 @@ static CHAN_MODES: &[&(dyn ChanMode + Sync)] = &[
     &PERMANENT,
     &KICKNOREJOIN,
     &OPMODERATED,
+    &DELAYMSG,
 ];
 
 // --- prefix modes (+q/+a/+o/+h/+v): a per-member rank, needs a nick ----------
@@ -910,6 +911,47 @@ impl ChanMode for KickNoRejoinMode {
     }
 }
 
+/// +d `<secs>` — a newly-joined member can't speak for `<secs>` seconds (InspIRCd
+/// `m_delaymsg`). Enforced in the message path; voiced-or-above are exempt.
+struct DelayMsgMode;
+static DELAYMSG: DelayMsgMode = DelayMsgMode;
+impl ChanMode for DelayMsgMode {
+    fn letter(&self) -> char {
+        'd'
+    }
+    fn wants_param(&self, adding: bool) -> bool {
+        adding
+    }
+    fn apply(
+        &self,
+        s: &mut Server,
+        _chan: &str,
+        key: &str,
+        _uid: Uid,
+        adding: bool,
+        param: Option<&str>,
+    ) -> Applied {
+        if adding {
+            let Some(secs) = param
+                .and_then(|p| p.parse::<u32>().ok())
+                .filter(|&n| n >= 1)
+            else {
+                return Applied::No;
+            };
+            let secs = secs.min(3600);
+            if let Some(c) = s.channels.get_mut(key) {
+                c.modes.delaymsg = Some(secs);
+            }
+            Applied::Yes(Some(secs.to_string()))
+        } else {
+            if let Some(c) = s.channels.get_mut(key) {
+                c.modes.delaymsg = None;
+            }
+            Applied::Yes(None)
+        }
+    }
+}
+
 // === user modes ============================================================
 
 /// A user mode (+i/+w/+o) — same handler-object shape as [`ChanMode`], and the
@@ -1150,7 +1192,7 @@ mod tests {
 
     #[test]
     fn registry_covers_all_channel_modes() {
-        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuBQAPJU".chars() {
+        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuBQAPJUd".chars() {
             assert!(chan_mode(c).is_some(), "missing handler for +{c}");
         }
         assert!(chan_mode('y').is_none());

@@ -216,6 +216,27 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             }
             return CmdResult::Fail;
         }
+        // +d delaymsg — a just-joined unprivileged user must wait before speaking
+        if let Some(secs) = s.channels.get(&key).and_then(|c| c.modes.delaymsg) {
+            if s.rank(uid, &key) < RANK_VOICE {
+                let joined = s
+                    .channels
+                    .get(&key)
+                    .and_then(|c| c.members.get(&uid))
+                    .map(|m| m.joined)
+                    .unwrap_or(0);
+                if joined != 0 && crate::server::now().saturating_sub(joined) < secs as u64 {
+                    if !notice {
+                        s.numeric(
+                            uid,
+                            ERR_CANNOTSENDTOCHAN,
+                            &format!("{target} :You must wait {secs}s after joining to speak (+d)"),
+                        );
+                    }
+                    return CmdResult::Fail;
+                }
+            }
+        }
         // extban `m:` mute — matched users can't speak unless voiced-or-above
         if s.extban_active(uid, &key, 'm') && s.rank(uid, &key) < RANK_VOICE {
             if !notice {

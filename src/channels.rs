@@ -18,6 +18,7 @@ pub struct Member {
     pub op: bool,     // +o (@)
     pub halfop: bool, // +h (%)
     pub voice: bool,  // +v (+)
+    pub joined: u64,  // unix ts this member joined (for +d delaymsg; 0 = unknown)
 }
 
 /// Prefix ranks, high→low — gate who may grant a prefix / kick whom.
@@ -155,6 +156,7 @@ pub struct ChanModes {
     pub permanent: bool,             // +P — channel persists with zero members
     pub kicknorejoin: Option<u32>,   // +J <secs> — block rejoin for N secs after a kick
     pub opmoderated: bool,           // +U — unprivileged users' messages go to ops only
+    pub delaymsg: Option<u32>,       // +d <secs> — new joiners can't speak for N secs
 }
 
 impl ChanModes {
@@ -551,6 +553,7 @@ impl Server {
             uid,
             Member {
                 op: is_new,
+                joined: now(),
                 ..Default::default()
             },
         );
