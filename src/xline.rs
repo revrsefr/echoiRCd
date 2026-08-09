@@ -30,6 +30,20 @@ impl XKind {
             XKind::Cban => "CBAN",
         }
     }
+
+    /// Inverse of [`tag`], for reloading the on-disk x-line db.
+    pub fn from_tag(t: &str) -> Option<XKind> {
+        Some(match t {
+            "K" => XKind::Kline,
+            "G" => XKind::Gline,
+            "Z" => XKind::Zline,
+            "E" => XKind::Eline,
+            "SHUN" => XKind::Shun,
+            "Q" => XKind::Qline,
+            "CBAN" => XKind::Cban,
+            _ => return None,
+        })
+    }
 }
 
 pub struct XLine {
@@ -176,6 +190,7 @@ impl Server {
             "{setter} added a {}-line on {mask}: {reason}",
             kind.tag()
         ));
+        self.save_xlines();
         self.enforce_xlines();
     }
 
@@ -183,7 +198,11 @@ impl Server {
     pub fn remove_xline(&mut self, kind: XKind, mask: &str) -> bool {
         let before = self.xlines.len();
         self.xlines.retain(|x| !(x.kind == kind && x.mask == mask));
-        self.xlines.len() < before
+        let removed = self.xlines.len() < before;
+        if removed {
+            self.save_xlines();
+        }
+        removed
     }
 
     /// Kill every connected local user that now matches an active x-line.
@@ -216,6 +235,61 @@ impl Server {
     /// Drop expired x-lines (called on the background tick).
     pub fn purge_xlines(&mut self) {
         let n = now();
+        let before = self.xlines.len();
         self.xlines.retain(|x| x.expires == 0 || x.expires > n);
+        if self.xlines.len() != before {
+            self.save_xlines(); // an expiry changed the set — persist it
+        }
+    }
+
+    /// Path of the on-disk x-line db (beside the config file).
+    fn xline_db_path(&self) -> String {
+        format!("{}.xlines", self.conf_path)
+    }
+
+    /// Persist all current x-lines so they survive a restart (InspIRCd `m_xline_db`).
+    pub fn save_xlines(&self) {
+        let mut out = String::new();
+        for x in &self.xlines {
+            out.push_str(&format!(
+                "{} {} {} {} {}\n",
+                x.kind.tag(),
+                x.mask,
+                x.expires,
+                x.setter,
+                x.reason
+            ));
+        }
+        let _ = std::fs::write(self.xline_db_path(), out);
+    }
+
+    /// Reload persisted x-lines at startup, skipping any already expired.
+    pub fn load_xlines(&mut self) {
+        let n = now();
+        let Ok(text) = std::fs::read_to_string(self.xline_db_path()) else {
+            return;
+        };
+        for line in text.lines() {
+            let mut it = line.splitn(5, ' ');
+            let (Some(tag), Some(mask), Some(exp), Some(setter), Some(reason)) =
+                (it.next(), it.next(), it.next(), it.next(), it.next())
+            else {
+                continue;
+            };
+            let Some(kind) = XKind::from_tag(tag) else {
+                continue;
+            };
+            let expires: u64 = exp.parse().unwrap_or(0);
+            if expires != 0 && expires <= n {
+                continue;
+            }
+            self.xlines.push(XLine {
+                kind,
+                mask: mask.to_string(),
+                reason: reason.to_string(),
+                setter: setter.to_string(),
+                expires,
+            });
+        }
     }
 }

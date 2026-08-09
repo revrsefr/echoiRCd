@@ -10,3 +10,6 @@ Cargo.lock
 *.key
 # stray logs / local scratch
 *.log
+
+# persisted x-line db (runtime state)
+*.xlines

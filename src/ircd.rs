@@ -71,8 +71,10 @@ impl Ircd {
         event_tx: Sender<Event>,
         conn_counter: std::sync::Arc<std::sync::atomic::AtomicU64>,
     ) -> Ircd {
+        let mut server = Server::new(cfg, event_tx, conn_counter);
+        server.load_xlines(); // restore persisted bans (m_xline_db)
         Ircd {
-            server: Server::new(cfg, event_tx, conn_counter),
+            server,
             commands: command_table(),
             modules: crate::modules::default_modules(),
         }
