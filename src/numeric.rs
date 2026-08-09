@@ -15,6 +15,7 @@ pub const RPL_ADMINEMAIL: u16 = 259;
 pub const RPL_USERHOST: u16 = 302;
 pub const RPL_ISON: u16 = 303;
 pub const RPL_WHOISIDLE: u16 = 317;
+pub const RPL_WHOISSPECIAL: u16 = 320; // SWHOIS oper-set whois line
 pub const RPL_LISTSTART: u16 = 321;
 pub const RPL_LIST: u16 = 322;
 pub const RPL_LISTEND: u16 = 323;

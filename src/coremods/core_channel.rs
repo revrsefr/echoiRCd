@@ -15,6 +15,7 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(TopicCmd),
         Box::new(Names),
         Box::new(Invite),
+        Box::new(Uninvite),
         Box::new(Knock),
         Box::new(Cycle),
         Box::new(Remove),
@@ -238,6 +239,76 @@ impl Command for Invite {
             {
                 s.send(m, notify.clone());
             }
+        }
+        CmdResult::Ok
+    }
+}
+
+/// UNINVITE — revoke a pending invite (InspIRCd `m_uninvite`). `UNINVITE <nick>
+/// <#chan>`; a channel op cancels an invite they (or another op) issued.
+struct Uninvite;
+impl Command for Uninvite {
+    fn name(&self) -> &'static str {
+        "UNINVITE"
+    }
+    fn min_params(&self) -> usize {
+        2
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        let (tnick, chan) = (&params[0], &params[1]);
+        let key = chan.to_ascii_lowercase();
+        if !s.channels.contains_key(&key) {
+            s.numeric(uid, ERR_NOSUCHCHANNEL, &format!("{chan} :No such channel"));
+            return CmdResult::Fail;
+        }
+        if !s.is_member(uid, &key) {
+            s.numeric(
+                uid,
+                ERR_NOTONCHANNEL,
+                &format!("{chan} :You're not on that channel"),
+            );
+            return CmdResult::Fail;
+        }
+        if !s.is_op(uid, &key) {
+            s.numeric(
+                uid,
+                ERR_CHANOPRIVSNEEDED,
+                &format!("{chan} :You're not a channel operator"),
+            );
+            return CmdResult::Fail;
+        }
+        let Some(tuid) = s.find_nick(tnick) else {
+            s.numeric(
+                uid,
+                ERR_NOSUCHNICK,
+                &format!("{tnick} :No such nick/channel"),
+            );
+            return CmdResult::Fail;
+        };
+        let removed = s
+            .channels
+            .get_mut(&key)
+            .map(|ch| ch.invites.remove(&tuid))
+            .unwrap_or(false);
+        let who = s.users[&tuid].nick.clone();
+        let word = if removed {
+            "is no longer invited to"
+        } else {
+            "was not invited to"
+        };
+        let nick = s.users[&uid].nick.clone();
+        s.send(
+            uid,
+            format!(":{} NOTICE {nick} :{who} {word} {chan}", s.name),
+        );
+        if removed {
+            s.send(
+                tuid,
+                format!(
+                    ":{} NOTICE {who} :Your invite to {chan} was revoked",
+                    s.name
+                ),
+            );
         }
         CmdResult::Ok
     }

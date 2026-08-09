@@ -118,6 +118,7 @@ impl Command for Whois {
             last_active,
             signon,
             certfp,
+            swhois,
         ) = {
             let u = &s.users[&tuid];
             (
@@ -136,6 +137,9 @@ impl Command for Whois {
                 u.last_active,
                 u.signon,
                 u.certfp.clone(),
+                u.ext
+                    .get::<crate::coremods::core_oper::Swhois>()
+                    .map(|w| w.0.clone()),
             )
         };
         let chans: Vec<String> = keys
@@ -170,6 +174,10 @@ impl Command for Whois {
                 RPL_WHOISOPERATOR,
                 &format!("{nick} :is an IRC operator"),
             );
+        }
+        // 320: oper-set SWHOIS line
+        if let Some(line) = &swhois {
+            s.numeric(uid, RPL_WHOISSPECIAL, &format!("{nick} :{line}"));
         }
         // opers can see through the cloak to the real host/ip
         if asker_oper && disp != realhost {

@@ -47,8 +47,14 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(ClearChan),
         Box::new(Check),
         Box::new(AllTime),
+        Box::new(SwhoisCmd),
+        Box::new(SetIdle),
     ]
 }
+
+/// An oper-set WHOIS line, stored per-user in `User.ext` and rendered by WHOIS
+/// (RPL_WHOISSPECIAL 320). InspIRCd `m_swhois`.
+pub struct Swhois(pub String);
 
 /// Reject non-opers with 481; returns whether the caller is an oper.
 fn require_oper(s: &mut Server, uid: Uid) -> bool {
@@ -1181,6 +1187,60 @@ impl Command for Check {
             );
             return CmdResult::Fail;
         }
+        CmdResult::Ok
+    }
+}
+
+/// SWHOIS — attach (or clear) an extra WHOIS line on a user (InspIRCd `m_swhois`).
+/// `SWHOIS <nick> :<text>`; an empty text removes it. Shown as RPL_WHOISSPECIAL.
+struct SwhoisCmd;
+impl Command for SwhoisCmd {
+    fn name(&self) -> &'static str {
+        "SWHOIS"
+    }
+    fn min_params(&self) -> usize {
+        2
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        if !require_oper(s, uid) {
+            return CmdResult::Fail;
+        }
+        let Some(t) = oper_target(s, uid, &params[0]) else {
+            return CmdResult::Fail;
+        };
+        let text = params[1].clone();
+        if let Some(u) = s.users.get_mut(&t) {
+            if text.is_empty() {
+                u.ext.take::<Swhois>();
+            } else {
+                u.ext.set(Swhois(text.clone()));
+            }
+        }
+        let by = oper_nick(s, uid);
+        s.snotice(&format!("{by} used SWHOIS on {}: {text}", params[0]));
+        CmdResult::Ok
+    }
+}
+
+/// SETIDLE — reset your own idle time (InspIRCd `m_setidle`). `SETIDLE <seconds>`
+/// backdates the last-activity clock so WHOIS shows that idle time.
+struct SetIdle;
+impl Command for SetIdle {
+    fn name(&self) -> &'static str {
+        "SETIDLE"
+    }
+    fn min_params(&self) -> usize {
+        1
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        if !require_oper(s, uid) {
+            return CmdResult::Fail;
+        }
+        let secs: u64 = params[0].parse().unwrap_or(0);
+        if let Some(u) = s.users.get_mut(&uid) {
+            u.last_active = now().saturating_sub(secs);
+        }
+        onotice(s, uid, &format!("*** SETIDLE: idle time set to {secs}s"));
         CmdResult::Ok
     }
 }
