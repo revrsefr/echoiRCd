@@ -360,6 +360,34 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
         // propagate to linked servers that have members in this channel
         s.send_channel_to_links(uid, &key, target, cmd, &body);
     } else if let Some(tuid) = s.find_nick(target) {
+        // user +c (commonchans): only users sharing a channel may PM them (opers exempt)
+        if s.users
+            .get(&tuid)
+            .map(|u| u.flags.deny_uncommon)
+            .unwrap_or(false)
+            && uid != tuid
+            && !s.is_oper(uid)
+        {
+            let common = match (s.users.get(&uid), s.users.get(&tuid)) {
+                (Some(a), Some(b)) => a.channels.intersection(&b.channels).next().is_some(),
+                _ => false,
+            };
+            if !common {
+                if !notice {
+                    let tn = s
+                        .users
+                        .get(&tuid)
+                        .map(|u| u.nick.clone())
+                        .unwrap_or_default();
+                    s.numeric(
+                        uid,
+                        ERR_CANTSENDTOUSER,
+                        &format!("{tn} :You must share a channel to message this user (+c)"),
+                    );
+                }
+                return CmdResult::Fail;
+            }
+        }
         // user +R (regdeaf): drop messages from users not logged into an account
         if s.users
             .get(&tuid)

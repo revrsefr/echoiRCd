@@ -30,6 +30,8 @@ pub struct UserFlags {
     pub ssl_pm: bool,         // +z (only accept PMs from TLS users)
     pub snomask: bool,        // +s (oper: receive server notices)
     pub callerid: bool,       // +g (only accept PMs from users on the ACCEPT list)
+    pub showwhois: bool,      // +W (get a notice when someone WHOISes you)
+    pub deny_uncommon: bool,  // +c (only users sharing a channel may PM you)
     pub away: Option<String>, // AWAY message, if set
 }
 
@@ -74,6 +76,12 @@ impl UserFlags {
         }
         if self.callerid {
             s.push('g');
+        }
+        if self.showwhois {
+            s.push('W');
+        }
+        if self.deny_uncommon {
+            s.push('c');
         }
         s
     }
@@ -409,7 +417,7 @@ impl Server {
             uid,
             RPL_MYINFO,
             &format!(
-                "{} echoircd-{VERSION} iowxsgBDIHrRz qaohvbeIklimnpstzCTcSNORMfjFLgGuBQAPJ",
+                "{} echoircd-{VERSION} iowxsgBDIHrRzWc qaohvbeIklimnpstzCTcSNORMfjFLgGuBQAPJ",
                 self.name
             ),
         );

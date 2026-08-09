@@ -30,6 +30,7 @@ pub const ERR_WASNOSUCHNICK: u16 = 406;
 pub const ERR_UNAVAILRESOURCE: u16 = 437; // channel temporarily unavailable (+j)
 pub const ERR_LINKCHANNEL: u16 = 470; // +L — you were redirected to another channel
 pub const ERR_DELAYREJOIN: u16 = 495; // +J — must wait before rejoining after a kick
+pub const ERR_CANTSENDTOUSER: u16 = 531; // +c — no shared channel with the target
 pub const RPL_ENDOFSPAMFILTER: u16 = 940; // end of the +g word-filter list
 pub const RPL_SPAMFILTER: u16 = 941; // one +g word-filter entry
 pub const RPL_KNOCK: u16 = 710; // channel gets the knock

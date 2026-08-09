@@ -119,6 +119,7 @@ impl Command for Whois {
             signon,
             certfp,
             swhois,
+            showwhois,
         ) = {
             let u = &s.users[&tuid];
             (
@@ -140,6 +141,7 @@ impl Command for Whois {
                 u.ext
                     .get::<crate::coremods::core_oper::Swhois>()
                     .map(|w| w.0.clone()),
+                u.flags.showwhois,
             )
         };
         let chans: Vec<String> = keys
@@ -221,6 +223,14 @@ impl Command for Whois {
             RPL_WHOISIDLE,
             &format!("{nick} {idle} {signon} :seconds idle, signon time"),
         );
+        // +W showwhois — tell the target that someone looked them up
+        if showwhois && !is_self {
+            let by = s.users.get(&uid).map(|u| u.prefix()).unwrap_or_default();
+            s.send(
+                tuid,
+                format!(":{} NOTICE {nick} :*** {by} did a /WHOIS on you", s.name),
+            );
+        }
         s.numeric(uid, RPL_ENDOFWHOIS, &format!("{nick} :End of /WHOIS list"));
         CmdResult::Ok
     }
