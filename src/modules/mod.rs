@@ -6,6 +6,7 @@
 pub mod account_registration;
 pub mod antimixedutf8;
 pub mod antirandom;
+pub mod banredirect;
 pub mod blockamsg;
 pub mod channames;
 pub mod channelban;

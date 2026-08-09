@@ -560,6 +560,21 @@ impl Server {
             // (both honour the g: security-group extban)
             if self.ban_list_hit(uid, &ch.bans) && !self.ban_list_hit(uid, &ch.excepts) {
                 if !is_oper {
+                    // banredirect: `+b mask$#chan` bounces the user into #chan (once)
+                    if let Some(t) = crate::modules::banredirect::redirect_target(self, uid, &key) {
+                        let tl = t.to_ascii_lowercase();
+                        if !self.in_redirect && tl != key && !self.is_member(uid, &tl) {
+                            self.numeric(
+                                uid,
+                                ERR_LINKCHANNEL,
+                                &format!("{name} {t} :Cannot join channel (+b), redirecting"),
+                            );
+                            self.in_redirect = true;
+                            self.join(uid, &t, None);
+                            self.in_redirect = false;
+                            return;
+                        }
+                    }
                     self.numeric(
                         uid,
                         ERR_BANNEDFROMCHAN,
@@ -925,7 +940,8 @@ impl Server {
                     _ => false,
                 }
             } else {
-                glob_match(&b.mask, &who)
+                // strip any `$#chan` banredirect suffix before matching the mask
+                glob_match(crate::modules::banredirect::mask_part(&b.mask), &who)
             }
         })
     }
