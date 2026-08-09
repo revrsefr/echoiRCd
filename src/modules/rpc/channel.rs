@@ -148,6 +148,24 @@ pub fn handle(s: &mut Server, action: &str, params: &str) -> Result<String, RpcE
             s.to_channel(&key, &format!(":{} TOPIC {display} :{text}", s.name), None);
             Ok(obj(&[("result", "true".into())]))
         }
+        "set_mode" => {
+            let name = json_channel(params)?;
+            let key = name.to_ascii_lowercase();
+            let modes = super::json::get_str(params, "modes")
+                .ok_or_else(|| RpcError::invalid_params("missing 'modes'"))?;
+            if !s.channels.contains_key(&key) {
+                return Err(RpcError::not_found("no such channel"));
+            }
+            // `parameters` (array) or `param` (single) — the mode arguments
+            let mut args = super::json::get_str_array(params, "parameters");
+            if args.is_empty() {
+                if let Some(p) = super::json::get_str(params, "param") {
+                    args.push(p);
+                }
+            }
+            let changed = crate::coremods::core_mode::svs_set_chan_modes(s, &name, &modes, &args);
+            Ok(obj(&[("result", changed.to_string())]))
+        }
         other => Err(RpcError::method_not_found(&format!("channel.{other}"))),
     }
 }

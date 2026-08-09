@@ -95,6 +95,21 @@ pub struct WhowasEntry {
     pub ts: u64,
 }
 
+/// One captured server log line (fed by `snotice`), for the RPC `log.tail` /
+/// `log.events` methods — echoIRCd's in-memory answer to InspIRCd's log file.
+pub struct LogLine {
+    pub id: u64,
+    pub ts: u64,
+    pub msg: String,
+}
+
+/// The rolling server-log ring plus its monotonic sequence counter.
+#[derive(Default)]
+pub struct LogState {
+    pub seq: u64,
+    pub ring: VecDeque<LogLine>,
+}
+
 pub struct Server {
     pub name: String,
     pub network: String,
@@ -141,6 +156,8 @@ pub struct Server {
     // the command's `label` (single tag, BATCH, or ACK). RefCell because the
     // output primitives are `&self`.
     pub label_capture: RefCell<Option<(Uid, Vec<String>)>>,
+    /// Rolling in-memory server log (fed by `snotice`), read by the RPC log methods.
+    pub log: RefCell<LogState>,
     pub event_tx: Sender<Event>,      // self-inject events (DNS results)
     pub conn_counter: Arc<AtomicU64>, // mints connection uids (for CONNECT dials)
     /// Module-owned server state, keyed by type — the InspIRCd `ExtensionItem`
@@ -189,6 +206,7 @@ impl Server {
             webirc: cfg.webirc,
             raw_config: cfg.raw,
             label_capture: RefCell::new(None),
+            log: RefCell::new(LogState::default()),
             event_tx,
             conn_counter,
             ext: Extensible::default(),
@@ -581,6 +599,20 @@ impl Server {
 
     /// Send a server notice to every operator who has snomask (+s) on.
     pub fn snotice(&self, msg: &str) {
+        // record it in the rolling server log (for RPC log.tail / log.events)
+        {
+            let mut lg = self.log.borrow_mut();
+            lg.seq += 1;
+            let id = lg.seq;
+            lg.ring.push_back(LogLine {
+                id,
+                ts: now(),
+                msg: msg.to_string(),
+            });
+            while lg.ring.len() > 1000 {
+                lg.ring.pop_front();
+            }
+        }
         let opers: Vec<Uid> = self
             .users
             .iter()

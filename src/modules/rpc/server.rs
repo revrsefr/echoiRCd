@@ -40,6 +40,28 @@ pub fn handle(s: &mut Server, action: &str, params: &str) -> Result<String, RpcE
             }
             None => Err(RpcError::internal("config file could not be read")),
         },
+        "connect" => {
+            let name = json_name(params)?;
+            let Some(b) = s
+                .link_blocks
+                .iter()
+                .find(|b| b.name.eq_ignore_ascii_case(&name))
+                .cloned()
+            else {
+                return Err(RpcError::not_found(&format!("no link block named {name}")));
+            };
+            if s.servers
+                .values()
+                .any(|sv| sv.name.eq_ignore_ascii_case(&b.name))
+            {
+                return Err(RpcError::invalid_params("server is already linked"));
+            }
+            let addr = format!("{}:{}", b.ip, b.port);
+            let (tx, counter) = (s.event_tx.clone(), s.conn_counter.clone());
+            std::thread::spawn(move || crate::socketengine::connect_link(&addr, tx, counter));
+            s.snotice(&format!("RPC initiated a link to {}", b.name));
+            Ok(obj(&[("result", "true".into())]))
+        }
         "disconnect" => {
             let name = json_name(params)?;
             let via = s

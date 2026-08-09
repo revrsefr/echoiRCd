@@ -19,6 +19,7 @@ pub mod channel;
 pub mod core;
 pub mod httpd;
 pub mod json;
+pub mod log;
 pub mod message;
 pub mod server;
 pub mod spamfilter;
@@ -83,8 +84,10 @@ pub const ALL_METHODS: &[&str] = &[
     "channel.get",
     "channel.kick",
     "channel.set_topic",
+    "channel.set_mode",
     "server.list",
     "server.rehash",
+    "server.connect",
     "server.disconnect",
     "module.list",
     "oper.list",
@@ -97,6 +100,8 @@ pub const ALL_METHODS: &[&str] = &[
     "spamfilter.list",
     "spamfilter.add",
     "spamfilter.del",
+    "log.tail",
+    "log.events",
 ];
 
 /// Run a parsed JSON-RPC request on the core thread. `params` is the raw JSON of
@@ -115,6 +120,7 @@ pub fn dispatch(s: &mut Server, method: &str, params: &str, id: &str) -> String 
             Some(("message", action)) => message::handle(s, action, params),
             Some(("whowas", action)) => whowas::handle(s, action, params),
             Some(("spamfilter", action)) => spamfilter::handle(s, action, params),
+            Some(("log", action)) => log::handle(s, action, params),
             _ => Err(RpcError::method_not_found(method)),
         },
     };

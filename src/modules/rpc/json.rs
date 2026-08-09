@@ -112,6 +112,36 @@ pub fn get_num<T: std::str::FromStr>(obj: &str, key: &str) -> Option<T> {
     raw.trim_matches('"').parse().ok()
 }
 
+/// The string elements of a top-level array field, e.g. `"parameters":["a","b"]`
+/// → `["a","b"]`. Empty vec if the key is absent or not an array of strings.
+pub fn get_str_array(obj: &str, key: &str) -> Vec<String> {
+    let Some(raw) = get_raw(obj, key) else {
+        return Vec::new();
+    };
+    let inner = raw.trim();
+    if !inner.starts_with('[') {
+        return Vec::new();
+    }
+    let b = inner.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 1;
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                if let Some(end) = scan_string(b, i) {
+                    out.push(unescape(&inner[i + 1..end - 1]));
+                    i = end;
+                } else {
+                    break;
+                }
+            }
+            b']' => break,
+            _ => i += 1,
+        }
+    }
+    out
+}
+
 /// A boolean field (`true`/`false`, or the strings `"true"`/`"false"`).
 pub fn get_bool(obj: &str, key: &str) -> Option<bool> {
     match get_raw(obj, key)?.trim_matches('"') {

@@ -155,6 +155,66 @@ pub fn apply_mode(s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
     CmdResult::Ok
 }
 
+/// Apply channel modes with **server** authority (no acting user) — for the RPC
+/// `channel.set_mode`. Same per-letter dispatch as [`apply_mode`] under `mode_sudo`
+/// (so every rank gate passes), but the resulting `MODE` line is sourced from the
+/// server, not a user. The handlers only ever touch the actor uid through
+/// `s.rank()` (maxed by sudo) or `s.users.get()` (safe on the `0` sentinel), so no
+/// live actor is needed. Returns whether anything actually changed.
+pub fn svs_set_chan_modes(s: &mut Server, target: &str, modestring: &str, args: &[String]) -> bool {
+    let key = target.to_ascii_lowercase();
+    if !s.channels.contains_key(&key) {
+        return false;
+    }
+    s.mode_sudo = true;
+    let mut argi = 0usize;
+    let mut sign = '+';
+    let mut applied = String::new();
+    let mut last = ' ';
+    let mut echoed: Vec<String> = Vec::new();
+    for c in modestring.chars() {
+        if c == '+' || c == '-' {
+            sign = c;
+            continue;
+        }
+        let adding = sign == '+';
+        let Some(handler) = chan_mode(c) else {
+            continue;
+        };
+        let param = if handler.wants_param(adding) {
+            let p = args.get(argi).cloned();
+            if p.is_some() {
+                argi += 1;
+            }
+            p
+        } else {
+            None
+        };
+        if let Applied::Yes(echo) = handler.apply(s, target, &key, 0, adding, param.as_deref()) {
+            emit(&mut applied, &mut last, sign, c);
+            if let Some(p) = echo {
+                echoed.push(p);
+            }
+        }
+    }
+    s.mode_sudo = false;
+    if applied.is_empty() {
+        return false;
+    }
+    let pstr = if echoed.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", echoed.join(" "))
+    };
+    s.to_channel(
+        &key,
+        &format!(":{} MODE {target} {applied}{pstr}", s.name),
+        None,
+    );
+    s.propagate(&format!(":{} MODE {target} {applied}{pstr}", s.sid), None); // links
+    true
+}
+
 /// User modes: dispatched to the [`crate::mode`] `UserMode` handler objects.
 fn apply_user_modes(s: &mut Server, uid: Uid, target: &str, params: &[String]) -> CmdResult {
     let me = s
