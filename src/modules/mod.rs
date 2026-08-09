@@ -10,6 +10,7 @@ pub mod blockamsg;
 pub mod channelban;
 pub mod chathistory;
 pub mod cloak;
+pub mod cloudflare_challenge;
 pub mod connectban;
 pub mod connflood;
 pub mod denychans;
@@ -60,6 +61,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(securelist::SecureList),
         Box::new(hashident::HashIdent),
         Box::new(recaptcha::ReCaptcha),
+        Box::new(cloudflare_challenge::CloudflareChallenge),
     ]
 }
 
@@ -77,5 +79,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(password_hash::commands())
         .chain(account_registration::commands())
         .chain(recaptcha::commands())
+        .chain(cloudflare_challenge::commands())
         .collect()
 }
