@@ -180,7 +180,13 @@ impl Command for Cap {
                     format!(
                         ":{} CAP {who} LS :{}",
                         s.name,
-                        Caps::ls_line(cap302, secure, &acctreg)
+                        Caps::ls_line(
+                            cap302,
+                            secure,
+                            &acctreg,
+                            crate::modules::multiline::max_bytes(s),
+                            crate::modules::multiline::max_lines(s),
+                        )
                     ),
                 );
             }
@@ -393,7 +399,7 @@ impl Command for Nick {
             s.numeric(uid, ERR_NONICKNAMEGIVEN, ":No nickname given");
             return CmdResult::Fail;
         };
-        if !valid_nick(newnick) {
+        if !valid_nick(newnick, s.conf_num("maxnick", 30usize)) {
             s.numeric(
                 uid,
                 ERR_ERRONEUSNICKNAME,

@@ -391,7 +391,7 @@ impl Command for SaNick {
             return CmdResult::Fail;
         };
         let newnick = &params[1];
-        if !valid_nick(newnick) {
+        if !valid_nick(newnick, s.conf_num("maxnick", 30usize)) {
             s.numeric(
                 uid,
                 ERR_ERRONEUSNICKNAME,
@@ -441,7 +441,7 @@ impl Command for SvsNick {
             return CmdResult::Fail;
         };
         let newnick = &params[1];
-        if !valid_nick(newnick) {
+        if !valid_nick(newnick, s.conf_num("maxnick", 30usize)) {
             s.numeric(
                 uid,
                 ERR_ERRONEUSNICKNAME,
@@ -761,7 +761,7 @@ impl Command for NickLock {
             return CmdResult::Fail;
         };
         let newnick = &params[1];
-        if !valid_nick(newnick) {
+        if !valid_nick(newnick, s.conf_num("maxnick", 30usize)) {
             s.numeric(
                 uid,
                 ERR_ERRONEUSNICKNAME,

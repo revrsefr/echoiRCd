@@ -121,3 +121,41 @@ amu_target    = both
 #     G:<cc> ban extban (e.g. +b G:CN,RU), the oper GEOIP <nick|ip> command and
 #     a country line in WHOIS (opers). Point at a GeoLite2-Country.mmdb file:
 # geoip_database = /etc/echoircd/GeoLite2-Country.mmdb
+
+# --- tunable limits & timeouts (every one shown with its built-in default; set a
+#     line only to override it). None of these are hardcoded — all read at runtime.
+
+# flood: allow this many messages per this many seconds before dropping (opers exempt)
+# flood_messages = 8
+# flood_seconds  = 4
+
+# dnsbl: ban length in seconds when dnsbl_action is kline/gline/zline (default 1 day)
+# dnsbl_duration = 86400
+
+# draft/multiline: the max-bytes / max-lines advertised in the cap AND enforced
+# multiline_maxbytes = 4096
+# multiline_maxlines = 24
+
+# CHATHISTORY: messages kept per conversation (also the ceiling a client may request)
+# chathistory_limit = 256
+
+# EXTJWT: token line-chunk size (bytes) when splitting a long token across lines
+# extjwt_chunk = 200
+
+# per-user list sizes (advertised in ISUPPORT WATCH/MONITOR/SILENCE where applicable)
+# maxwatch    = 128
+# maxmonitor  = 128
+# maxsilence  = 32
+# maxaccept   = 64
+
+# WHOWAS: number of historical nick records retained
+# whowas_maxentries = 256
+
+# nick / channel name length limits (advertised as NICKLEN / CHANNELLEN)
+# maxnick    = 30
+# maxchannel = 50
+
+# connection timeouts, in seconds
+# registration_timeout = 60   # drop clients that never register (NICK+USER) in time
+# ping_frequency       = 90   # send a PING after this much idle time
+# ping_timeout         = 60   # then drop if no PONG within this much longer

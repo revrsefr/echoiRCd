@@ -433,7 +433,7 @@ impl Server {
             self.forward_to_target(target, msg, from);
             return;
         };
-        if !valid_nick(newnick)
+        if !valid_nick(newnick, self.conf_num("maxnick", 30usize))
             || self.find_nick(newnick).is_some()
             || self.remote_nick.contains_key(&newnick.to_ascii_lowercase())
         {

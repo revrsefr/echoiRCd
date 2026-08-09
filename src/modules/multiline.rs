@@ -14,9 +14,19 @@ use crate::module::Module;
 use crate::server::Server;
 use crate::Uid;
 
-/// Limits advertised in the `draft/multiline` cap and enforced while buffering.
+/// Default limits (overridable via `multiline_maxbytes` / `multiline_maxlines`),
+/// advertised in the `draft/multiline` cap and enforced while buffering.
 pub const MAX_BYTES: usize = 4096;
 pub const MAX_LINES: usize = 24;
+
+/// The configured maximum total bytes of one multiline batch.
+pub fn max_bytes(s: &Server) -> usize {
+    s.conf_num("multiline_maxbytes", MAX_BYTES)
+}
+/// The configured maximum number of lines in one multiline batch.
+pub fn max_lines(s: &Server) -> usize {
+    s.conf_num("multiline_maxlines", MAX_LINES)
+}
 
 /// An in-progress inbound multiline batch — one long client message being
 /// assembled from several `@batch=`-tagged PRIVMSG/NOTICE lines.
@@ -58,9 +68,10 @@ pub fn accumulate(
     text: &str,
     concat: bool,
 ) -> bool {
+    let (max_lines, max_bytes) = (max_lines(s), max_bytes(s));
     match s.ext.get_mut::<Mline>().and_then(|m| m.0.get_mut(&uid)) {
         Some(mb) if mb.bref == bref => {
-            if mb.parts.len() < MAX_LINES && mb.bytes + text.len() <= MAX_BYTES {
+            if mb.parts.len() < max_lines && mb.bytes + text.len() <= max_bytes {
                 mb.notice = notice;
                 mb.bytes += text.len();
                 mb.parts.push((text.to_string(), concat));

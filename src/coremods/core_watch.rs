@@ -45,10 +45,11 @@ fn watch_add(s: &mut Server, uid: Uid, nick: &str) {
         return;
     }
     let low = nick.to_ascii_lowercase();
+    let maxwatch = s.conf_num("maxwatch", WATCH_MAX);
     let full = s
         .users
         .get(&uid)
-        .map(|u| u.watch.len() >= WATCH_MAX && !u.watch.contains(&low))
+        .map(|u| u.watch.len() >= maxwatch && !u.watch.contains(&low))
         .unwrap_or(true);
     if full {
         s.numeric(
@@ -185,16 +186,17 @@ impl Command for Monitor {
                 let mut added = Vec::new();
                 for t in targets {
                     let low = t.to_ascii_lowercase();
+                    let maxmon = s.conf_num("maxmonitor", MONITOR_MAX);
                     let full = s
                         .users
                         .get(&uid)
-                        .map(|u| u.monitor.len() >= MONITOR_MAX && !u.monitor.contains(&low))
+                        .map(|u| u.monitor.len() >= maxmon && !u.monitor.contains(&low))
                         .unwrap_or(true);
                     if full {
                         s.numeric(
                             uid,
                             ERR_MONLISTFULL,
-                            &format!("{MONITOR_MAX} {t} :Monitor list is full"),
+                            &format!("{maxmon} {t} :Monitor list is full"),
                         );
                         continue;
                     }
@@ -278,10 +280,11 @@ impl Command for Silence {
         let prefix = s.users.get(&uid).map(|u| u.prefix()).unwrap_or_default();
         if let Some(m) = arg.strip_prefix('+') {
             let mask = normalize_mask(m);
+            let maxsil = s.conf_num("maxsilence", SILENCE_MAX);
             let full = s
                 .users
                 .get(&uid)
-                .map(|u| u.silence.len() >= SILENCE_MAX && !u.silence.contains(&mask))
+                .map(|u| u.silence.len() >= maxsil && !u.silence.contains(&mask))
                 .unwrap_or(true);
             if full {
                 s.numeric(
@@ -353,10 +356,11 @@ impl Command for Accept {
             }
             let low = name.to_ascii_lowercase();
             if adding {
+                let maxacc = s.conf_num("maxaccept", ACCEPT_MAX);
                 let (full, exists) = s
                     .users
                     .get(&uid)
-                    .map(|u| (u.accept.len() >= ACCEPT_MAX, u.accept.contains(&low)))
+                    .map(|u| (u.accept.len() >= maxacc, u.accept.contains(&low)))
                     .unwrap_or((true, false));
                 if exists {
                     s.numeric(

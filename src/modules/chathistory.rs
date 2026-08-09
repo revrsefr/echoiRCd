@@ -12,8 +12,14 @@ use crate::command::{CmdResult, Command};
 use crate::server::{iso_time, now, parse_iso, Server};
 use crate::Uid;
 
-/// Recent messages CHATHISTORY keeps per conversation.
+/// Default number of messages CHATHISTORY keeps per conversation, if
+/// `chathistory_limit` is unset. Also the ceiling a client can request.
 pub const HISTORY_CAP: usize = 256;
+
+/// The configured per-conversation history size (overridable via `chathistory_limit`).
+pub fn limit(s: &Server) -> usize {
+    s.conf_num("chathistory_limit", HISTORY_CAP).clamp(1, 100_000)
+}
 
 /// One stored message, replayed by CHATHISTORY / the `+H` backlog.
 pub struct HistMsg {
@@ -40,6 +46,7 @@ pub fn record(
     text: &str,
     msgid: &str,
 ) {
+    let cap = limit(s);
     let buf = s
         .ext
         .get_or_insert_with::<History>(History::default)
@@ -54,7 +61,7 @@ pub fn record(
         target: target.to_string(),
         text: text.to_string(),
     });
-    while buf.len() > HISTORY_CAP {
+    while buf.len() > cap {
         buf.pop_front();
     }
 }
@@ -105,7 +112,7 @@ impl Command for ChatHistory {
                 .get(3)
                 .and_then(|l| l.parse::<usize>().ok())
                 .unwrap_or(50)
-                .clamp(1, HISTORY_CAP);
+                .clamp(1, limit(s));
             let me = s
                 .users
                 .get(&uid)
@@ -186,7 +193,7 @@ impl Command for ChatHistory {
         let limit = limit_s
             .and_then(|l| l.parse::<usize>().ok())
             .unwrap_or(50)
-            .clamp(1, HISTORY_CAP);
+            .clamp(1, limit(s));
 
         let bref = s.next_msgid().replace('-', "");
         let mut lines: Vec<String> = Vec::new();

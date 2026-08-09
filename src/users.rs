@@ -7,7 +7,6 @@ use std::net::{SocketAddr, TcpStream};
 
 use crate::extensible::Extensible;
 use crate::module::Hook;
-use crate::modules::multiline::{MAX_BYTES as MLINE_MAX_BYTES, MAX_LINES as MLINE_MAX_LINES};
 use crate::numeric::*;
 use crate::server::{Server, VERSION};
 use crate::socketengine::OutSink;
@@ -162,7 +161,14 @@ impl Caps {
 
     /// The `CAP LS` token list; `sasl` carries its mechanisms for 302 clients.
     /// EXTERNAL is only offered on TLS connections (it needs a client cert).
-    pub fn ls_line(cap302: bool, secure: bool, acctreg: &str) -> String {
+    /// `mline_bytes`/`mline_lines` are the (config-driven) draft/multiline limits.
+    pub fn ls_line(
+        cap302: bool,
+        secure: bool,
+        acctreg: &str,
+        mline_bytes: usize,
+        mline_lines: usize,
+    ) -> String {
         SUPPORTED_CAPS
             .iter()
             .map(|c| {
@@ -173,9 +179,7 @@ impl Caps {
                         "sasl=PLAIN".to_string()
                     }
                 } else if *c == "draft/multiline" && cap302 {
-                    format!(
-                        "draft/multiline=max-bytes={MLINE_MAX_BYTES},max-lines={MLINE_MAX_LINES}"
-                    )
+                    format!("draft/multiline=max-bytes={mline_bytes},max-lines={mline_lines}")
                 } else if *c == "draft/account-registration" && cap302 && !acctreg.is_empty() {
                     format!("draft/account-registration={acctreg}")
                 } else {
@@ -537,14 +541,14 @@ pub fn valid_ident(i: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
 }
 
-pub fn valid_nick(n: &str) -> bool {
+pub fn valid_nick(n: &str, maxlen: usize) -> bool {
     let special = |c: char| "[]\\`_^{}|".contains(c);
     let mut chars = n.chars();
     match chars.next() {
         Some(c) if c.is_ascii_alphabetic() || special(c) => {}
         _ => return false,
     }
-    n.len() <= 30
+    n.len() <= maxlen
         && n.chars()
             .all(|c| c.is_ascii_alphanumeric() || special(c) || c == '-')
 }
@@ -575,12 +579,12 @@ mod tests {
         assert!(!c.set("bogus-cap", true)); // unknown cap rejected
         assert!(c.has("server-time") && c.has("multi-prefix") && !c.has("sasl"));
         assert_eq!(c.enabled(), "server-time multi-prefix"); // SUPPORTED order
-        assert!(Caps::ls_line(true, false, "").contains("sasl=PLAIN")); // 302 shows mechs
-        assert!(!Caps::ls_line(true, false, "").contains("EXTERNAL")); // plaintext: no EXTERNAL
-        assert!(Caps::ls_line(true, true, "").contains("sasl=PLAIN,EXTERNAL")); // TLS offers it
+        assert!(Caps::ls_line(true, false, "", 4096, 24).contains("sasl=PLAIN")); // 302 shows mechs
+        assert!(!Caps::ls_line(true, false, "", 4096, 24).contains("EXTERNAL")); // plaintext: no EXTERNAL
+        assert!(Caps::ls_line(true, true, "", 4096, 24).contains("sasl=PLAIN,EXTERNAL")); // TLS offers it
         assert!(
-            Caps::ls_line(false, false, "").contains("sasl")
-                && !Caps::ls_line(false, false, "").contains("sasl=")
+            Caps::ls_line(false, false, "", 4096, 24).contains("sasl")
+                && !Caps::ls_line(false, false, "", 4096, 24).contains("sasl=")
         );
         c.set("server-time", false);
         assert!(!c.has("server-time"));

@@ -20,7 +20,7 @@ use crate::xline::XKind;
 use crate::Uid;
 
 /// Ban length applied by the `*line` actions on a hit.
-const DNSBL_BAN: u64 = 86_400; // 1 day
+const DNSBL_BAN: u64 = 86_400; // default ban length (1 day) if `dnsbl_duration` unset
 
 /// Outcome of a DNSBL check for one connecting client.
 pub enum Outcome {
@@ -84,22 +84,11 @@ fn act(s: &mut Server, uid: Uid, zone: &str, reply: Ipv4Addr) {
     ));
     let reason = format!("{} (listed on {zone})", s.dnsbl_reason);
     let ipstr = ip.to_string();
+    let dur = s.conf_num("dnsbl_duration", DNSBL_BAN);
     match action.as_str() {
-        "kline" => s.add_xline(
-            XKind::Kline,
-            &format!("*@{ipstr}"),
-            DNSBL_BAN,
-            "dnsbl",
-            &reason,
-        ),
-        "gline" => s.add_xline(
-            XKind::Gline,
-            &format!("*@{ipstr}"),
-            DNSBL_BAN,
-            "dnsbl",
-            &reason,
-        ),
-        "zline" => s.add_xline(XKind::Zline, &ipstr, DNSBL_BAN, "dnsbl", &reason),
+        "kline" => s.add_xline(XKind::Kline, &format!("*@{ipstr}"), dur, "dnsbl", &reason),
+        "gline" => s.add_xline(XKind::Gline, &format!("*@{ipstr}"), dur, "dnsbl", &reason),
+        "zline" => s.add_xline(XKind::Zline, &ipstr, dur, "dnsbl", &reason),
         "kill" | "reject" => {}
         _ => return, // "mark" or unknown: notify only, don't disconnect
     }

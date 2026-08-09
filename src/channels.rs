@@ -501,7 +501,7 @@ impl Server {
     /// Join a user to a channel (creating it if new, giving the creator +o),
     /// then broadcast JOIN and send TOPIC + NAMES. Queues the join hook.
     pub fn join(&mut self, uid: Uid, name: &str, key_arg: Option<&str>) {
-        if !valid_chan(name) {
+        if !valid_chan(name, self.conf_num("maxchannel", 50usize)) {
             self.numeric(uid, ERR_NOSUCHCHANNEL, &format!("{name} :No such channel"));
             return;
         }
@@ -1076,10 +1076,10 @@ impl Server {
 }
 
 /// A channel name starts with `#`, is ≤ 50 chars, and has no space/comma/control.
-pub fn valid_chan(name: &str) -> bool {
+pub fn valid_chan(name: &str, maxlen: usize) -> bool {
     name.starts_with('#')
         && name.len() > 1
-        && name.len() <= 50
+        && name.len() <= maxlen
         && !name
             .chars()
             .any(|c| c == ' ' || c == ',' || (c as u32) < 0x20)

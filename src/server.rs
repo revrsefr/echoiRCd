@@ -280,7 +280,8 @@ impl Server {
             account,
             ts: now(),
         });
-        while self.whowas.len() > 256 {
+        let cap = self.conf_num("whowas_maxentries", 256usize);
+        while self.whowas.len() > cap {
             self.whowas.pop_back();
         }
     }
@@ -584,8 +585,15 @@ impl Server {
     /// without the trailing `:are supported by this server`. Shared by the welcome
     /// burst and the `ISUPPORT` command (draft/extended-isupport).
     pub fn isupport_lines(&self) -> Vec<String> {
+        // advertised limits mirror the (config-driven) values actually enforced
+        let maxwatch = self.conf_num("maxwatch", crate::watch::WATCH_MAX);
+        let maxmon = self.conf_num("maxmonitor", crate::watch::MONITOR_MAX);
+        let maxsil = self.conf_num("maxsilence", crate::watch::SILENCE_MAX);
+        let chathist = crate::modules::chathistory::limit(self);
+        let maxnick = self.conf_num("maxnick", 30usize);
+        let maxchan = self.conf_num("maxchannel", 50usize);
         let mut lines = vec![format!(
-            "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIgX,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnpstuz EXTBAN=,Gcgjmnrsy WATCH=128 MONITOR=128 SILENCE=32 CALLERID=g WHOX CHATHISTORY=256 MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={}",
+            "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIgX,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnpstuz EXTBAN=,Gcgjmnrsy WATCH={maxwatch} MONITOR={maxmon} SILENCE={maxsil} CALLERID=g WHOX CHATHISTORY={chathist} MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN={maxnick} CHANNELLEN={maxchan} NETWORK={}",
             self.network
         )];
         if let Some(tok) = crate::modules::network_icon::isupport(self) {
@@ -980,19 +988,22 @@ impl Server {
     /// Decide which connections to PING and which to drop, given `now`.
     /// Returns `(to_ping, to_quit)`. Pure over the state, so it's unit-testable.
     pub fn idle_check(&self, now: u64) -> (Vec<Uid>, Vec<Uid>) {
+        let reg_timeout = self.conf_num("registration_timeout", REG_TIMEOUT);
+        let ping_after = self.conf_num("ping_frequency", PING_AFTER);
+        let ping_timeout = self.conf_num("ping_timeout", PING_TIMEOUT);
         let mut ping = Vec::new();
         let mut quit = Vec::new();
         for (&uid, u) in &self.users {
             let idle = now.saturating_sub(u.last_active);
             if !u.registered {
-                if idle >= REG_TIMEOUT {
+                if idle >= reg_timeout {
                     quit.push(uid); // never registered in time
                 }
             } else if u.ping_sent {
-                if idle >= PING_AFTER + PING_TIMEOUT {
+                if idle >= ping_after + ping_timeout {
                     quit.push(uid); // no reply to our PING
                 }
-            } else if idle >= PING_AFTER {
+            } else if idle >= ping_after {
                 ping.push(uid); // idle — poke it
             }
         }
@@ -1180,13 +1191,13 @@ mod tests {
 
     #[test]
     fn nick_and_chan_validation() {
-        assert!(valid_nick("reverse"));
-        assert!(valid_nick("[abc]`"));
-        assert!(!valid_nick("1abc")); // can't start with a digit
-        assert!(!valid_nick(""));
-        assert!(valid_chan("#argentina"));
-        assert!(!valid_chan("argentina"));
-        assert!(!valid_chan("#a b"));
+        assert!(valid_nick("reverse", 30));
+        assert!(valid_nick("[abc]`", 30));
+        assert!(!valid_nick("1abc", 30)); // can't start with a digit
+        assert!(!valid_nick("", 30));
+        assert!(valid_chan("#argentina", 50));
+        assert!(!valid_chan("argentina", 50));
+        assert!(!valid_chan("#a b", 50));
     }
 
     #[test]

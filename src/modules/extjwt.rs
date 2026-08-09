@@ -21,7 +21,7 @@ use crate::server::{now, Server};
 use crate::Uid;
 
 /// Longest token chunk per EXTJWT line (keeps the whole line well under 512).
-const CHUNK: usize = 200;
+const CHUNK: usize = 200; // default token chunk size if `extjwt_chunk` unset
 
 /// Resolve `(secret, duration)` for a service name (`*` = the default service).
 fn service(s: &Server, name: &str) -> Option<(String, u64)> {
@@ -133,10 +133,11 @@ impl Command for ExtJwt {
         };
 
         // send the token, chunked, with a `*` continuation marker on all but the last
+        let chunk_sz = s.conf_num("extjwt_chunk", CHUNK).max(1);
         let bytes = token.as_bytes();
         let mut i = 0;
         while i < bytes.len() {
-            let end = (i + CHUNK).min(bytes.len());
+            let end = (i + chunk_sz).min(bytes.len());
             let chunk = &token[i..end];
             let more = end < bytes.len();
             let line = if more {

@@ -10,8 +10,10 @@ use crate::module::{ModResult, Module};
 use crate::server::{now, Server};
 use crate::Uid;
 
-const FLOOD_MAX: usize = 8; // messages allowed…
-const FLOOD_WINDOW: u64 = 4; // …within this many seconds
+// Defaults if unset in the config (`flood_messages` / `flood_seconds`): this many
+// messages allowed within this many seconds.
+const FLOOD_MAX: usize = 8;
+const FLOOD_WINDOW: u64 = 4;
 
 #[derive(Default)]
 struct FloodState {
@@ -34,6 +36,8 @@ impl Module for Flood {
         _text: &str,
     ) -> ModResult {
         let now = now();
+        let max = srv.conf_num("flood_messages", FLOOD_MAX);
+        let window = srv.conf_num("flood_seconds", FLOOD_WINDOW);
         let (over, warn) = {
             let Some(u) = srv.users.get_mut(&uid) else {
                 return ModResult::Passthru;
@@ -42,9 +46,9 @@ impl Module for Flood {
                 return ModResult::Passthru; // opers bypass flood limits
             }
             let st = u.ext.get_or_insert_with(FloodState::default);
-            st.times.retain(|&t| now.saturating_sub(t) < FLOOD_WINDOW);
+            st.times.retain(|&t| now.saturating_sub(t) < window);
             st.times.push(now);
-            let over = st.times.len() > FLOOD_MAX;
+            let over = st.times.len() > max;
             let warn = over && !st.warned; // notice once per burst
             st.warned = over;
             (over, warn)
