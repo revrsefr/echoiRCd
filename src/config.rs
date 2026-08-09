@@ -107,6 +107,17 @@ pub struct Config {
     pub aliases: Vec<(String, String)>, // command aliases: (name, target-nick)
     pub connflood: Option<(u32, u64)>, // (max conns, per secs) from one IP before refusing
     pub sec_groups: Vec<SecGroup>,     // UnrealIRCd-style security groups
+    pub autojoin: Vec<String>,         // conn_join: channels every user joins on connect
+    pub auto_umodes: String,           // conn_umodes: umodes set on connect (e.g. "+ix")
+    pub conn_banner: Vec<String>,      // connbanner: NOTICE lines sent on connect
+    pub oper_autojoin: Vec<String>,    // operjoin: channels opers join on /OPER
+    pub oper_umodes: String,           // opermodes: umodes set on /OPER
+    pub seenicks: bool,                // snotice every nick change
+    pub announce_chan: bool,           // chancreate: snotice when a channel is created
+    pub rep_scorecap: u32,             // reputation: max score
+    pub rep_bump_secs: u64,            // reputation: seconds between score bumps
+    pub rep_minchanmembers: usize,     // reputation: only bump if in a chan this big
+    pub rep_whois: bool,               // reputation: show score in WHOIS (opers)
 }
 
 impl Default for Config {
@@ -140,6 +151,17 @@ impl Default for Config {
             aliases: Vec::new(),
             connflood: None,
             sec_groups: Vec::new(),
+            autojoin: Vec::new(),
+            auto_umodes: String::new(),
+            conn_banner: Vec::new(),
+            oper_autojoin: Vec::new(),
+            oper_umodes: String::new(),
+            seenicks: false,
+            announce_chan: false,
+            rep_scorecap: 10000,
+            rep_bump_secs: 300,
+            rep_minchanmembers: 0,
+            rep_whois: true,
         }
     }
 }
@@ -308,6 +330,54 @@ impl Config {
                             }
                         }
                     }
+                }
+                "autojoin" | "conn_join" => {
+                    for chan in v.split([',', ' ']).filter(|c| !c.is_empty()) {
+                        c.autojoin.push(chan.to_string());
+                    }
+                }
+                "autoumodes" | "conn_umodes" => c.auto_umodes = v.to_string(),
+                "connbanner" => c.conn_banner.push(v.to_string()),
+                "operjoin" => {
+                    for chan in v.split([',', ' ']).filter(|c| !c.is_empty()) {
+                        c.oper_autojoin.push(chan.to_string());
+                    }
+                }
+                "opermodes" | "oper_umodes" => c.oper_umodes = v.to_string(),
+                "seenicks" => {
+                    c.seenicks = !matches!(
+                        v.to_ascii_lowercase().as_str(),
+                        "off" | "no" | "false" | "0"
+                    )
+                }
+                "chancreate" | "announce_channels" => {
+                    c.announce_chan = !matches!(
+                        v.to_ascii_lowercase().as_str(),
+                        "off" | "no" | "false" | "0"
+                    )
+                }
+                "reputation_scorecap" => {
+                    if let Ok(n) = v.parse() {
+                        c.rep_scorecap = n;
+                    }
+                }
+                "reputation_bumpinterval" => {
+                    if let Some(d) = crate::xline::parse_duration(v) {
+                        if d > 0 {
+                            c.rep_bump_secs = d;
+                        }
+                    }
+                }
+                "reputation_minchanmembers" => {
+                    if let Ok(n) = v.parse() {
+                        c.rep_minchanmembers = n;
+                    }
+                }
+                "reputation_whois" => {
+                    c.rep_whois = !matches!(
+                        v.to_ascii_lowercase().as_str(),
+                        "off" | "no" | "false" | "0"
+                    )
                 }
                 "securitygroup" | "secgroup" => {
                     // securitygroup = <name> [public] [tls|insecure] [account|unregistered]

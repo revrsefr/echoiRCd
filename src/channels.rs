@@ -699,6 +699,15 @@ impl Server {
         if let Some(u) = self.users.get_mut(&uid) {
             u.channels.insert(key.clone());
         }
+        // chancreate: snotice when a brand-new channel comes into being
+        if is_new && self.announce_chan {
+            let who = self
+                .users
+                .get(&uid)
+                .map(|u| u.nick.clone())
+                .unwrap_or_default();
+            self.snotice(&format!("{who} created channel {name}"));
+        }
 
         // JOIN broadcast — extended-join clients also get the account + realname
         let (prefix, acct, realname) = {
@@ -892,6 +901,9 @@ impl Server {
             if b.mask.as_bytes().get(1) == Some(&b':') {
                 match b.mask.as_bytes().first() {
                     Some(b'g') => crate::modules::securitygroups::in_group(self, uid, &b.mask[2..]),
+                    Some(b'y') => {
+                        crate::modules::reputation::score_ban_match(self, uid, &b.mask[2..])
+                    }
                     _ => false,
                 }
             } else {
@@ -1100,8 +1112,8 @@ pub fn normalize_mask(m: &str) -> String {
 pub fn normalize_ban_mask(m: &str) -> String {
     let b = m.as_bytes();
     if b.len() >= 2 && b[1] == b':' && (b[0] as char).is_ascii_alphabetic() {
-        // the g: security-group extban's argument is a group name, not a host mask
-        if b[0] == b'g' {
+        // g: (security-group name) and y: (reputation score spec) aren't host masks
+        if b[0] == b'g' || b[0] == b'y' {
             return m.to_string();
         }
         return format!("{}:{}", &m[..1], normalize_mask(&m[2..]));

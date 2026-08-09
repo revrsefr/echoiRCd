@@ -326,6 +326,15 @@ impl Server {
         self.numeric(uid, RPL_YOUREOPER, ":You are now an IRC operator");
         self.send(uid, format!(":{} MODE {nick} :+os", self.name));
         self.snotice(&format!("{nick} is now an IRC operator"));
+        // opermodes: extra umodes on oper-up
+        if !self.oper_umodes.is_empty() {
+            let modes = self.oper_umodes.clone();
+            crate::coremods::core_mode::svs_set_user_modes(self, uid, &modes);
+        }
+        // operjoin: auto-join configured oper channels
+        for chan in self.oper_autojoin.clone() {
+            self.join(uid, &chan, None);
+        }
     }
 
     /// Send a WALLOPS to every oper and every +w user.
@@ -386,6 +395,9 @@ impl Server {
             for t in targets {
                 self.send(t, line.clone());
             }
+            if self.seenicks {
+                self.snotice(&format!("{old} is now known as {newnick}"));
+            }
             // WATCH/MONITOR: the old nick is now gone, the new one is here
             self.watch_notify_offline(&old);
             self.watch_notify_online(newnick);
@@ -431,7 +443,7 @@ impl Server {
             uid,
             RPL_ISUPPORT,
             &format!(
-                "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIgX,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnpstuz EXTBAN=,cgmn WATCH=128 MONITOR=128 SILENCE=32 CALLERID=g WHOX CHATHISTORY=256 MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={} :are supported by this server",
+                "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIgX,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnpstuz EXTBAN=,cgmny WATCH=128 MONITOR=128 SILENCE=32 CALLERID=g WHOX CHATHISTORY=256 MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={} :are supported by this server",
                 self.network
             ),
         );
@@ -441,8 +453,21 @@ impl Server {
             &format!(":There are {} users on 1 server", self.users.len()),
         );
         self.send_motd(uid);
+        // connbanner: NOTICE lines to every connecting client
+        for line in self.conn_banner.clone() {
+            self.send(uid, format!(":{} NOTICE {nick} :{line}", self.name));
+        }
+        // conn_umodes: auto-set user modes on connect
+        if !self.auto_umodes.is_empty() {
+            let modes = self.auto_umodes.clone();
+            crate::coremods::core_mode::svs_set_user_modes(self, uid, &modes);
+        }
         self.watch_notify_online(&nick); // tell WATCH/MONITOR watchers
         self.events.push_back(Hook::Connect(uid));
+        // conn_join: auto-join configured channels
+        for chan in self.autojoin.clone() {
+            self.join(uid, &chan, None);
+        }
     }
 
     pub fn send_motd(&self, uid: Uid) {

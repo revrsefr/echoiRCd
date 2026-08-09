@@ -138,6 +138,17 @@ pub struct Server {
     pub connflood: Option<(u32, u64)>,             // (max, secs) connection throttle per IP
     pub conn_history: HashMap<IpAddr, Vec<u64>>,   // recent connection times per IP (connflood)
     pub sec_groups: Vec<crate::config::SecGroup>,  // UnrealIRCd-style security groups
+    pub autojoin: Vec<String>,                     // conn_join: channels joined on connect
+    pub auto_umodes: String,                       // conn_umodes: umodes set on connect
+    pub conn_banner: Vec<String>,                  // connbanner: NOTICE lines on connect
+    pub oper_autojoin: Vec<String>,                // operjoin: channels opers join on /OPER
+    pub oper_umodes: String,                       // opermodes: umodes set on /OPER
+    pub seenicks: bool,                            // snotice every nick change
+    pub announce_chan: bool,                       // chancreate: snotice on channel creation
+    pub rep_scorecap: u32,                         // reputation: max score
+    pub rep_bump_secs: u64,                        // reputation: seconds between bumps
+    pub rep_minchanmembers: usize,                 // reputation: min channel size to bump
+    pub rep_whois: bool,                           // reputation: show score in WHOIS
     // labeled-response: while Some((uid, buf)), that client's own responses are
     // diverted into `buf` instead of the socket, so `on_line` can wrap them with
     // the command's `label` (single tag, BATCH, or ACK). RefCell because the
@@ -195,6 +206,17 @@ impl Server {
             connflood: cfg.connflood,
             conn_history: HashMap::new(),
             sec_groups: cfg.sec_groups,
+            autojoin: cfg.autojoin,
+            auto_umodes: cfg.auto_umodes,
+            conn_banner: cfg.conn_banner,
+            oper_autojoin: cfg.oper_autojoin,
+            oper_umodes: cfg.oper_umodes,
+            seenicks: cfg.seenicks,
+            announce_chan: cfg.announce_chan,
+            rep_scorecap: cfg.rep_scorecap,
+            rep_bump_secs: cfg.rep_bump_secs,
+            rep_minchanmembers: cfg.rep_minchanmembers,
+            rep_whois: cfg.rep_whois,
             label_capture: RefCell::new(None),
             event_tx,
             conn_counter,
