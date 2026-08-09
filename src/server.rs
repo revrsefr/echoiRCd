@@ -709,6 +709,72 @@ impl Server {
         if aware {
             self.send(uid, line);
         }
+        // hostcycle — clients WITHOUT the chghost cap only learn the new host via a
+        // PART+JOIN, so cycle them through each shared channel (chghost peers already
+        // got the CHGHOST line above). Prefix modes are re-sent so they don't appear
+        // de-opped. InspIRCd `m_hostcycle`.
+        if new_host.is_some() || new_ident.is_some() {
+            let (nick, new_prefix, acct, realname) = {
+                let u = &self.users[&uid];
+                (
+                    u.nick.clone(),
+                    u.prefix(),
+                    u.account.clone().unwrap_or_else(|| "*".to_string()),
+                    u.realname.clone(),
+                )
+            };
+            let chans: Vec<String> = self.users[&uid].channels.iter().cloned().collect();
+            for key in chans {
+                let Some(ch) = self.channels.get(&key) else {
+                    continue;
+                };
+                let name = ch.name.clone();
+                let modes: String = ch
+                    .members
+                    .get(&uid)
+                    .map(|mem| {
+                        let mut s = String::new();
+                        for (on, c) in [
+                            (mem.owner, 'q'),
+                            (mem.admin, 'a'),
+                            (mem.op, 'o'),
+                            (mem.halfop, 'h'),
+                            (mem.voice, 'v'),
+                        ] {
+                            if on {
+                                s.push(c);
+                            }
+                        }
+                        s
+                    })
+                    .unwrap_or_default();
+                let recips: Vec<(Uid, bool)> = ch
+                    .members
+                    .keys()
+                    .copied()
+                    .filter(|&m| m != uid)
+                    .filter_map(|m| {
+                        self.users
+                            .get(&m)
+                            .filter(|u| !u.caps.chghost)
+                            .map(|u| (m, u.caps.extended_join))
+                    })
+                    .collect();
+                for (m, extjoin) in recips {
+                    self.send(m, format!(":{old_prefix} PART {name} :Changing host"));
+                    let joinline = if extjoin {
+                        format!(":{new_prefix} JOIN {name} {acct} :{realname}")
+                    } else {
+                        format!(":{new_prefix} JOIN {name}")
+                    };
+                    self.send(m, joinline);
+                    if !modes.is_empty() {
+                        let args = vec![nick.clone(); modes.len()].join(" ");
+                        self.send(m, format!(":{} MODE {name} +{modes} {args}", self.name));
+                    }
+                }
+            }
+        }
         if new_host.is_some() {
             self.numeric(
                 uid,
