@@ -15,6 +15,7 @@ pub mod connectban;
 pub mod connflood;
 pub mod denychans;
 pub mod dnsbl;
+pub mod extjwt;
 pub mod filter;
 pub mod flood;
 pub mod hashident;
@@ -80,5 +81,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(account_registration::commands())
         .chain(recaptcha::commands())
         .chain(cloudflare_challenge::commands())
+        .chain(extjwt::commands())
         .collect()
 }
