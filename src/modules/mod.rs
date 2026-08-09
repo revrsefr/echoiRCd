@@ -20,6 +20,7 @@ pub mod filter;
 pub mod flood;
 pub mod hashident;
 pub mod hidewhois;
+pub mod jsonlog;
 pub mod jwt;
 pub mod markread;
 pub mod metadata;

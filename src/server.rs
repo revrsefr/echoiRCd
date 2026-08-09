@@ -619,13 +619,27 @@ impl Server {
             .filter(|(_, u)| u.flags.oper && u.flags.snomask)
             .map(|(&u, _)| u)
             .collect();
+        // draft/json-log: the structured tag value is the same for every recipient
+        let jval = crate::modules::jsonlog::tag_value(self, msg);
         for o in opers {
-            let nick = self
+            let (nick, json_cap, time_cap) = self
                 .users
                 .get(&o)
-                .map(|u| u.nick.clone())
+                .map(|u| (u.nick.clone(), u.caps.json_log, u.caps.server_time))
                 .unwrap_or_default();
-            self.send(o, format!(":{} NOTICE {nick} :*** {msg}", self.name));
+            let base = format!(":{} NOTICE {nick} :*** {msg}", self.name);
+            if json_cap {
+                // build one tag block (server-time too, if negotiated) and emit raw,
+                // so we don't collide with the auto server-time tagging in `send`
+                let mut tags = String::new();
+                if time_cap {
+                    tags.push_str(&format!("time={};", iso_time(now())));
+                }
+                tags.push_str(&format!("draft/json-log={jval}"));
+                self.emit_to(o, format!("@{tags} {base}"));
+            } else {
+                self.send(o, base);
+            }
         }
     }
 

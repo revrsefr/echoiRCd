@@ -114,6 +114,7 @@ pub const SUPPORTED_CAPS: &[&str] = &[
     "draft/metadata-2",
     "draft/multiline",
     "draft/account-registration",
+    "draft/json-log",
     "cap-notify",
 ];
 
@@ -145,6 +146,7 @@ pub struct Caps {
     pub metadata: bool,         // draft/metadata-2 — wants metadata + change notices
     pub multiline: bool,        // draft/multiline — may send multiline message batches
     pub acct_registration: bool, // draft/account-registration — REGISTER/VERIFY understood
+    pub json_log: bool,         // draft/json-log — structured JSON tag on server notices
     pub cap_notify: bool,
 }
 
@@ -204,6 +206,7 @@ impl Caps {
             "draft/metadata-2" => self.metadata,
             "draft/multiline" => self.multiline,
             "draft/account-registration" => self.acct_registration,
+            "draft/json-log" => self.json_log,
             "cap-notify" => self.cap_notify,
             _ => false,
         }
@@ -235,6 +238,7 @@ impl Caps {
             "draft/metadata-2" => &mut self.metadata,
             "draft/multiline" => &mut self.multiline,
             "draft/account-registration" => &mut self.acct_registration,
+            "draft/json-log" => &mut self.json_log,
             "cap-notify" => &mut self.cap_notify,
             _ => return false,
         };
