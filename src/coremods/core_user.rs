@@ -22,7 +22,50 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(Away),
         Box::new(SetName),
         Box::new(WebIrc),
+        Box::new(Vhost),
     ]
+}
+
+/// VHOST — claim a self-service virtual host with `VHOST <user> <pass>` matching a
+/// configured `vhost = <user> <pass> <host>` block (InspIRCd `m_vhost`).
+struct Vhost;
+impl Command for Vhost {
+    fn name(&self) -> &'static str {
+        "VHOST"
+    }
+    fn min_params(&self) -> usize {
+        2
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        let (user, pass) = (&params[0], &params[1]);
+        let host = s
+            .vhosts
+            .iter()
+            .find(|(u, p, _)| u == user && p == pass)
+            .map(|(_, _, h)| h.clone());
+        let nick = s
+            .users
+            .get(&uid)
+            .map(|u| u.nick.clone())
+            .unwrap_or_else(|| "*".to_string());
+        match host {
+            Some(h) => {
+                s.change_host_ident(uid, None, Some(&h));
+                s.send(
+                    uid,
+                    format!(":{} NOTICE {nick} :Your vhost is now {h}", s.name),
+                );
+            }
+            None => {
+                s.send(
+                    uid,
+                    format!(":{} NOTICE {nick} :Invalid vhost credentials", s.name),
+                );
+                return CmdResult::Fail;
+            }
+        }
+        CmdResult::Ok
+    }
 }
 
 /// WEBIRC — a trusted web gateway declares the real client's host + IP, so users

@@ -70,3 +70,13 @@ amu_target    = both
 
 # +G censor words: `badword = <find> [replacement]` (omit replacement to block).
 # badword = examplebadword ***
+
+# --- OPERMOTD: message shown to opers via /OPERMOTD (one line per entry) ---
+# opermotd = Welcome to the staff team.
+
+# --- self-service vhosts: /VHOST <user> <pass> sets your displayed host ---
+# vhost = alice s3cret alice.staff.example
+
+# --- command aliases: /NS ... -> PRIVMSG <target> :... (services shortcuts) ---
+# alias = NS NickServ
+# alias = CS ChanServ

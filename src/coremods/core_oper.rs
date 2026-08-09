@@ -52,7 +52,45 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(SetIdle),
         Box::new(NickLock),
         Box::new(NickUnlock),
+        Box::new(OperMotd),
     ]
+}
+
+/// OPERMOTD — show the IRC-operators' message of the day (InspIRCd `m_opermotd`),
+/// configured with repeated `opermotd = <line>` entries.
+struct OperMotd;
+impl Command for OperMotd {
+    fn name(&self) -> &'static str {
+        "OPERMOTD"
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, _params: &[String]) -> CmdResult {
+        if !require_oper(s, uid) {
+            return CmdResult::Fail;
+        }
+        let nick = oper_nick(s, uid);
+        if s.opermotd.is_empty() {
+            s.send(
+                uid,
+                format!(":{} NOTICE {nick} :No OPERMOTD is set", s.name),
+            );
+            return CmdResult::Ok;
+        }
+        s.send(
+            uid,
+            format!(
+                ":{} NOTICE {nick} :- IRC Operators Message of the Day -",
+                s.name
+            ),
+        );
+        for line in s.opermotd.clone() {
+            s.send(uid, format!(":{} NOTICE {nick} :- {line}", s.name));
+        }
+        s.send(
+            uid,
+            format!(":{} NOTICE {nick} :- End of OPERMOTD -", s.name),
+        );
+        CmdResult::Ok
+    }
 }
 
 /// An oper-set WHOIS line, stored per-user in `User.ext` and rendered by WHOIS

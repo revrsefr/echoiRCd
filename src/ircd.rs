@@ -228,6 +228,25 @@ impl Ircd {
 
         let Some(handler) = self.commands.get(cmd) else {
             if registered {
+                // command aliases (m_alias): `/NS help` -> PRIVMSG NickServ :help
+                if let Some(target) = self
+                    .server
+                    .aliases
+                    .iter()
+                    .find(|(n, _)| n == cmd)
+                    .map(|(_, t)| t.clone())
+                {
+                    if !msg.params.is_empty() {
+                        let text = msg.params.join(" ");
+                        crate::coremods::core_message::deliver(
+                            &mut self.server,
+                            uid,
+                            &[target, text],
+                            false,
+                        );
+                    }
+                    return;
+                }
                 self.server
                     .numeric(uid, ERR_UNKNOWNCOMMAND, &format!("{cmd} :Unknown command"));
             }

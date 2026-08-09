@@ -132,6 +132,9 @@ pub struct Server {
     pub dnsbl_reason: String,                      // ban reason on a DNSBL hit
     pub sasl_server: String,                       // services server that handles SASL
     pub webirc: Vec<(String, String, String)>,     // web gateways: (password, name, ip-mask)
+    pub opermotd: Vec<String>,                     // OPERMOTD text
+    pub vhosts: Vec<(String, String, String)>,     // self-service vhosts: (user, pass, host)
+    pub aliases: Vec<(String, String)>,            // command aliases: (name, target-nick)
     // labeled-response: while Some((uid, buf)), that client's own responses are
     // diverted into `buf` instead of the socket, so `on_line` can wrap them with
     // the command's `label` (single tag, BATCH, or ACK). RefCell because the
@@ -183,6 +186,9 @@ impl Server {
             dnsbl_reason: cfg.dnsbl_reason,
             sasl_server: cfg.sasl_server,
             webirc: cfg.webirc,
+            opermotd: cfg.opermotd,
+            vhosts: cfg.vhosts,
+            aliases: cfg.aliases,
             label_capture: RefCell::new(None),
             event_tx,
             conn_counter,

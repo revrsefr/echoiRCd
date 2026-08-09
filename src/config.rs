@@ -76,6 +76,9 @@ pub struct Config {
     pub dnsbl_reason: String,          // ban reason for a DNSBL hit
     pub sasl_server: String,           // linked services server that handles SASL ("" = none)
     pub webirc: Vec<(String, String, String)>, // web gateways: (password, name, ip-mask)
+    pub opermotd: Vec<String>,         // OPERMOTD text, one line per entry
+    pub vhosts: Vec<(String, String, String)>, // self-service vhosts: (user, pass, host)
+    pub aliases: Vec<(String, String)>, // command aliases: (name, target-nick)
 }
 
 impl Default for Config {
@@ -104,6 +107,9 @@ impl Default for Config {
             dnsbl_reason: "Your host is listed in a DNS blocklist".to_string(),
             sasl_server: String::new(),
             webirc: Vec::new(),
+            opermotd: Vec::new(),
+            vhosts: Vec::new(),
+            aliases: Vec::new(),
         }
     }
 }
@@ -244,6 +250,22 @@ impl Config {
                         let gw = it.next().unwrap_or("webirc").to_string();
                         let mask = it.next().unwrap_or("").to_string();
                         c.webirc.push((pass.to_string(), gw, mask));
+                    }
+                }
+                "opermotd" => c.opermotd.push(v.to_string()),
+                "vhost" => {
+                    // vhost = <user> <pass> <host>
+                    let mut it = v.split_whitespace();
+                    if let (Some(u), Some(p), Some(h)) = (it.next(), it.next(), it.next()) {
+                        c.vhosts.push((u.to_string(), p.to_string(), h.to_string()));
+                    }
+                }
+                "alias" => {
+                    // alias = <command> <target-nick>   (e.g. `alias = NS NickServ`)
+                    let mut it = v.split_whitespace();
+                    if let (Some(name), Some(target)) = (it.next(), it.next()) {
+                        c.aliases
+                            .push((name.to_ascii_uppercase(), target.to_string()));
                     }
                 }
                 _ => {}
