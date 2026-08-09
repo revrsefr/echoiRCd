@@ -311,6 +311,9 @@ impl Server {
             return;
         }
 
+        // connectban — z-line an IP range that opens too many connections (see modules::connectban)
+        crate::modules::connectban::on_connect(self, ip);
+
         // Pre-registration connection notices, InspIRCd / solanum style. Ident-113
         // is archaic and firewalled, so those two are cosmetic; the hostname lookup
         // is real (see `resolver`) — its result arrives later as an Event.

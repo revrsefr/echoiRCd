@@ -4,8 +4,11 @@
 //! than the hook bus, but lives here as its own self-contained unit.
 
 pub mod antimixedutf8;
+pub mod antirandom;
+pub mod blockamsg;
 pub mod chathistory;
 pub mod cloak;
+pub mod connectban;
 pub mod connflood;
 pub mod dnsbl;
 pub mod filter;
@@ -17,6 +20,8 @@ pub mod multiline;
 pub mod network_icon;
 pub mod profilelink;
 pub mod reputation;
+pub mod restrictcommands;
+pub mod restrictmsg;
 pub mod securitygroups;
 pub mod snoop;
 pub mod whoisport;
@@ -37,6 +42,11 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(multiline::Multiline),
         Box::new(reputation::ReputationMod::default()),
         Box::new(connflood::ConnFlood),
+        Box::new(antirandom::AntiRandom),
+        Box::new(restrictcommands::RestrictCommands),
+        Box::new(restrictmsg::RestrictMsg),
+        Box::new(blockamsg::BlockAmsg),
+        Box::new(connectban::ConnectBan),
     ]
 }
 
