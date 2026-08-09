@@ -90,3 +90,17 @@ amu_target    = both
 #     scoremin=<n> scoremax=<n>   — use as an extban: MODE #c +b g:<name>
 # securitygroup = trusted account tls public
 # securitygroup = newbies scoremax=10 public
+
+# --- reputation (m_reputation): per-address scoring + y: score extban ---
+# reputation_database = reputation.db      # default: <conf>.reputation
+# reputation_ipv4prefix = 32               # CIDR bits used to key IPv4 scores
+# reputation_ipv6prefix = 64               # CIDR bits used to key IPv6 scores
+# reputation_bumpinterval = 5m             # how often a score bumps (+1, +2 if logged in)
+# reputation_expireinterval = 605          # how often decay rules run
+# reputation_saveinterval = 902            # how often the db is written
+# reputation_minchanmembers = 3            # only bump if in a channel this big
+# reputation_scorecap = 10000              # max score
+# reputation_whois = all                   # all | opers | self | none
+# reputationexpire = 2 1h                  # score<=2 decays after 1h  (repeatable; * = any)
+# reputationexpire = * 90d                 # any score decays after 90d
+# extban usage:  MODE #chan +b y:<100   (ban score below 100)   +b y:>500 (above 500)

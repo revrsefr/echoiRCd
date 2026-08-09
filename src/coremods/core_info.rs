@@ -238,14 +238,12 @@ impl Command for Whois {
                 &format!(":is in security groups: {}", groups.join(", ")),
             );
         }
-        // reputation score (opers only, when enabled)
-        if asker_oper && s.rep_whois {
+        // reputation score, subject to the configured whois visibility (all/opers/self/none)
+        if crate::modules::reputation::whois_visible(s, uid, tuid) {
             let score = crate::modules::reputation::score_of(s, tuid);
-            s.numeric(
-                uid,
-                RPL_WHOISSPECIAL,
-                &format!(":has a reputation score of {score}"),
-            );
+            if score > 0 {
+                s.numeric(uid, RPL_WHOISSPECIAL, &format!(":Score: {score}"));
+            }
         }
         // opers can see through the cloak to the real host/ip
         if asker_oper && disp != realhost {

@@ -54,13 +54,7 @@ fn matches(s: &Server, uid: Uid, g: &SecGroup) -> bool {
         return false;
     }
     if g.score_min.is_some() || g.score_max.is_some() {
-        let ip = u.addr.ip();
-        let score = s
-            .ext
-            .get::<crate::modules::reputation::Reputation>()
-            .and_then(|r| r.0.get(&ip))
-            .copied()
-            .unwrap_or(0);
+        let score = crate::modules::reputation::score_of(s, uid);
         if g.score_min.is_some_and(|m| score < m) || g.score_max.is_some_and(|m| score > m) {
             return false;
         }

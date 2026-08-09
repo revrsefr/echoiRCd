@@ -1,24 +1,62 @@
-//! reputation — InspIRCd `m_reputation`. Tracks a per-IP reputation score that
-//! accrues while users from that IP stay connected (roughly, time-online), so
-//! opers can tell established users apart from fresh/throwaway connections.
-//! Self-contained: the scores live in `Server.ext`, accrue on the tick, and
-//! persist to `<conf>.reputation`. `REPUTATION` reads/sets a user's score.
+//! reputation — InspIRCd `m_reputation` (© reverse). Per-network-address reputation
+//! scoring. Every `bumpinterval` (default 5m) each connected user's masked address
+//! gains +1 (+2 if logged into services), provided they're in a channel with at
+//! least `minchanmembers` members. Scores decay per the `reputationexpire` rules
+//! and persist to disk. Exposes the `y:` score extban, WHOIS visibility, and the
+//! `REPUTATION` oper command. Everything is config-driven (see `[reputation_*]`).
 
 use std::collections::HashMap;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::command::{CmdResult, Command};
 use crate::module::Module;
 use crate::numeric::{ERR_NOPRIVILEGES, ERR_NOSUCHNICK};
-use crate::server::Server;
+use crate::server::{now, Server};
 use crate::Uid;
 
-/// per-IP reputation score. Stored in `Server.ext`.
+/// One address's score plus when it was last active (for the decay rules).
+#[derive(Clone, Default)]
+pub struct Entry {
+    pub score: u32,
+    pub last_seen: u64,
+}
+
+/// masked-address -> entry. Stored in `Server.ext`.
 #[derive(Default)]
-pub struct Reputation(pub HashMap<IpAddr, u32>);
+pub struct Reputation(pub HashMap<IpAddr, Entry>);
+
+/// Mask an address to the configured CIDR prefix so a whole subnet shares a score.
+fn mask_ip(ip: IpAddr, v4: u8, v6: u8) -> IpAddr {
+    match ip {
+        IpAddr::V4(a) => {
+            let bits = u32::from(a);
+            let keep = match v4 {
+                0 => 0,
+                p if p >= 32 => u32::MAX,
+                p => u32::MAX << (32 - p),
+            };
+            IpAddr::V4(Ipv4Addr::from(bits & keep))
+        }
+        IpAddr::V6(a) => {
+            let bits = u128::from(a);
+            let keep = match v6 {
+                0 => 0,
+                p if p >= 128 => u128::MAX,
+                p => u128::MAX << (128 - p),
+            };
+            IpAddr::V6(Ipv6Addr::from(bits & keep))
+        }
+    }
+}
+
+/// The masked key for `uid`'s address.
+fn key_of(s: &Server, uid: Uid) -> Option<IpAddr> {
+    let ip = s.users.get(&uid).map(|u| u.addr.ip())?;
+    Some(mask_ip(ip, s.rep_ipv4prefix, s.rep_ipv6prefix))
+}
 
 /// Whether `uid` is in at least one channel with `min` or more members (the
-/// reputation `minchanmembers` gate — stops idle bots farming score alone).
+/// `minchanmembers` gate — stops idle bots farming score alone).
 fn in_active_channel(s: &Server, uid: Uid, min: usize) -> bool {
     if min <= 1 {
         return true;
@@ -36,11 +74,11 @@ fn in_active_channel(s: &Server, uid: Uid, min: usize) -> bool {
         .unwrap_or(false)
 }
 
-/// The tick-driven accrual + periodic save. Bumps every `rep_bump_secs` (default
-/// 5 min): +1 per connected user's IP, +1 more if they're logged into an account.
+/// The tick-driven bump / expire / save. Tracks seconds since each last ran.
 #[derive(Default)]
 pub struct ReputationMod {
-    secs: u64, // seconds since the last bump
+    since_bump: u64,
+    since_expire: u64,
     since_save: u64,
 }
 impl Module for ReputationMod {
@@ -48,43 +86,77 @@ impl Module for ReputationMod {
         "reputation"
     }
     fn on_tick(&mut self, s: &mut Server) {
-        self.secs += crate::server::TICK_SECS;
-        self.since_save += crate::server::TICK_SECS;
-        if self.secs < s.rep_bump_secs {
-            return;
+        let t = crate::server::TICK_SECS;
+        self.since_bump += t;
+        self.since_expire += t;
+        self.since_save += t;
+        if self.since_bump >= s.rep_bump_secs {
+            self.since_bump = 0;
+            bump_scores(s);
         }
-        self.secs = 0;
-        let cap = s.rep_scorecap;
-        let min = s.rep_minchanmembers;
-        // (ip, bump amount): +1 base, +1 if the user is logged into services
-        let bumps: Vec<(IpAddr, u32)> = s
-            .users
-            .values()
-            .filter(|u| u.registered)
-            .filter(|u| in_active_channel(s, u.uid, min))
-            .map(|u| (u.addr.ip(), if u.account.is_some() { 2 } else { 1 }))
-            .collect();
-        let store = s.ext.get_or_insert_with::<Reputation>(Reputation::default);
-        for (ip, amt) in bumps {
-            let e = store.0.entry(ip).or_insert(0);
-            *e = (*e + amt).min(cap);
+        if self.since_expire >= s.rep_expire_secs {
+            self.since_expire = 0;
+            expire_old(s);
         }
-        if self.since_save >= 600 {
+        if self.since_save >= s.rep_save_secs {
             self.since_save = 0;
             save(s);
         }
     }
 }
 
-/// The reputation score of the IP `uid` is connecting from.
+/// +1 per connected user's masked address (+1 more if logged in), capped, and
+/// refresh their last_seen so active addresses don't decay.
+fn bump_scores(s: &mut Server) {
+    let n = now();
+    let cap = s.rep_scorecap;
+    let min = s.rep_minchanmembers;
+    let (v4, v6) = (s.rep_ipv4prefix, s.rep_ipv6prefix);
+    let bumps: Vec<(IpAddr, u32)> = s
+        .users
+        .values()
+        .filter(|u| u.registered)
+        .filter(|u| in_active_channel(s, u.uid, min))
+        .map(|u| {
+            (
+                mask_ip(u.addr.ip(), v4, v6),
+                if u.account.is_some() { 2 } else { 1 },
+            )
+        })
+        .collect();
+    let store = s.ext.get_or_insert_with::<Reputation>(Reputation::default);
+    for (ip, amt) in bumps {
+        let e = store.0.entry(ip).or_default();
+        e.score = (e.score + amt).min(cap);
+        e.last_seen = n;
+    }
+}
+
+/// Drop entries that have aged out under any matching `reputationexpire` rule.
+fn expire_old(s: &mut Server) {
+    let n = now();
+    let rules = s.rep_expire_rules.clone();
+    if let Some(store) = s.ext.get_mut::<Reputation>() {
+        store.0.retain(|_, e| {
+            let expired = rules.iter().any(|&(score, age)| {
+                age > 0
+                    && n.saturating_sub(e.last_seen) > age
+                    && (score == -1 || e.score <= score as u32)
+            });
+            !expired
+        });
+    }
+}
+
+/// The reputation score of the (masked) address `uid` is connecting from.
 pub fn score_of(s: &Server, uid: Uid) -> u32 {
-    let Some(ip) = s.users.get(&uid).map(|u| u.addr.ip()) else {
+    let Some(k) = key_of(s, uid) else {
         return 0;
     };
     s.ext
         .get::<Reputation>()
-        .and_then(|r| r.0.get(&ip))
-        .copied()
+        .and_then(|r| r.0.get(&k))
+        .map(|e| e.score)
         .unwrap_or(0)
 }
 
@@ -105,12 +177,22 @@ pub fn score_ban_match(s: &Server, uid: Uid, spec: &str) -> bool {
     }
 }
 
+/// Whether the WHOIS `source` may see `target`'s reputation, per the `whois` mode.
+pub fn whois_visible(s: &Server, source: Uid, target: Uid) -> bool {
+    match s.rep_whois.as_str() {
+        "none" => false,
+        "self" => source == target,
+        "opers" => source == target || s.is_oper(source),
+        _ => true, // "all"
+    }
+}
+
 pub fn commands() -> Vec<Box<dyn Command>> {
     vec![Box::new(ReputationCmd)]
 }
 
 /// REPUTATION — `REPUTATION <nick> [<value>]` (oper). Show, or set, the reputation
-/// of the IP `<nick>` is connecting from.
+/// of the masked address `<nick>` is connecting from.
 struct ReputationCmd;
 impl Command for ReputationCmd {
     fn name(&self) -> &'static str {
@@ -136,7 +218,7 @@ impl Command for ReputationCmd {
             );
             return CmdResult::Fail;
         };
-        let Some(ip) = s.users.get(&tuid).map(|u| u.addr.ip()) else {
+        let Some(k) = key_of(s, tuid) else {
             return CmdResult::Fail;
         };
         let nick = params[0].clone();
@@ -146,30 +228,25 @@ impl Command for ReputationCmd {
             .map(|u| u.nick.clone())
             .unwrap_or_default();
         if let Some(val) = params.get(1).and_then(|v| v.parse::<u32>().ok()) {
-            let cap = s.rep_scorecap;
-            s.ext
-                .get_or_insert_with::<Reputation>(Reputation::default)
-                .0
-                .insert(ip, val.min(cap));
+            let (cap, n) = (s.rep_scorecap, now());
+            let store = s.ext.get_or_insert_with::<Reputation>(Reputation::default);
+            let e = store.0.entry(k).or_default();
+            e.score = val.min(cap);
+            e.last_seen = n;
             save(s);
             s.send(
                 uid,
                 format!(
-                    ":{} NOTICE {anick} :REPUTATION {nick} ({ip}) set to {val}",
+                    ":{} NOTICE {anick} :REPUTATION {nick} ({k}) set to {val}",
                     s.name
                 ),
             );
         } else {
-            let score = s
-                .ext
-                .get::<Reputation>()
-                .and_then(|r| r.0.get(&ip))
-                .copied()
-                .unwrap_or(0);
+            let score = score_of(s, tuid);
             s.send(
                 uid,
                 format!(
-                    ":{} NOTICE {anick} :REPUTATION {nick} ({ip}) = {score}",
+                    ":{} NOTICE {anick} :REPUTATION {nick} ({k}) = {score}",
                     s.name
                 ),
             );
@@ -179,15 +256,19 @@ impl Command for ReputationCmd {
 }
 
 fn db_path(s: &Server) -> String {
-    format!("{}.reputation", s.conf_path)
+    if s.rep_database.is_empty() {
+        format!("{}.reputation", s.conf_path)
+    } else {
+        s.rep_database.clone()
+    }
 }
 
-/// Persist per-IP reputation so it survives a restart.
+/// Persist reputation (masked-ip score last_seen per line) so it survives a restart.
 pub fn save(s: &Server) {
     let mut out = String::new();
     if let Some(r) = s.ext.get::<Reputation>() {
-        for (ip, score) in &r.0 {
-            out.push_str(&format!("{ip} {score}\n"));
+        for (ip, e) in &r.0 {
+            out.push_str(&format!("{ip} {} {}\n", e.score, e.last_seen));
         }
     }
     let _ = std::fs::write(db_path(s), out);
@@ -202,8 +283,9 @@ pub fn load(s: &mut Server) {
     for line in text.lines() {
         let mut it = line.split_whitespace();
         if let (Some(ip), Some(sc)) = (it.next(), it.next()) {
-            if let (Ok(ip), Ok(sc)) = (ip.parse::<IpAddr>(), sc.parse::<u32>()) {
-                store.0.insert(ip, sc);
+            if let (Ok(ip), Ok(score)) = (ip.parse::<IpAddr>(), sc.parse::<u32>()) {
+                let last_seen = it.next().and_then(|s| s.parse().ok()).unwrap_or_else(now);
+                store.0.insert(ip, Entry { score, last_seen });
             }
         }
     }

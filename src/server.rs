@@ -145,10 +145,16 @@ pub struct Server {
     pub oper_umodes: String,                       // opermodes: umodes set on /OPER
     pub seenicks: bool,                            // snotice every nick change
     pub announce_chan: bool,                       // chancreate: snotice on channel creation
+    pub rep_database: String,                      // reputation: db path ("" = <conf>.reputation)
+    pub rep_ipv4prefix: u8,                        // reputation: IPv4 CIDR prefix for keying
+    pub rep_ipv6prefix: u8,                        // reputation: IPv6 CIDR prefix for keying
     pub rep_scorecap: u32,                         // reputation: max score
     pub rep_bump_secs: u64,                        // reputation: seconds between bumps
+    pub rep_expire_secs: u64,                      // reputation: seconds between expiry runs
+    pub rep_save_secs: u64,                        // reputation: seconds between saves
     pub rep_minchanmembers: usize,                 // reputation: min channel size to bump
-    pub rep_whois: bool,                           // reputation: show score in WHOIS
+    pub rep_whois: String,                         // reputation: whois visibility mode
+    pub rep_expire_rules: Vec<(i32, u64)>,         // reputation: (score, age) decay rules
     // labeled-response: while Some((uid, buf)), that client's own responses are
     // diverted into `buf` instead of the socket, so `on_line` can wrap them with
     // the command's `label` (single tag, BATCH, or ACK). RefCell because the
@@ -213,10 +219,21 @@ impl Server {
             oper_umodes: cfg.oper_umodes,
             seenicks: cfg.seenicks,
             announce_chan: cfg.announce_chan,
+            rep_database: cfg.rep_database,
+            rep_ipv4prefix: cfg.rep_ipv4prefix,
+            rep_ipv6prefix: cfg.rep_ipv6prefix,
             rep_scorecap: cfg.rep_scorecap,
             rep_bump_secs: cfg.rep_bump_secs,
+            rep_expire_secs: cfg.rep_expire_secs,
+            rep_save_secs: cfg.rep_save_secs,
             rep_minchanmembers: cfg.rep_minchanmembers,
             rep_whois: cfg.rep_whois,
+            rep_expire_rules: if cfg.rep_expire_rules.is_empty() {
+                // Unreal defaults: score<=2 after 1h, <=6 after 7d, <=12 after 30d, any after 90d
+                vec![(2, 3600), (6, 604800), (12, 2592000), (-1, 7776000)]
+            } else {
+                cfg.rep_expire_rules
+            },
             label_capture: RefCell::new(None),
             event_tx,
             conn_counter,

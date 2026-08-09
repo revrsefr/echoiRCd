@@ -114,10 +114,16 @@ pub struct Config {
     pub oper_umodes: String,           // opermodes: umodes set on /OPER
     pub seenicks: bool,                // snotice every nick change
     pub announce_chan: bool,           // chancreate: snotice when a channel is created
-    pub rep_scorecap: u32,             // reputation: max score
-    pub rep_bump_secs: u64,            // reputation: seconds between score bumps
-    pub rep_minchanmembers: usize,     // reputation: only bump if in a chan this big
-    pub rep_whois: bool,               // reputation: show score in WHOIS (opers)
+    pub rep_database: String,          // reputation: db file (default <conf>.reputation)
+    pub rep_ipv4prefix: u8,            // reputation: IPv4 CIDR prefix for keying (32)
+    pub rep_ipv6prefix: u8,            // reputation: IPv6 CIDR prefix for keying (64)
+    pub rep_scorecap: u32,             // reputation: max score (10000)
+    pub rep_bump_secs: u64,            // reputation: seconds between score bumps (300)
+    pub rep_expire_secs: u64,          // reputation: seconds between expiry runs (605)
+    pub rep_save_secs: u64,            // reputation: seconds between disk saves (902)
+    pub rep_minchanmembers: usize,     // reputation: only bump if in a chan this big (3)
+    pub rep_whois: String,             // reputation: whois visibility all|opers|self|none
+    pub rep_expire_rules: Vec<(i32, u64)>, // (score-threshold, age-secs) decay rules
 }
 
 impl Default for Config {
@@ -158,10 +164,16 @@ impl Default for Config {
             oper_umodes: String::new(),
             seenicks: false,
             announce_chan: false,
+            rep_database: String::new(),
+            rep_ipv4prefix: 32,
+            rep_ipv6prefix: 64,
             rep_scorecap: 10000,
             rep_bump_secs: 300,
-            rep_minchanmembers: 0,
-            rep_whois: true,
+            rep_expire_secs: 605,
+            rep_save_secs: 902,
+            rep_minchanmembers: 3,
+            rep_whois: "all".to_string(),
+            rep_expire_rules: Vec::new(),
         }
     }
 }
@@ -356,16 +368,35 @@ impl Config {
                         "off" | "no" | "false" | "0"
                     )
                 }
+                "reputation_database" => c.rep_database = v.to_string(),
+                "reputation_ipv4prefix" => {
+                    if let Ok(n) = v.parse::<u8>() {
+                        c.rep_ipv4prefix = n.clamp(1, 32);
+                    }
+                }
+                "reputation_ipv6prefix" => {
+                    if let Ok(n) = v.parse::<u8>() {
+                        c.rep_ipv6prefix = n.clamp(1, 128);
+                    }
+                }
                 "reputation_scorecap" => {
                     if let Ok(n) = v.parse() {
                         c.rep_scorecap = n;
                     }
                 }
                 "reputation_bumpinterval" => {
-                    if let Some(d) = crate::xline::parse_duration(v) {
-                        if d > 0 {
-                            c.rep_bump_secs = d;
-                        }
+                    if let Some(d) = crate::xline::parse_duration(v).filter(|&d| d > 0) {
+                        c.rep_bump_secs = d;
+                    }
+                }
+                "reputation_expireinterval" => {
+                    if let Some(d) = crate::xline::parse_duration(v).filter(|&d| d > 0) {
+                        c.rep_expire_secs = d;
+                    }
+                }
+                "reputation_saveinterval" => {
+                    if let Some(d) = crate::xline::parse_duration(v).filter(|&d| d > 0) {
+                        c.rep_save_secs = d;
                     }
                 }
                 "reputation_minchanmembers" => {
@@ -373,11 +404,20 @@ impl Config {
                         c.rep_minchanmembers = n;
                     }
                 }
-                "reputation_whois" => {
-                    c.rep_whois = !matches!(
-                        v.to_ascii_lowercase().as_str(),
-                        "off" | "no" | "false" | "0"
-                    )
+                "reputation_whois" => c.rep_whois = v.to_ascii_lowercase(),
+                "reputationexpire" => {
+                    // reputationexpire = <score|*> <age>  (decay rule; * = any score)
+                    let mut it = v.split_whitespace();
+                    if let (Some(sc), Some(age)) = (it.next(), it.next()) {
+                        let score = if sc == "*" {
+                            -1
+                        } else {
+                            sc.parse().unwrap_or(-1)
+                        };
+                        if let Some(age) = crate::xline::parse_duration(age).filter(|&a| a > 0) {
+                            c.rep_expire_rules.push((score, age));
+                        }
+                    }
                 }
                 "securitygroup" | "secgroup" => {
                     // securitygroup = <name> [public] [tls|insecure] [account|unregistered]
