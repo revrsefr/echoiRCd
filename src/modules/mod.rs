@@ -15,11 +15,13 @@ pub mod denychans;
 pub mod dnsbl;
 pub mod filter;
 pub mod flood;
+pub mod hashident;
 pub mod hidewhois;
 pub mod markread;
 pub mod metadata;
 pub mod multiline;
 pub mod network_icon;
+pub mod password_hash;
 pub mod profilelink;
 pub mod realnameban;
 pub mod reputation;
@@ -53,6 +55,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(blockamsg::BlockAmsg),
         Box::new(connectban::ConnectBan),
         Box::new(securelist::SecureList),
+        Box::new(hashident::HashIdent),
     ]
 }
 
@@ -67,5 +70,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(chathistory::commands())
         .chain(reputation::commands())
         .chain(securitygroups::commands())
+        .chain(password_hash::commands())
         .collect()
 }

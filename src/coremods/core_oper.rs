@@ -121,7 +121,10 @@ impl Command for Oper {
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         let (name, pass) = (&params[0], &params[1]);
-        if s.opers.iter().any(|(n, p)| n == name && p == pass) {
+        if s.opers
+            .iter()
+            .any(|(n, p)| n == name && crate::modules::password_hash::verify(p, pass))
+        {
             s.oper_up(uid);
             CmdResult::Ok
         } else {
