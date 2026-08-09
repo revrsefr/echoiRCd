@@ -14,6 +14,7 @@ pub mod cloak;
 pub mod cloudflare_challenge;
 pub mod connectban;
 pub mod connflood;
+pub mod customtitle;
 pub mod denychans;
 pub mod disable;
 pub mod dnsbl;
@@ -111,5 +112,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(extended_isupport::commands())
         .chain(tline::commands())
         .chain(rmode::commands())
+        .chain(customtitle::commands())
         .collect()
 }

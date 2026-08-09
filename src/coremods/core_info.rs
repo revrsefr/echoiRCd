@@ -253,6 +253,10 @@ impl Command for Whois {
         if let Some(line) = crate::modules::profilelink::line(s, &account) {
             s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));
         }
+        // customtitle: a claimed vanity title
+        if let Some(line) = crate::modules::customtitle::line(s, tuid) {
+            s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));
+        }
         // whoisport: the listener port — opers only
         if asker_oper {
             if let Some(line) = crate::modules::whoisport::line(s, tuid) {
