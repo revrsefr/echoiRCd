@@ -51,6 +51,7 @@ pub mod securelist;
 pub mod securitygroups;
 pub mod serverban;
 pub mod showfile;
+pub mod solvemsg;
 pub mod snoop;
 pub mod tline;
 pub mod whoisport;
@@ -86,6 +87,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(disable::Disable),
         Box::new(maphide::MapHide),
         Box::new(dccallow::DccAllow),
+        Box::new(solvemsg::SolveMsg),
     ]
 }
 
