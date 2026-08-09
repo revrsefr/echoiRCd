@@ -283,6 +283,11 @@ impl Ircd {
 
         let Some(handler) = self.commands.get(cmd) else {
             if registered {
+                // showfile (m_showfile): config `showfile = <CMD> <path>` streams a
+                // text file as its own command (e.g. /RULES), like a config-named alias.
+                if crate::modules::showfile::maybe_show(&mut self.server, uid, cmd) {
+                    return;
+                }
                 // command aliases (m_alias): config `alias = <CMD> <target-nick>`
                 // e.g. `alias = NS NickServ` makes `/NS help` -> PRIVMSG NickServ :help
                 if let Some(target) = self.server.conf_all("alias").iter().find_map(|line| {

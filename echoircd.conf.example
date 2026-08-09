@@ -117,6 +117,10 @@ amu_target    = both
 # hidewhois_hide_server = yes  # hide 312
 # hidewhois_hide_idle = yes    # hide 317
 # hidewhois_hide_secure = yes  # hide 671
+# --- showfile (m_showfile): serve a text file as its own command. One line per
+#     file: `showfile = <COMMAND> <path>`. The file is read fresh each use, so
+#     edits show without a rehash. e.g. make /RULES stream a rules file:
+# showfile = RULES /etc/echoircd/rules.txt
 # --- geoip (m_geo_maxmind): native MaxMind .mmdb country lookup. Enables the
 #     G:<cc> ban extban (e.g. +b G:CN,RU), the oper GEOIP <nick|ip> command and
 #     a country line in WHOIS (opers). Point at a GeoLite2-Country.mmdb file:

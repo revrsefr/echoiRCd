@@ -48,6 +48,7 @@ pub mod rpc;
 pub mod securelist;
 pub mod securitygroups;
 pub mod serverban;
+pub mod showfile;
 pub mod snoop;
 pub mod tline;
 pub mod whoisport;
