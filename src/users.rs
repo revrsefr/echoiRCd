@@ -447,6 +447,14 @@ impl Server {
                 self.network
             ),
         );
+        // ircv3_network_icon: advertise draft/ICON when configured
+        if !self.network_icon.is_empty() {
+            self.numeric(
+                uid,
+                RPL_ISUPPORT,
+                &format!("ICON={} :are supported by this server", self.network_icon),
+            );
+        }
         self.numeric(
             uid,
             RPL_LUSERCLIENT,

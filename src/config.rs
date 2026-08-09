@@ -8,6 +8,14 @@
 //! oper       = god secret
 //! ```
 
+/// Parse a boolean config value (`yes`/`no`/`true`/`false`/`on`/`off`/`1`/`0`).
+fn yesish(v: &str) -> bool {
+    !matches!(
+        v.to_ascii_lowercase().as_str(),
+        "off" | "no" | "false" | "0"
+    )
+}
+
 /// Tri-state for a security-group criterion: don't-care / must-be / must-not-be.
 #[derive(Clone, Copy, PartialEq, Default)]
 pub enum Tri {
@@ -124,6 +132,15 @@ pub struct Config {
     pub rep_minchanmembers: usize,     // reputation: only bump if in a chan this big (3)
     pub rep_whois: String,             // reputation: whois visibility all|opers|self|none
     pub rep_expire_rules: Vec<(i32, u64)>, // (score-threshold, age-secs) decay rules
+    pub network_icon: String,          // ircv3_network_icon: draft/ICON ISUPPORT url
+    pub profilelink_baseurl: String,   // profileLink: WHOIS profile url base
+    pub hidewhois: bool,               // hidewhois: hide sensitive WHOIS lines from users
+    pub hidewhois_opers: bool,         // hidewhois: opers still see everything (default yes)
+    pub hidewhois_selfview: bool,      // hidewhois: a user sees their own full WHOIS (yes)
+    pub hidewhois_server: bool,        // hidewhois: hide 312 server line
+    pub hidewhois_idle: bool,          // hidewhois: hide 317 idle line
+    pub hidewhois_away: bool,          // hidewhois: hide 301 away line
+    pub hidewhois_secure: bool,        // hidewhois: hide 671 secure line
 }
 
 impl Default for Config {
@@ -174,6 +191,15 @@ impl Default for Config {
             rep_minchanmembers: 3,
             rep_whois: "all".to_string(),
             rep_expire_rules: Vec::new(),
+            network_icon: String::new(),
+            profilelink_baseurl: String::new(),
+            hidewhois: false,
+            hidewhois_opers: true,
+            hidewhois_selfview: true,
+            hidewhois_server: true,
+            hidewhois_idle: true,
+            hidewhois_away: true,
+            hidewhois_secure: true,
         }
     }
 }
@@ -204,6 +230,8 @@ impl Config {
         Self::parse_into(&mut c, &text);
         Some(c)
     }
+
+    // small helper is defined at module scope (see `yesish`).
 
     /// Parse `key = value` lines into `c`; unknown keys and comments are ignored.
     fn parse_into(c: &mut Config, text: &str) {
@@ -419,6 +447,20 @@ impl Config {
                         }
                     }
                 }
+                "network_icon" | "networkicon" => c.network_icon = v.to_string(),
+                "profilelink" | "profilelink_baseurl" => c.profilelink_baseurl = v.to_string(),
+                "hidewhois" => {
+                    c.hidewhois = !matches!(
+                        v.to_ascii_lowercase().as_str(),
+                        "off" | "no" | "false" | "0"
+                    )
+                }
+                "hidewhois_opers" => c.hidewhois_opers = yesish(v),
+                "hidewhois_selfview" => c.hidewhois_selfview = yesish(v),
+                "hidewhois_hide_server" => c.hidewhois_server = yesish(v),
+                "hidewhois_hide_idle" => c.hidewhois_idle = yesish(v),
+                "hidewhois_hide_away" => c.hidewhois_away = yesish(v),
+                "hidewhois_hide_secure" => c.hidewhois_secure = yesish(v),
                 "securitygroup" | "secgroup" => {
                     // securitygroup = <name> [public] [tls|insecure] [account|unregistered]
                     //   [oper|exclude-oper] [bot|exclude-bot] [webirc|exclude-webirc]

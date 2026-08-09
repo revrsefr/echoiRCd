@@ -104,3 +104,16 @@ amu_target    = both
 # reputationexpire = 2 1h                  # score<=2 decays after 1h  (repeatable; * = any)
 # reputationexpire = * 90d                 # any score decays after 90d
 # extban usage:  MODE #chan +b y:<100   (ban score below 100)   +b y:>500 (above 500)
+
+# --- whoisport: opers see the target's listener port in WHOIS (always on) ---
+# --- ircv3_network_icon: advertise a network icon via draft/ICON ISUPPORT ---
+# network_icon = https://example.org/icon.png
+# --- profileLink: a profile URL in WHOIS for logged-in users ---
+# profilelink_baseurl = https://example.org/profile/
+# --- hidewhois: hide sensitive WHOIS lines from ordinary users ---
+# hidewhois = yes
+# hidewhois_opers = yes        # opers still see everything
+# hidewhois_selfview = yes     # a user sees their own full WHOIS
+# hidewhois_hide_server = yes  # hide 312
+# hidewhois_hide_idle = yes    # hide 317
+# hidewhois_hide_secure = yes  # hide 671

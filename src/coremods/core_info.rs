@@ -148,6 +148,9 @@ impl Command for Whois {
         };
         let asker_oper = s.is_oper(uid);
         let is_self = tuid == uid;
+        // hidewhois: hide sensitive lines from ordinary users (opers/self exempt per config)
+        let hide =
+            s.hidewhois && !(is_self && s.hidewhois_selfview) && !(asker_oper && s.hidewhois_opers);
         let keys: Vec<String> = s.users[&tuid].channels.iter().cloned().collect();
         let (
             nick,
@@ -203,11 +206,13 @@ impl Command for Whois {
         if bot {
             s.numeric(uid, RPL_WHOISBOT, &format!("{nick} :is a bot"));
         }
-        s.numeric(
-            uid,
-            RPL_WHOISSERVER,
-            &format!("{nick} {} :echoIRCd", s.name),
-        );
+        if !(hide && s.hidewhois_server) {
+            s.numeric(
+                uid,
+                RPL_WHOISSERVER,
+                &format!("{nick} {} :echoIRCd", s.name),
+            );
+        }
         // +I hides the channel list from everyone but the user themselves + opers
         if !chans.is_empty() && (is_self || asker_oper || !hidechans) {
             s.numeric(
@@ -245,6 +250,28 @@ impl Command for Whois {
                 s.numeric(uid, RPL_WHOISSPECIAL, &format!(":Score: {score}"));
             }
         }
+        // profileLink: a profile URL for logged-in users (when configured)
+        if !s.profilelink_baseurl.is_empty() {
+            match &account {
+                Some(acct) => s.numeric(
+                    uid,
+                    RPL_WHOISSPECIAL,
+                    &format!(":Profil: {}{acct}", s.profilelink_baseurl),
+                ),
+                None => s.numeric(
+                    uid,
+                    RPL_WHOISSPECIAL,
+                    ":Profile: The user is not logged in or the account is not registered.",
+                ),
+            }
+        }
+        // whoisport: the listener port (+ TLS/plain) — opers only
+        if asker_oper {
+            let port = if secure { s.tls_port } else { s.plain_port };
+            if port != 0 {
+                s.numeric(uid, RPL_WHOISSPECIAL, &format!(":is using port {port}"));
+            }
+        }
         // opers can see through the cloak to the real host/ip
         if asker_oper && disp != realhost {
             s.numeric(
@@ -262,7 +289,7 @@ impl Command for Whois {
             );
         }
         // sslinfo: advertise a secure (TLS) connection
-        if secure {
+        if secure && !(hide && s.hidewhois_secure) {
             s.numeric(
                 uid,
                 RPL_WHOISSECURE,
@@ -279,13 +306,15 @@ impl Command for Whois {
                 );
             }
         }
-        // 317: idle time + signon time
-        let idle = crate::server::now().saturating_sub(last_active);
-        s.numeric(
-            uid,
-            RPL_WHOISIDLE,
-            &format!("{nick} {idle} {signon} :seconds idle, signon time"),
-        );
+        // 317: idle time + signon time (hidewhois may suppress it)
+        if !(hide && s.hidewhois_idle) {
+            let idle = crate::server::now().saturating_sub(last_active);
+            s.numeric(
+                uid,
+                RPL_WHOISIDLE,
+                &format!("{nick} {idle} {signon} :seconds idle, signon time"),
+            );
+        }
         // +W showwhois — tell the target that someone looked them up
         if showwhois && !is_self {
             let by = s.users.get(&uid).map(|u| u.prefix()).unwrap_or_default();

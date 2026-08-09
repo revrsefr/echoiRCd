@@ -35,6 +35,14 @@ pub const PING_AFTER: u64 = 90;
 pub const PING_TIMEOUT: u64 = 60;
 pub const REG_TIMEOUT: u64 = 60;
 
+/// The port from a `host:port` bind string (0 if unparseable) — for whoisport.
+fn port_of(addr: &str) -> u16 {
+    addr.rsplit(':')
+        .next()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(0)
+}
+
 pub fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -155,6 +163,17 @@ pub struct Server {
     pub rep_minchanmembers: usize,                 // reputation: min channel size to bump
     pub rep_whois: String,                         // reputation: whois visibility mode
     pub rep_expire_rules: Vec<(i32, u64)>,         // reputation: (score, age) decay rules
+    pub network_icon: String,                      // ircv3_network_icon: draft/ICON url
+    pub profilelink_baseurl: String,               // profileLink: WHOIS profile url base
+    pub hidewhois: bool,                           // hidewhois: enabled
+    pub hidewhois_opers: bool,                     // hidewhois: opers exempt
+    pub hidewhois_selfview: bool,                  // hidewhois: self exempt
+    pub hidewhois_server: bool,                    // hidewhois: hide 312
+    pub hidewhois_idle: bool,                      // hidewhois: hide 317
+    pub hidewhois_away: bool,                      // hidewhois: hide 301
+    pub hidewhois_secure: bool,                    // hidewhois: hide 671
+    pub plain_port: u16,                           // whoisport: the plaintext listener port
+    pub tls_port: u16,                             // whoisport: the TLS listener port (0 = none)
     // labeled-response: while Some((uid, buf)), that client's own responses are
     // diverted into `buf` instead of the socket, so `on_line` can wrap them with
     // the command's `label` (single tag, BATCH, or ACK). RefCell because the
@@ -228,6 +247,17 @@ impl Server {
             rep_save_secs: cfg.rep_save_secs,
             rep_minchanmembers: cfg.rep_minchanmembers,
             rep_whois: cfg.rep_whois,
+            network_icon: cfg.network_icon,
+            profilelink_baseurl: cfg.profilelink_baseurl,
+            hidewhois: cfg.hidewhois,
+            hidewhois_opers: cfg.hidewhois_opers,
+            hidewhois_selfview: cfg.hidewhois_selfview,
+            hidewhois_server: cfg.hidewhois_server,
+            hidewhois_idle: cfg.hidewhois_idle,
+            hidewhois_away: cfg.hidewhois_away,
+            hidewhois_secure: cfg.hidewhois_secure,
+            plain_port: port_of(&cfg.bind),
+            tls_port: cfg.bind_tls.as_deref().map(port_of).unwrap_or(0),
             rep_expire_rules: if cfg.rep_expire_rules.is_empty() {
                 // Unreal defaults: score<=2 after 1h, <=6 after 7d, <=12 after 30d, any after 90d
                 vec![(2, 3600), (6, 604800), (12, 2592000), (-1, 7776000)]
