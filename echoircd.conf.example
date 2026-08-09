@@ -117,6 +117,11 @@ amu_target    = both
 # hidewhois_hide_server = yes  # hide 312
 # hidewhois_hide_idle = yes    # hide 317
 # hidewhois_hide_secure = yes  # hide 671
+# --- conn_waitpong (m_conn_waitpong): hold registration until the client answers
+#     a server PING with the exact cookie — filters bots that never PONG. Real
+#     clients auto-reply, so it's transparent to them.
+# conn_waitpong = yes
+# conn_waitpong_killonbadreply = yes   # drop on a wrong pong (default: keep waiting)
 # --- showfile (m_showfile): serve a text file as its own command. One line per
 #     file: `showfile = <COMMAND> <path>`. The file is read fresh each use, so
 #     edits show without a rehash. e.g. make /RULES stream a rules file:

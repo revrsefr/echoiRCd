@@ -12,6 +12,7 @@ pub mod channelban;
 pub mod chathistory;
 pub mod cloak;
 pub mod cloudflare_challenge;
+pub mod conn_waitpong;
 pub mod connectban;
 pub mod connflood;
 pub mod customtitle;

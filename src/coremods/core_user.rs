@@ -555,8 +555,10 @@ impl Command for Pong {
     fn before_reg(&self) -> bool {
         true
     }
-    fn handle(&self, _s: &mut Server, _uid: Uid, _params: &[String]) -> CmdResult {
-        CmdResult::Ok // keepalive; nothing to do yet
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        // conn_waitpong: a pre-registration PONG may be answering our cookie
+        crate::modules::conn_waitpong::on_pong(s, uid, params);
+        CmdResult::Ok // otherwise just a keepalive
     }
 }
 

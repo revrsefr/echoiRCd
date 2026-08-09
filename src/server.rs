@@ -318,6 +318,7 @@ impl Server {
                 addr,
                 registered: false,
                 dns_pending: false,
+                waitpong: None,
                 deferred: Vec::new(),
                 cap: false,
                 cap_302: false,
@@ -393,6 +394,8 @@ impl Server {
                 "Couldn't look up your hostname; using your IP address instead",
             );
         }
+        // conn_waitpong: optionally hold registration until the client PONGs a cookie
+        crate::modules::conn_waitpong::arm(self, uid);
     }
 
     /// Fire an HTTP POST on a worker thread and deliver `(status, body)` back to
@@ -1039,6 +1042,7 @@ mod tests {
                 addr: "127.0.0.1:1".parse().unwrap(),
                 registered: true,
                 dns_pending: false,
+                waitpong: None,
                 deferred: Vec::new(),
                 cap: false,
                 cap_302: false,

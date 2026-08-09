@@ -286,6 +286,7 @@ pub struct User {
     pub addr: SocketAddr,
     pub registered: bool,
     pub dns_pending: bool,     // holding registration for a reverse-DNS lookup
+    pub waitpong: Option<String>, // conn_waitpong: cookie the client must PONG before registering
     pub deferred: Vec<String>, // handshake lines held while dns_pending (replayed after)
     pub cap: bool,             // CAP negotiation in progress (holds registration)
     pub cap_302: bool,         // client sent CAP LS 302 (cap-notify aware)

@@ -384,6 +384,7 @@ impl Ircd {
                     && !u.ident.is_empty()
                     && !u.cap
                     && !u.dns_pending
+                    && u.waitpong.is_none()
             })
             .unwrap_or(false);
         if ready {
