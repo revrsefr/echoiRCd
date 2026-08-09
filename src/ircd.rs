@@ -73,6 +73,7 @@ impl Ircd {
     ) -> Ircd {
         let mut server = Server::new(cfg, event_tx, conn_counter);
         server.load_xlines(); // restore persisted bans (m_xline_db)
+        crate::modules::metadata::load(&mut server); // restore channel metadata (m_metadata_db)
         Ircd {
             server,
             commands: command_table(),

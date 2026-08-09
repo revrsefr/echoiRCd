@@ -13,3 +13,4 @@ Cargo.lock
 
 # persisted x-line db (runtime state)
 *.xlines
+*.metadata

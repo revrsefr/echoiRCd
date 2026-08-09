@@ -160,6 +160,9 @@ impl Command for MetadataCmd {
                         }
                     }
                 }
+                if key.starts_with('#') {
+                    save(s); // persist channel metadata (m_ircv3_metadata_db)
+                }
                 let setter = s.users.get(&uid).map(|u| u.prefix()).unwrap_or_default();
                 let note = match &value {
                     Some(v) => format!(":{setter} METADATA {disp} {mkey} * :{v}"),
@@ -192,6 +195,9 @@ impl Command for MetadataCmd {
                 if let Some(st) = s.ext.get_mut::<MetaStore>() {
                     st.0.remove(&key);
                 }
+                if key.starts_with('#') {
+                    save(s);
+                }
             }
             "SUB" | "UNSUB" => {} // all metadata is public here; subscriptions are a no-op
             _ => {
@@ -200,5 +206,46 @@ impl Command for MetadataCmd {
             }
         }
         CmdResult::Ok
+    }
+}
+
+/// Where channel metadata is persisted (beside the config).
+fn db_path(s: &Server) -> String {
+    format!("{}.metadata", s.conf_path)
+}
+
+/// Persist channel metadata (the `#`-keyed entries) so it survives a restart —
+/// InspIRCd `m_ircv3_metadata_db`. Per-user metadata (`u<uid>`) is intentionally
+/// not saved: uids don't persist across restarts.
+pub fn save(s: &Server) {
+    let mut out = String::new();
+    if let Some(st) = s.ext.get::<MetaStore>() {
+        for (key, kv) in &st.0 {
+            if !key.starts_with('#') {
+                continue;
+            }
+            for (mk, v) in kv {
+                out.push_str(&format!("{key} {mk} {v}\n"));
+            }
+        }
+    }
+    let _ = std::fs::write(db_path(s), out);
+}
+
+/// Reload persisted channel metadata at startup.
+pub fn load(s: &mut Server) {
+    let Ok(text) = std::fs::read_to_string(db_path(s)) else {
+        return;
+    };
+    let store = s.ext.get_or_insert_with::<MetaStore>(MetaStore::default);
+    for line in text.lines() {
+        let mut it = line.splitn(3, ' ');
+        if let (Some(key), Some(mk), Some(v)) = (it.next(), it.next(), it.next()) {
+            store
+                .0
+                .entry(key.to_string())
+                .or_default()
+                .insert(mk.to_string(), v.to_string());
+        }
     }
 }
