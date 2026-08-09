@@ -34,6 +34,7 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(Eline),
         Box::new(Shun),
         Box::new(Qline),
+        Box::new(Cban),
         Box::new(Connect),
         Box::new(ChgHost),
         Box::new(ChgIdent),
@@ -680,6 +681,21 @@ impl Command for Qline {
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         do_xline(s, uid, params, XKind::Qline)
+    }
+}
+
+/// CBAN — forbid a channel-name glob (opers bypass it). Mask alone removes; a
+/// mask + duration adds. InspIRCd `m_cban`.
+struct Cban;
+impl Command for Cban {
+    fn name(&self) -> &'static str {
+        "CBAN"
+    }
+    fn min_params(&self) -> usize {
+        1
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        do_xline(s, uid, params, XKind::Cban)
     }
 }
 

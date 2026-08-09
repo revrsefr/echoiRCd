@@ -14,7 +14,54 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(Motd),
         Box::new(VersionCmd),
         Box::new(Links),
+        Box::new(SslInfo),
     ]
+}
+
+/// SSLINFO — report a user's TLS status and client-cert fingerprint (InspIRCd
+/// `m_sslinfo`). You may query yourself; querying another user requires oper.
+struct SslInfo;
+impl Command for SslInfo {
+    fn name(&self) -> &'static str {
+        "SSLINFO"
+    }
+    fn min_params(&self) -> usize {
+        1
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        let target = params[0].clone();
+        let Some(tuid) = s.find_nick(&target) else {
+            s.numeric(
+                uid,
+                ERR_NOSUCHNICK,
+                &format!("{target} :No such nick/channel"),
+            );
+            return CmdResult::Fail;
+        };
+        if tuid != uid && !s.is_oper(uid) {
+            s.numeric(uid, ERR_NOPRIVILEGES, ":You may only SSLINFO yourself");
+            return CmdResult::Fail;
+        }
+        let asker = s
+            .users
+            .get(&uid)
+            .map(|u| u.nick.clone())
+            .unwrap_or_else(|| "*".to_string());
+        let (nick, secure, certfp) = {
+            let u = &s.users[&tuid];
+            (u.nick.clone(), u.secure, u.certfp.clone())
+        };
+        let tls = if secure { "yes" } else { "no" };
+        let fp = certfp.unwrap_or_else(|| "none".to_string());
+        s.send(
+            uid,
+            format!(
+                ":{} NOTICE {asker} :SSLINFO {nick}: TLS={tls} certfp={fp}",
+                s.name
+            ),
+        );
+        CmdResult::Ok
+    }
 }
 
 /// LINKS — the servers this one knows about (itself + every linked peer).

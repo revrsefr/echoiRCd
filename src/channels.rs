@@ -405,6 +405,17 @@ impl Server {
         {
             return; // unknown user, or already joined
         }
+        // CBAN — a forbidden channel name (opers bypass)
+        if !self.users.get(&uid).map(|u| u.flags.oper).unwrap_or(false) {
+            if let Some(reason) = self.matched_cban(&key) {
+                self.numeric(
+                    uid,
+                    ERR_BADCHANNEL,
+                    &format!("{name} :Channel is CBAN'd: {reason}"),
+                );
+                return;
+            }
+        }
         // an existing channel can refuse the join (+k / +b / +i / +l)
         if let Some(ch) = self.channels.get(&key) {
             if let Some(k) = &ch.modes.key {

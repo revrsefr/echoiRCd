@@ -15,6 +15,7 @@ pub enum XKind {
     Eline, // user@host / ip EXEMPT from K/G/Z-lines
     Shun,  // user@host allowed to connect but whose commands are dropped
     Qline, // a reserved/forbidden nick glob
+    Cban,  // a forbidden channel-name glob
 }
 
 impl XKind {
@@ -26,6 +27,7 @@ impl XKind {
             XKind::Eline => "E",
             XKind::Shun => "SHUN",
             XKind::Qline => "Q",
+            XKind::Cban => "CBAN",
         }
     }
 }
@@ -105,6 +107,20 @@ impl Server {
                 x.kind == XKind::Qline
                     && (x.expires == 0 || x.expires > n)
                     && glob_match(&x.mask, nick)
+            })
+            .map(|x| x.reason.clone())
+    }
+
+    /// The reason channel `chan` is CBAN'd (forbidden), if any. Case-insensitive.
+    pub fn matched_cban(&self, chan: &str) -> Option<String> {
+        let n = now();
+        let c = chan.to_ascii_lowercase();
+        self.xlines
+            .iter()
+            .find(|x| {
+                x.kind == XKind::Cban
+                    && (x.expires == 0 || x.expires > n)
+                    && glob_match(&x.mask.to_ascii_lowercase(), &c)
             })
             .map(|x| x.reason.clone())
     }
