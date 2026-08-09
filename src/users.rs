@@ -116,6 +116,7 @@ pub const SUPPORTED_CAPS: &[&str] = &[
     "draft/multiline",
     "draft/account-registration",
     "draft/json-log",
+    "reverse.im/filehost",
     "cap-notify",
 ];
 
@@ -148,6 +149,7 @@ pub struct Caps {
     pub multiline: bool,        // draft/multiline — may send multiline message batches
     pub acct_registration: bool, // draft/account-registration — REGISTER/VERIFY understood
     pub json_log: bool,         // draft/json-log — structured JSON tag on server notices
+    pub filehost: bool,         // reverse.im/filehost — knows the file-host extension
     pub cap_notify: bool,
 }
 
@@ -208,6 +210,7 @@ impl Caps {
             "draft/multiline" => self.multiline,
             "draft/account-registration" => self.acct_registration,
             "draft/json-log" => self.json_log,
+            "reverse.im/filehost" => self.filehost,
             "cap-notify" => self.cap_notify,
             _ => false,
         }
@@ -240,6 +243,7 @@ impl Caps {
             "draft/multiline" => &mut self.multiline,
             "draft/account-registration" => &mut self.acct_registration,
             "draft/json-log" => &mut self.json_log,
+            "reverse.im/filehost" => &mut self.filehost,
             "cap-notify" => &mut self.cap_notify,
             _ => return false,
         };
@@ -466,6 +470,13 @@ impl Server {
         );
         // ircv3_network_icon: advertise draft/ICON when configured
         if let Some(tok) = crate::modules::network_icon::isupport(self) {
+            self.numeric(
+                uid,
+                RPL_ISUPPORT,
+                &format!("{tok} :are supported by this server"),
+            );
+        }
+        if let Some(tok) = crate::modules::filehost::isupport(self) {
             self.numeric(
                 uid,
                 RPL_ISUPPORT,

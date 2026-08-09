@@ -16,10 +16,12 @@ pub mod connflood;
 pub mod denychans;
 pub mod dnsbl;
 pub mod extjwt;
+pub mod filehost;
 pub mod filter;
 pub mod flood;
 pub mod hashident;
 pub mod hidewhois;
+pub mod irccloudtags;
 pub mod jsonlog;
 pub mod jwt;
 pub mod markread;
@@ -65,6 +67,8 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(hashident::HashIdent),
         Box::new(recaptcha::ReCaptcha),
         Box::new(cloudflare_challenge::CloudflareChallenge),
+        Box::new(filehost::FileHost),
+        Box::new(irccloudtags::IrcCloudTags),
     ]
 }
 
@@ -92,5 +96,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(recaptcha::commands())
         .chain(cloudflare_challenge::commands())
         .chain(extjwt::commands())
+        .chain(filehost::commands())
         .collect()
 }
