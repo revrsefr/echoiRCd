@@ -190,7 +190,11 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             .get(&key)
             .map(|c| c.modes.moderated)
             .unwrap_or(false);
-        if moderated && s.rank(uid, &key) < RANK_VOICE && !op_only {
+        if moderated
+            && s.rank(uid, &key) < RANK_VOICE
+            && !op_only
+            && !s.chanop_exempt(uid, &key, "moderated")
+        {
             if !notice {
                 s.numeric(
                     uid,
@@ -206,7 +210,11 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             .get(&key)
             .map(|c| c.modes.reg_moderated)
             .unwrap_or(false);
-        if reg_moderated && s.rank(uid, &key) < RANK_VOICE && !s.is_logged_in(uid) {
+        if reg_moderated
+            && s.rank(uid, &key) < RANK_VOICE
+            && !s.is_logged_in(uid)
+            && !s.chanop_exempt(uid, &key, "regmoderated")
+        {
             if !notice {
                 s.numeric(
                     uid,
@@ -218,7 +226,7 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
         }
         // +d delaymsg — a just-joined unprivileged user must wait before speaking
         if let Some(secs) = s.channels.get(&key).and_then(|c| c.modes.delaymsg) {
-            if s.rank(uid, &key) < RANK_VOICE {
+            if s.rank(uid, &key) < RANK_VOICE && !s.chanop_exempt(uid, &key, "delaymsg") {
                 let joined = s
                     .channels
                     .get(&key)
@@ -251,7 +259,7 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
         // +f message flood — ops/half-ops and opers are exempt; others get kicked
         let flood_exempt = s.rank(uid, &key) >= RANK_HALFOP
             || s.users.get(&uid).map(|u| u.flags.oper).unwrap_or(false);
-        if !flood_exempt {
+        if !flood_exempt && !s.chanop_exempt(uid, &key, "flood") {
             if let Some(ban) = s.messageflood_hit(uid, &key) {
                 s.flood_kick(uid, &key, ban);
                 return CmdResult::Fail;
@@ -270,10 +278,10 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
                 )
             })
             .unwrap_or_default();
-        if notice && no_notice {
+        if notice && no_notice && !s.chanop_exempt(uid, &key, "nonotice") {
             return CmdResult::Fail; // +T — NOTICEs are silently dropped
         }
-        if no_ctcp && is_ctcp(text) && !is_action(text) {
+        if no_ctcp && is_ctcp(text) && !is_action(text) && !s.chanop_exempt(uid, &key, "noctcp") {
             if !notice {
                 s.numeric(
                     uid,
@@ -283,7 +291,7 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             }
             return CmdResult::Fail;
         }
-        if no_color && has_formatting(text) {
+        if no_color && has_formatting(text) && !s.chanop_exempt(uid, &key, "blockcolor") {
             if !notice {
                 s.numeric(
                     uid,
@@ -310,7 +318,7 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             .get(&key)
             .map(|c| c.filters.iter().any(|f| glob_match(&f.mask, text)))
             .unwrap_or(false);
-        if filtered {
+        if filtered && !s.chanop_exempt(uid, &key, "filter") {
             if !notice {
                 s.numeric(
                     uid,
@@ -320,7 +328,7 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             }
             return CmdResult::Fail;
         }
-        let mut body = if strip {
+        let mut body = if strip && !s.chanop_exempt(uid, &key, "stripcolor") {
             strip_formatting(text)
         } else {
             text.clone()
@@ -331,7 +339,7 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             .get(&key)
             .map(|c| c.modes.censor)
             .unwrap_or(false);
-        if censor_on && !s.censor.is_empty() {
+        if censor_on && !s.censor.is_empty() && !s.chanop_exempt(uid, &key, "censor") {
             match apply_censor(&body, &s.censor) {
                 Some(b) => body = b,
                 None => {
@@ -347,7 +355,7 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             }
         }
         // +B anticaps — reject a mostly-uppercase message (ops/opers exempt)
-        if !flood_exempt {
+        if !flood_exempt && !s.chanop_exempt(uid, &key, "anticaps") {
             if let Some(pct) = s.channels.get(&key).and_then(|c| c.modes.anticaps) {
                 if caps_percent(&body).map(|p| p >= pct).unwrap_or(false) {
                     if !notice {
@@ -363,7 +371,7 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
         }
         // +K repeat — reject a line the sender just repeated; else remember it (ops exempt)
         if let Some(n) = s.channels.get(&key).and_then(|c| c.modes.repeat) {
-            if s.rank(uid, &key) < RANK_HALFOP {
+            if s.rank(uid, &key) < RANK_HALFOP && !s.chanop_exempt(uid, &key, "repeat") {
                 let repeated = s
                     .channels
                     .get(&key)

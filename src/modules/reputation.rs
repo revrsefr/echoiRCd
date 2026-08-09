@@ -42,6 +42,7 @@ impl Module for ReputationMod {
             *e = (*e + 1).min(REP_CAP);
         }
         self.ticks += 1;
+        #[allow(clippy::manual_is_multiple_of)] // is_multiple_of is unstable on our MSRV
         if self.ticks % SAVE_EVERY == 0 {
             save(s);
         }

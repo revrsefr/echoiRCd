@@ -275,10 +275,11 @@ pub struct Channel {
     pub rmembers: HashMap<String, Member>, // remote members, by network uuid (S2S)
     pub modes: ChanModes,
     pub bans: Vec<Ban>,
-    pub excepts: Vec<Ban>,     // +e ban exceptions
-    pub invex: Vec<Ban>,       // +I invite exceptions
-    pub filters: Vec<Ban>,     // +g word/glob message filters (mask = the glob)
-    pub invites: HashSet<Uid>, // uids allowed past +i
+    pub excepts: Vec<Ban>,       // +e ban exceptions
+    pub invex: Vec<Ban>,         // +I invite exceptions
+    pub filters: Vec<Ban>,       // +g word/glob message filters (mask = the glob)
+    pub exemptchanops: Vec<Ban>, // +X exemptions (mask = "restriction:rankchar")
+    pub invites: HashSet<Uid>,   // uids allowed past +i
     pub created: u64,
     // --- ephemeral flood counters (not modes; never rendered or synced) -------
     pub msgflood_hits: HashMap<Uid, Vec<u64>>, // +f per-user message times
@@ -306,6 +307,7 @@ impl Channel {
             excepts: Vec::new(),
             invex: Vec::new(),
             filters: Vec::new(),
+            exemptchanops: Vec::new(),
             invites: HashSet::new(),
             created: now(),
             msgflood_hits: HashMap::new(),
@@ -353,6 +355,32 @@ impl Server {
             .get(key)
             .map(|c| c.members.contains_key(&uid))
             .unwrap_or(false)
+    }
+
+    /// +X exemptchanops — is `uid` exempt from `restriction` in this channel? True
+    /// when a `+X <restriction>:<rankchar>` entry names a rank they meet or exceed.
+    pub fn chanop_exempt(&self, uid: Uid, key: &str, restriction: &str) -> bool {
+        let Some(ch) = self.channels.get(key) else {
+            return false;
+        };
+        let rank = self.rank(uid, key);
+        ch.exemptchanops.iter().any(|e| {
+            let Some((r, prefix)) = e.mask.split_once(':') else {
+                return false;
+            };
+            if !r.eq_ignore_ascii_case(restriction) {
+                return false;
+            }
+            let need = match prefix.chars().next() {
+                Some('q') => RANK_OWNER,
+                Some('a') => RANK_ADMIN,
+                Some('o') => RANK_OP,
+                Some('h') => RANK_HALFOP,
+                Some('v') => RANK_VOICE,
+                _ => return false,
+            };
+            rank >= need
+        })
     }
 
     /// Lift any expired TBAN timed bans, announcing `MODE -b` to each channel.

@@ -92,6 +92,7 @@ static CHAN_MODES: &[&(dyn ChanMode + Sync)] = &[
     &OPMODERATED,
     &DELAYMSG,
     &REPEAT,
+    &EXEMPTCHANOPS,
 ];
 
 // --- prefix modes (+q/+a/+o/+h/+v): a per-member rank, needs a nick ----------
@@ -477,7 +478,8 @@ enum ListKind {
     Ban,
     Except,
     Invex,
-    Filter, // +g — message word/glob filters (not host masks)
+    Filter,        // +g — message word/glob filters (not host masks)
+    ExemptChanOps, // +X — "restriction:rankchar" exemptions
 }
 impl ListKind {
     fn list<'a>(&self, c: &'a Channel) -> &'a Vec<Ban> {
@@ -486,6 +488,7 @@ impl ListKind {
             ListKind::Except => &c.excepts,
             ListKind::Invex => &c.invex,
             ListKind::Filter => &c.filters,
+            ListKind::ExemptChanOps => &c.exemptchanops,
         }
     }
     fn list_mut<'a>(&self, c: &'a mut Channel) -> &'a mut Vec<Ban> {
@@ -494,6 +497,7 @@ impl ListKind {
             ListKind::Except => &mut c.excepts,
             ListKind::Invex => &mut c.invex,
             ListKind::Filter => &mut c.filters,
+            ListKind::ExemptChanOps => &mut c.exemptchanops,
         }
     }
     /// (per-entry numeric, end-of-list numeric, name for the "End of …" line)
@@ -503,12 +507,17 @@ impl ListKind {
             ListKind::Except => (RPL_EXCEPTLIST, RPL_ENDOFEXCEPTLIST, "exception list"),
             ListKind::Invex => (RPL_INVEXLIST, RPL_ENDOFINVEXLIST, "invite list"),
             ListKind::Filter => (RPL_SPAMFILTER, RPL_ENDOFSPAMFILTER, "spamfilter list"),
+            ListKind::ExemptChanOps => (
+                RPL_EXEMPTIONLIST,
+                RPL_ENDOFEXEMPTIONLIST,
+                "exemptchanops list",
+            ),
         }
     }
     /// Ban-style lists hold host masks and get filled out to `nick!user@host`;
-    /// the +g filter list holds literal word/globs and is stored verbatim.
+    /// the +g filter and +X lists hold literal strings and are stored verbatim.
     fn normalizes(&self) -> bool {
-        !matches!(self, ListKind::Filter)
+        matches!(self, ListKind::Ban | ListKind::Except | ListKind::Invex)
     }
 }
 
@@ -531,6 +540,10 @@ static INVEX: ListMode = ListMode {
 static FILTER: ListMode = ListMode {
     ch: 'g',
     kind: ListKind::Filter,
+};
+static EXEMPTCHANOPS: ListMode = ListMode {
+    ch: 'X',
+    kind: ListKind::ExemptChanOps,
 };
 
 impl ChanMode for ListMode {
@@ -1234,7 +1247,7 @@ mod tests {
 
     #[test]
     fn registry_covers_all_channel_modes() {
-        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuBQAPJUdK".chars() {
+        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuBQAPJUdKX".chars() {
             assert!(chan_mode(c).is_some(), "missing handler for +{c}");
         }
         assert!(chan_mode('y').is_none());
