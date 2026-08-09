@@ -533,6 +533,14 @@ impl Server {
         if crate::modules::denychans::intercept(self, uid, name, is_oper) {
             return;
         }
+        // restrictchans — only opers may create new channels (unless whitelisted)
+        if crate::modules::restrictchans::intercept(self, uid, name, is_oper) {
+            return;
+        }
+        // channames — forbidden characters in new channel names
+        if crate::modules::channames::intercept(self, uid, name) {
+            return;
+        }
         // an existing channel can refuse the join (+k / +b / +i / +z / +R / +J)
         if let Some(ch) = self.channels.get(&key) {
             if let Some(k) = &ch.modes.key {

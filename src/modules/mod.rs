@@ -7,6 +7,7 @@ pub mod account_registration;
 pub mod antimixedutf8;
 pub mod antirandom;
 pub mod blockamsg;
+pub mod channames;
 pub mod channelban;
 pub mod chathistory;
 pub mod cloak;
@@ -14,6 +15,7 @@ pub mod cloudflare_challenge;
 pub mod connectban;
 pub mod connflood;
 pub mod denychans;
+pub mod disable;
 pub mod dnsbl;
 pub mod extended_isupport;
 pub mod extjwt;
@@ -31,9 +33,11 @@ pub mod multiline;
 pub mod network_icon;
 pub mod password_hash;
 pub mod profilelink;
+pub mod randquote;
 pub mod realnameban;
 pub mod recaptcha;
 pub mod reputation;
+pub mod restrictchans;
 pub mod restrictcommands;
 pub mod restrictmsg;
 pub mod rpc;
@@ -70,6 +74,8 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(cloudflare_challenge::CloudflareChallenge),
         Box::new(filehost::FileHost),
         Box::new(irccloudtags::IrcCloudTags),
+        Box::new(randquote::RandQuote),
+        Box::new(disable::Disable),
     ]
 }
 
