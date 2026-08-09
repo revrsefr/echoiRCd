@@ -1,10 +1,11 @@
 //! core_channel — channel membership commands: JOIN, PART, KICK, TOPIC, NAMES.
 
-use crate::channels::{Topic, RANK_HALFOP};
+use crate::channels::{normalize_ban_mask, Ban, Topic, RANK_HALFOP};
 use crate::command::{CmdResult, Command};
 use crate::module::Hook;
 use crate::numeric::*;
 use crate::server::{now, Server};
+use crate::xline::parse_duration;
 use crate::Uid;
 
 pub fn commands() -> Vec<Box<dyn Command>> {
@@ -19,7 +20,72 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(Knock),
         Box::new(Cycle),
         Box::new(Remove),
+        Box::new(Tban),
     ]
+}
+
+/// TBAN — set a +b ban that lifts itself after a duration (InspIRCd `m_timedbans`).
+/// `TBAN <#chan> <duration> <mask>`; needs half-op or above. The background tick
+/// removes it and announces `MODE -b` when it expires.
+struct Tban;
+impl Command for Tban {
+    fn name(&self) -> &'static str {
+        "TBAN"
+    }
+    fn min_params(&self) -> usize {
+        3
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        let chan = &params[0];
+        let key = chan.to_ascii_lowercase();
+        if !s.channels.contains_key(&key) {
+            s.numeric(uid, ERR_NOSUCHCHANNEL, &format!("{chan} :No such channel"));
+            return CmdResult::Fail;
+        }
+        if s.rank(uid, &key) < RANK_HALFOP {
+            s.numeric(
+                uid,
+                ERR_CHANOPRIVSNEEDED,
+                &format!("{chan} :You're not a channel operator"),
+            );
+            return CmdResult::Fail;
+        }
+        let Some(dur) = parse_duration(&params[1]).filter(|&d| d > 0) else {
+            s.fail(
+                uid,
+                "TBAN",
+                "INVALID_DURATION",
+                "TBAN needs a positive duration",
+            );
+            return CmdResult::Fail;
+        };
+        let mask = normalize_ban_mask(&params[2]);
+        let (nick, prefix) = {
+            let u = &s.users[&uid];
+            (u.nick.clone(), u.prefix())
+        };
+        if s.channels[&key].bans.iter().any(|b| b.mask == mask) {
+            s.send(
+                uid,
+                format!(
+                    ":{} NOTICE {nick} :{mask} is already banned on {chan}",
+                    s.name
+                ),
+            );
+            return CmdResult::Fail;
+        }
+        if let Some(c) = s.channels.get_mut(&key) {
+            c.bans.push(Ban {
+                mask: mask.clone(),
+                setter: nick,
+                ts: now(),
+                expires: Some(now() + dur),
+            });
+        }
+        s.to_channel(&key, &format!(":{prefix} MODE {chan} +b {mask}"), None);
+        s.propagate_from_user(uid, &format!("MODE {chan} +b {mask}"));
+        CmdResult::Ok
+    }
 }
 
 /// KNOCK — ask for an invite to an invite-only channel.

@@ -1131,6 +1131,7 @@ impl Server {
                                         mask,
                                         setter,
                                         ts: now(),
+                                        expires: None,
                                     });
                                 }
                             } else {

@@ -579,6 +579,7 @@ impl ChanMode for ListMode {
                     mask: mask.clone(),
                     setter,
                     ts: now(),
+                    expires: None,
                 });
             }
             Applied::Yes(Some(mask))

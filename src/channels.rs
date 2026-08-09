@@ -103,6 +103,7 @@ pub struct Ban {
     pub mask: String,
     pub setter: String,
     pub ts: u64,
+    pub expires: Option<u64>, // TBAN: unix ts to auto-lift at (None = permanent)
 }
 
 /// +f message flood: `[*]lines:secs` — kick past `lines` msgs in `secs` (and set
@@ -346,6 +347,26 @@ impl Server {
             .get(key)
             .map(|c| c.members.contains_key(&uid))
             .unwrap_or(false)
+    }
+
+    /// Lift any expired TBAN timed bans, announcing `MODE -b` to each channel.
+    /// Called from the background tick.
+    pub fn purge_tbans(&mut self) {
+        let now = now();
+        let mut expired: Vec<(String, String, String)> = Vec::new(); // (key, name, mask)
+        for (key, ch) in &self.channels {
+            for b in &ch.bans {
+                if b.expires.is_some_and(|e| e <= now) {
+                    expired.push((key.clone(), ch.name.clone(), b.mask.clone()));
+                }
+            }
+        }
+        for (key, name, mask) in expired {
+            if let Some(ch) = self.channels.get_mut(&key) {
+                ch.bans.retain(|b| b.mask != mask);
+            }
+            self.to_channel(&key, &format!(":{} MODE {name} -b {mask}", self.name), None);
+        }
     }
 
     /// Force `uid` out of `chan` (SAPART / SVSPART enforcement): announce the PART
@@ -758,6 +779,7 @@ impl Server {
                         mask,
                         setter: self.name.clone(),
                         ts: now(),
+                        expires: None,
                     });
                 }
             }
