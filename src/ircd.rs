@@ -52,6 +52,15 @@ pub enum Event {
         status: u16,
         body: String,
     },
+    /// An inbound JSON-RPC request from the HTTP control interface (see
+    /// `crate::modules::rpc`). Handled inline on the core thread; the reply JSON is
+    /// sent back to the waiting httpd thread over `reply`.
+    RpcRequest {
+        method: String,
+        params: String,
+        id: String,
+        reply: std::sync::mpsc::Sender<String>,
+    },
     /// Background timer tick — drives ping/idle timeouts.
     Tick,
 }
@@ -155,6 +164,16 @@ impl Ircd {
                             &body,
                         );
                     }
+                }
+                Event::RpcRequest {
+                    method,
+                    params,
+                    id,
+                    reply,
+                } => {
+                    let resp =
+                        crate::modules::rpc::dispatch(&mut self.server, &method, &params, &id);
+                    let _ = reply.send(resp);
                 }
                 Event::Tick => self.on_tick(),
             }

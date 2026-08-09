@@ -32,6 +32,7 @@ pub mod recaptcha;
 pub mod reputation;
 pub mod restrictcommands;
 pub mod restrictmsg;
+pub mod rpc;
 pub mod securelist;
 pub mod securitygroups;
 pub mod serverban;
