@@ -11,6 +11,7 @@ pub mod chathistory;
 pub mod cloak;
 pub mod connectban;
 pub mod connflood;
+pub mod denychans;
 pub mod dnsbl;
 pub mod filter;
 pub mod flood;
@@ -24,6 +25,7 @@ pub mod realnameban;
 pub mod reputation;
 pub mod restrictcommands;
 pub mod restrictmsg;
+pub mod securelist;
 pub mod securitygroups;
 pub mod serverban;
 pub mod snoop;
@@ -50,6 +52,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(restrictmsg::RestrictMsg),
         Box::new(blockamsg::BlockAmsg),
         Box::new(connectban::ConnectBan),
+        Box::new(securelist::SecureList),
     ]
 }
 

@@ -529,6 +529,10 @@ impl Server {
                 return;
             }
         }
+        // denychans — a configured forbidden channel name (opers bypass per badchan)
+        if crate::modules::denychans::intercept(self, uid, name, is_oper) {
+            return;
+        }
         // an existing channel can refuse the join (+k / +b / +i / +z / +R / +J)
         if let Some(ch) = self.channels.get(&key) {
             if let Some(k) = &ch.modes.key {
