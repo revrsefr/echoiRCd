@@ -12,6 +12,7 @@ pub mod flood;
 pub mod markread;
 pub mod metadata;
 pub mod multiline;
+pub mod reputation;
 pub mod snoop;
 
 use crate::command::Command;
@@ -28,6 +29,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(metadata::Metadata),
         Box::new(markread::MarkRead),
         Box::new(multiline::Multiline),
+        Box::new(reputation::ReputationMod::default()),
     ]
 }
 
@@ -40,5 +42,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(markread::commands())
         .chain(multiline::commands())
         .chain(chathistory::commands())
+        .chain(reputation::commands())
         .collect()
 }

@@ -66,4 +66,6 @@ pub trait Module: Send {
     fn on_join(&mut self, srv: &mut Server, uid: Uid, chan: &str) {}
     fn on_part(&mut self, srv: &mut Server, uid: Uid, chan: &str, reason: &str) {}
     fn on_user_quit(&mut self, srv: &mut Server, uid: Uid, reason: &str) {}
+    /// Fired on the background timer (every `TICK_SECS`).
+    fn on_tick(&mut self, srv: &mut Server) {}
 }

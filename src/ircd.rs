@@ -74,6 +74,7 @@ impl Ircd {
         let mut server = Server::new(cfg, event_tx, conn_counter);
         server.load_xlines(); // restore persisted bans (m_xline_db)
         crate::modules::metadata::load(&mut server); // restore channel metadata (m_metadata_db)
+        crate::modules::reputation::load(&mut server); // restore per-IP reputation
         Ircd {
             server,
             commands: command_table(),
@@ -377,6 +378,9 @@ impl Ircd {
         self.server.purge_xlines(); // drop expired server bans
         self.server.purge_tbans(); // lift expired timed channel bans (TBAN)
         self.server.prune_conn_history(); // connflood bookkeeping
+        for m in &mut self.modules {
+            m.on_tick(&mut self.server); // timer-driven modules (e.g. reputation)
+        }
         let now = crate::server::now();
         let (to_ping, to_quit) = self.server.idle_check(now);
         for uid in to_ping {
