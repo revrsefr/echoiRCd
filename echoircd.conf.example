@@ -117,3 +117,7 @@ amu_target    = both
 # hidewhois_hide_server = yes  # hide 312
 # hidewhois_hide_idle = yes    # hide 317
 # hidewhois_hide_secure = yes  # hide 671
+# --- geoip (m_geo_maxmind): native MaxMind .mmdb country lookup. Enables the
+#     G:<cc> ban extban (e.g. +b G:CN,RU), the oper GEOIP <nick|ip> command and
+#     a country line in WHOIS (opers). Point at a GeoLite2-Country.mmdb file:
+# geoip_database = /etc/echoircd/GeoLite2-Country.mmdb

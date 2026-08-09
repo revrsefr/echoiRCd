@@ -95,6 +95,7 @@ impl Ircd {
         server.load_xlines(); // restore persisted bans (m_xline_db)
         crate::modules::metadata::load(&mut server); // restore channel metadata (m_metadata_db)
         crate::modules::reputation::load(&mut server); // restore per-IP reputation
+        crate::modules::geoip::init(&mut server); // load the GeoIP database (m_geo_maxmind)
         Ircd {
             server,
             commands: command_table(),

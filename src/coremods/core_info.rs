@@ -262,6 +262,10 @@ impl Command for Whois {
             if let Some(line) = crate::modules::whoisport::line(s, tuid) {
                 s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));
             }
+            // geoip: the country the user connects from — opers only
+            if let Some(line) = crate::modules::geoip::whois_line(s, tuid) {
+                s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));
+            }
         }
         // opers can see through the cloak to the real host/ip
         if asker_oper && disp != realhost {

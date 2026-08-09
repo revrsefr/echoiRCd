@@ -23,6 +23,7 @@ pub mod extjwt;
 pub mod filehost;
 pub mod filter;
 pub mod flood;
+pub mod geoip;
 pub mod hashident;
 pub mod hidewhois;
 pub mod irccloudtags;
@@ -113,5 +114,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(tline::commands())
         .chain(rmode::commands())
         .chain(customtitle::commands())
+        .chain(geoip::commands())
         .collect()
 }

@@ -585,7 +585,7 @@ impl Server {
     /// burst and the `ISUPPORT` command (draft/extended-isupport).
     pub fn isupport_lines(&self) -> Vec<String> {
         let mut lines = vec![format!(
-            "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIgX,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnpstuz EXTBAN=,cgjmnrsy WATCH=128 MONITOR=128 SILENCE=32 CALLERID=g WHOX CHATHISTORY=256 MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={}",
+            "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIgX,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnpstuz EXTBAN=,Gcgjmnrsy WATCH=128 MONITOR=128 SILENCE=32 CALLERID=g WHOX CHATHISTORY=256 MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={}",
             self.network
         )];
         if let Some(tok) = crate::modules::network_icon::isupport(self) {
