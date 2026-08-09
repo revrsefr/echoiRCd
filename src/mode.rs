@@ -84,6 +84,7 @@ static CHAN_MODES: &[&(dyn ChanMode + Sync)] = &[
     &NICKFLOOD,
     &REDIRECT,
     &CHANHISTORY,
+    &ANTICAPS,
 ];
 
 // --- prefix modes (+q/+a/+o/+h/+v): a per-member rank, needs a nick ----------
@@ -796,6 +797,44 @@ impl ChanMode for RedirectMode {
     }
 }
 
+/// +B `<percent>` — reject channel messages that are at least `<percent>` uppercase
+/// (InspIRCd `m_anticaps`). Enforced in the message path; ops are exempt.
+struct AntiCapsMode;
+static ANTICAPS: AntiCapsMode = AntiCapsMode;
+impl ChanMode for AntiCapsMode {
+    fn letter(&self) -> char {
+        'B'
+    }
+    fn wants_param(&self, adding: bool) -> bool {
+        adding
+    }
+    fn apply(
+        &self,
+        s: &mut Server,
+        _chan: &str,
+        key: &str,
+        _uid: Uid,
+        adding: bool,
+        param: Option<&str>,
+    ) -> Applied {
+        if adding {
+            let pct = param.and_then(|p| p.parse::<u8>().ok()).filter(|&p| p >= 1);
+            let Some(pct) = pct.map(|p| p.min(100)) else {
+                return Applied::No; // needs a 1..=100 percentage
+            };
+            if let Some(c) = s.channels.get_mut(key) {
+                c.modes.anticaps = Some(pct);
+            }
+            Applied::Yes(Some(pct.to_string()))
+        } else {
+            if let Some(c) = s.channels.get_mut(key) {
+                c.modes.anticaps = None;
+            }
+            Applied::Yes(None)
+        }
+    }
+}
+
 // === user modes ============================================================
 
 /// A user mode (+i/+w/+o) — same handler-object shape as [`ChanMode`], and the
@@ -1020,7 +1059,7 @@ mod tests {
 
     #[test]
     fn registry_covers_all_channel_modes() {
-        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGu".chars() {
+        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuB".chars() {
             assert!(chan_mode(c).is_some(), "missing handler for +{c}");
         }
         assert!(chan_mode('y').is_none());

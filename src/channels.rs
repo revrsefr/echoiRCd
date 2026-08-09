@@ -148,6 +148,7 @@ pub struct ChanModes {
     pub nickflood: Option<Rate>,     // +F
     pub redirect: Option<String>,    // +L <#target> — when full, send there
     pub history: Option<(u32, u64)>, // +H <lines>:<secs> — replay recent messages to joiners
+    pub anticaps: Option<u8>,        // +B <percent> — block messages that are mostly CAPS
 }
 
 impl ChanModes {

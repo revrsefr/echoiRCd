@@ -119,6 +119,18 @@ fn apply_censor(body: &str, censor: &[(String, String)]) -> Option<String> {
     Some(out)
 }
 
+/// Percentage of the ASCII letters in `t` that are uppercase, or `None` when there
+/// are too few letters to judge (so short shouts like "OK" aren't blocked). Used
+/// by the +B anticaps channel mode.
+fn caps_percent(t: &str) -> Option<u8> {
+    let letters = t.chars().filter(|c| c.is_ascii_alphabetic()).count();
+    if letters < 8 {
+        return None;
+    }
+    let upper = t.chars().filter(|c| c.is_ascii_uppercase()).count();
+    Some(((upper * 100) / letters) as u8)
+}
+
 pub fn commands() -> Vec<Box<dyn Command>> {
     vec![Box::new(PrivMsg), Box::new(Notice), Box::new(TagMsg)]
 }
@@ -299,6 +311,21 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
                             uid,
                             ERR_CANNOTSENDTOCHAN,
                             &format!("{target} :Cannot send to channel (+G censor)"),
+                        );
+                    }
+                    return CmdResult::Fail;
+                }
+            }
+        }
+        // +B anticaps — reject a mostly-uppercase message (ops/opers exempt)
+        if !flood_exempt {
+            if let Some(pct) = s.channels.get(&key).and_then(|c| c.modes.anticaps) {
+                if caps_percent(&body).map(|p| p >= pct).unwrap_or(false) {
+                    if !notice {
+                        s.numeric(
+                            uid,
+                            ERR_CANNOTSENDTOCHAN,
+                            &format!("{target} :Cannot send to channel (+B: too many capitals)"),
                         );
                     }
                     return CmdResult::Fail;
