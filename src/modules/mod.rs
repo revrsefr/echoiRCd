@@ -41,6 +41,7 @@ pub mod reputation;
 pub mod restrictchans;
 pub mod restrictcommands;
 pub mod restrictmsg;
+pub mod rmode;
 pub mod rpc;
 pub mod securelist;
 pub mod securitygroups;
@@ -109,5 +110,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(filehost::commands())
         .chain(extended_isupport::commands())
         .chain(tline::commands())
+        .chain(rmode::commands())
         .collect()
 }
