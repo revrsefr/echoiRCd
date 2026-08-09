@@ -327,12 +327,18 @@ impl Server {
         self.send(uid, format!(":{} MODE {nick} :+os", self.name));
         self.snotice(&format!("{nick} is now an IRC operator"));
         // opermodes: extra umodes on oper-up
-        if !self.oper_umodes.is_empty() {
-            let modes = self.oper_umodes.clone();
+        let om = self.conf("opermodes").or_else(|| self.conf("oper_umodes"));
+        if let Some(modes) = om.map(str::to_string) {
             crate::coremods::core_mode::svs_set_user_modes(self, uid, &modes);
         }
         // operjoin: auto-join configured oper channels
-        for chan in self.oper_autojoin.clone() {
+        let chans: Vec<String> = self
+            .conf_all("operjoin")
+            .iter()
+            .flat_map(|v| v.split([',', ' ']).map(str::to_string))
+            .filter(|c| !c.is_empty())
+            .collect();
+        for chan in chans {
             self.join(uid, &chan, None);
         }
     }
@@ -395,7 +401,7 @@ impl Server {
             for t in targets {
                 self.send(t, line.clone());
             }
-            if self.seenicks {
+            if self.conf_bool("seenicks", false) {
                 self.snotice(&format!("{old} is now known as {newnick}"));
             }
             // WATCH/MONITOR: the old nick is now gone, the new one is here
@@ -448,11 +454,11 @@ impl Server {
             ),
         );
         // ircv3_network_icon: advertise draft/ICON when configured
-        if !self.network_icon.is_empty() {
+        if let Some(tok) = crate::modules::network_icon::isupport(self) {
             self.numeric(
                 uid,
                 RPL_ISUPPORT,
-                &format!("ICON={} :are supported by this server", self.network_icon),
+                &format!("{tok} :are supported by this server"),
             );
         }
         self.numeric(
@@ -462,18 +468,25 @@ impl Server {
         );
         self.send_motd(uid);
         // connbanner: NOTICE lines to every connecting client
-        for line in self.conn_banner.clone() {
+        for line in self.conf_all("connbanner").to_vec() {
             self.send(uid, format!(":{} NOTICE {nick} :{line}", self.name));
         }
         // conn_umodes: auto-set user modes on connect
-        if !self.auto_umodes.is_empty() {
-            let modes = self.auto_umodes.clone();
+        let auto_umodes = self.conf("conn_umodes").or_else(|| self.conf("autoumodes"));
+        if let Some(modes) = auto_umodes.map(str::to_string) {
             crate::coremods::core_mode::svs_set_user_modes(self, uid, &modes);
         }
         self.watch_notify_online(&nick); // tell WATCH/MONITOR watchers
         self.events.push_back(Hook::Connect(uid));
-        // conn_join: auto-join configured channels
-        for chan in self.autojoin.clone() {
+        // conn_join: auto-join configured channels (comma/space separated, repeatable)
+        let chans: Vec<String> = self
+            .conf_all("autojoin")
+            .iter()
+            .chain(self.conf_all("conn_join"))
+            .flat_map(|v| v.split([',', ' ']).map(str::to_string))
+            .filter(|c| !c.is_empty())
+            .collect();
+        for chan in chans {
             self.join(uid, &chan, None);
         }
     }

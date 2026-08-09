@@ -68,7 +68,8 @@ impl Command for OperMotd {
             return CmdResult::Fail;
         }
         let nick = oper_nick(s, uid);
-        if s.opermotd.is_empty() {
+        let motd = s.conf_all("opermotd").to_vec();
+        if motd.is_empty() {
             s.send(
                 uid,
                 format!(":{} NOTICE {nick} :No OPERMOTD is set", s.name),
@@ -82,7 +83,7 @@ impl Command for OperMotd {
                 s.name
             ),
         );
-        for line in s.opermotd.clone() {
+        for line in motd {
             s.send(uid, format!(":{} NOTICE {nick} :- {line}", s.name));
         }
         s.send(

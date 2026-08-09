@@ -7,7 +7,7 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::net::{IpAddr, SocketAddr, TcpStream};
+use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::AtomicU64;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
@@ -34,14 +34,6 @@ pub const TICK_SECS: u64 = 15;
 pub const PING_AFTER: u64 = 90;
 pub const PING_TIMEOUT: u64 = 60;
 pub const REG_TIMEOUT: u64 = 60;
-
-/// The port from a `host:port` bind string (0 if unparseable) — for whoisport.
-fn port_of(addr: &str) -> u16 {
-    addr.rsplit(':')
-        .next()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(0)
-}
 
 pub fn now() -> u64 {
     SystemTime::now()
@@ -140,40 +132,10 @@ pub struct Server {
     pub dnsbl_reason: String,                      // ban reason on a DNSBL hit
     pub sasl_server: String,                       // services server that handles SASL
     pub webirc: Vec<(String, String, String)>,     // web gateways: (password, name, ip-mask)
-    pub opermotd: Vec<String>,                     // OPERMOTD text
-    pub vhosts: Vec<(String, String, String)>,     // self-service vhosts: (user, pass, host)
-    pub aliases: Vec<(String, String)>,            // command aliases: (name, target-nick)
-    pub connflood: Option<(u32, u64)>,             // (max, secs) connection throttle per IP
-    pub conn_history: HashMap<IpAddr, Vec<u64>>,   // recent connection times per IP (connflood)
-    pub sec_groups: Vec<crate::config::SecGroup>,  // UnrealIRCd-style security groups
-    pub autojoin: Vec<String>,                     // conn_join: channels joined on connect
-    pub auto_umodes: String,                       // conn_umodes: umodes set on connect
-    pub conn_banner: Vec<String>,                  // connbanner: NOTICE lines on connect
-    pub oper_autojoin: Vec<String>,                // operjoin: channels opers join on /OPER
-    pub oper_umodes: String,                       // opermodes: umodes set on /OPER
-    pub seenicks: bool,                            // snotice every nick change
-    pub announce_chan: bool,                       // chancreate: snotice on channel creation
-    pub rep_database: String,                      // reputation: db path ("" = <conf>.reputation)
-    pub rep_ipv4prefix: u8,                        // reputation: IPv4 CIDR prefix for keying
-    pub rep_ipv6prefix: u8,                        // reputation: IPv6 CIDR prefix for keying
-    pub rep_scorecap: u32,                         // reputation: max score
-    pub rep_bump_secs: u64,                        // reputation: seconds between bumps
-    pub rep_expire_secs: u64,                      // reputation: seconds between expiry runs
-    pub rep_save_secs: u64,                        // reputation: seconds between saves
-    pub rep_minchanmembers: usize,                 // reputation: min channel size to bump
-    pub rep_whois: String,                         // reputation: whois visibility mode
-    pub rep_expire_rules: Vec<(i32, u64)>,         // reputation: (score, age) decay rules
-    pub network_icon: String,                      // ircv3_network_icon: draft/ICON url
-    pub profilelink_baseurl: String,               // profileLink: WHOIS profile url base
-    pub hidewhois: bool,                           // hidewhois: enabled
-    pub hidewhois_opers: bool,                     // hidewhois: opers exempt
-    pub hidewhois_selfview: bool,                  // hidewhois: self exempt
-    pub hidewhois_server: bool,                    // hidewhois: hide 312
-    pub hidewhois_idle: bool,                      // hidewhois: hide 317
-    pub hidewhois_away: bool,                      // hidewhois: hide 301
-    pub hidewhois_secure: bool,                    // hidewhois: hide 671
-    pub plain_port: u16,                           // whoisport: the plaintext listener port
-    pub tls_port: u16,                             // whoisport: the TLS listener port (0 = none)
+    /// Every `key = value` line from the config, so each module reads its own
+    /// settings via [`Server::conf`] / [`conf_all`] / [`conf_bool`] / [`conf_num`]
+    /// — no per-module field lives on this struct (module-per-file rule).
+    pub raw_config: HashMap<String, Vec<String>>,
     // labeled-response: while Some((uid, buf)), that client's own responses are
     // diverted into `buf` instead of the socket, so `on_line` can wrap them with
     // the command's `label` (single tag, BATCH, or ACK). RefCell because the
@@ -225,50 +187,41 @@ impl Server {
             dnsbl_reason: cfg.dnsbl_reason,
             sasl_server: cfg.sasl_server,
             webirc: cfg.webirc,
-            opermotd: cfg.opermotd,
-            vhosts: cfg.vhosts,
-            aliases: cfg.aliases,
-            connflood: cfg.connflood,
-            conn_history: HashMap::new(),
-            sec_groups: cfg.sec_groups,
-            autojoin: cfg.autojoin,
-            auto_umodes: cfg.auto_umodes,
-            conn_banner: cfg.conn_banner,
-            oper_autojoin: cfg.oper_autojoin,
-            oper_umodes: cfg.oper_umodes,
-            seenicks: cfg.seenicks,
-            announce_chan: cfg.announce_chan,
-            rep_database: cfg.rep_database,
-            rep_ipv4prefix: cfg.rep_ipv4prefix,
-            rep_ipv6prefix: cfg.rep_ipv6prefix,
-            rep_scorecap: cfg.rep_scorecap,
-            rep_bump_secs: cfg.rep_bump_secs,
-            rep_expire_secs: cfg.rep_expire_secs,
-            rep_save_secs: cfg.rep_save_secs,
-            rep_minchanmembers: cfg.rep_minchanmembers,
-            rep_whois: cfg.rep_whois,
-            network_icon: cfg.network_icon,
-            profilelink_baseurl: cfg.profilelink_baseurl,
-            hidewhois: cfg.hidewhois,
-            hidewhois_opers: cfg.hidewhois_opers,
-            hidewhois_selfview: cfg.hidewhois_selfview,
-            hidewhois_server: cfg.hidewhois_server,
-            hidewhois_idle: cfg.hidewhois_idle,
-            hidewhois_away: cfg.hidewhois_away,
-            hidewhois_secure: cfg.hidewhois_secure,
-            plain_port: port_of(&cfg.bind),
-            tls_port: cfg.bind_tls.as_deref().map(port_of).unwrap_or(0),
-            rep_expire_rules: if cfg.rep_expire_rules.is_empty() {
-                // Unreal defaults: score<=2 after 1h, <=6 after 7d, <=12 after 30d, any after 90d
-                vec![(2, 3600), (6, 604800), (12, 2592000), (-1, 7776000)]
-            } else {
-                cfg.rep_expire_rules
-            },
+            raw_config: cfg.raw,
             label_capture: RefCell::new(None),
             event_tx,
             conn_counter,
             ext: Extensible::default(),
         }
+    }
+
+    /// The last value set for config `key` (`None` if unset). Modules read their
+    /// own settings through here so no per-module field bloats `Server`/`Config`.
+    pub fn conf(&self, key: &str) -> Option<&str> {
+        self.raw_config
+            .get(key)
+            .and_then(|v| v.last())
+            .map(|s| s.as_str())
+    }
+
+    /// Every value set for `key` (repeated lines, e.g. `securitygroup`, `motd`).
+    pub fn conf_all(&self, key: &str) -> &[String] {
+        self.raw_config
+            .get(key)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// A boolean config value (`yes`/`no`/…); `default` when the key is unset.
+    pub fn conf_bool(&self, key: &str, default: bool) -> bool {
+        self.conf(key).map(crate::config::yesish).unwrap_or(default)
+    }
+
+    /// A parsed config value; `default` when unset or unparseable.
+    pub fn conf_num<T: std::str::FromStr>(&self, key: &str, default: T) -> T {
+        self.conf(key)
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(default)
     }
 
     /// Remember an identity for WHOWAS (capped ring, newest first).
@@ -348,20 +301,14 @@ impl Server {
             },
         );
 
-        // connflood — refuse an IP that's opening connections too fast
-        if let Some((max, secs)) = self.connflood {
-            let n = now();
-            let hist = self.conn_history.entry(ip).or_default();
-            hist.retain(|&t| n.saturating_sub(t) < secs);
-            hist.push(n);
-            if hist.len() as u32 > max {
-                self.send(
-                    uid,
-                    "ERROR :Closing link: (Too many connections from your IP)".to_string(),
-                );
-                self.remove_user(uid, "Connection throttled");
-                return;
-            }
+        // connflood — refuse an IP that's opening connections too fast (see modules::connflood)
+        if crate::modules::connflood::over_limit(self, ip) {
+            self.send(
+                uid,
+                "ERROR :Closing link: (Too many connections from your IP)".to_string(),
+            );
+            self.remove_user(uid, "Connection throttled");
+            return;
         }
 
         // Pre-registration connection notices, InspIRCd / solanum style. Ident-113
@@ -405,17 +352,6 @@ impl Server {
                 uid,
                 "Couldn't look up your hostname; using your IP address instead",
             );
-        }
-    }
-
-    /// Drop stale per-IP connflood bookkeeping (called on the background tick).
-    pub fn prune_conn_history(&mut self) {
-        if let Some((_, secs)) = self.connflood {
-            let n = now();
-            self.conn_history.retain(|_, times| {
-                times.retain(|&t| n.saturating_sub(t) < secs);
-                !times.is_empty()
-            });
         }
     }
 

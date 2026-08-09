@@ -149,8 +149,7 @@ impl Command for Whois {
         let asker_oper = s.is_oper(uid);
         let is_self = tuid == uid;
         // hidewhois: hide sensitive lines from ordinary users (opers/self exempt per config)
-        let hide =
-            s.hidewhois && !(is_self && s.hidewhois_selfview) && !(asker_oper && s.hidewhois_opers);
+        let hide = crate::modules::hidewhois::hide(s, uid, tuid, asker_oper);
         let keys: Vec<String> = s.users[&tuid].channels.iter().cloned().collect();
         let (
             nick,
@@ -206,7 +205,7 @@ impl Command for Whois {
         if bot {
             s.numeric(uid, RPL_WHOISBOT, &format!("{nick} :is a bot"));
         }
-        if !(hide && s.hidewhois_server) {
+        if !(hide && crate::modules::hidewhois::hide_server(s)) {
             s.numeric(
                 uid,
                 RPL_WHOISSERVER,
@@ -251,25 +250,13 @@ impl Command for Whois {
             }
         }
         // profileLink: a profile URL for logged-in users (when configured)
-        if !s.profilelink_baseurl.is_empty() {
-            match &account {
-                Some(acct) => s.numeric(
-                    uid,
-                    RPL_WHOISSPECIAL,
-                    &format!(":Profil: {}{acct}", s.profilelink_baseurl),
-                ),
-                None => s.numeric(
-                    uid,
-                    RPL_WHOISSPECIAL,
-                    ":Profile: The user is not logged in or the account is not registered.",
-                ),
-            }
+        if let Some(line) = crate::modules::profilelink::line(s, &account) {
+            s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));
         }
-        // whoisport: the listener port (+ TLS/plain) — opers only
+        // whoisport: the listener port — opers only
         if asker_oper {
-            let port = if secure { s.tls_port } else { s.plain_port };
-            if port != 0 {
-                s.numeric(uid, RPL_WHOISSPECIAL, &format!(":is using port {port}"));
+            if let Some(line) = crate::modules::whoisport::line(s, tuid) {
+                s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));
             }
         }
         // opers can see through the cloak to the real host/ip
@@ -289,7 +276,7 @@ impl Command for Whois {
             );
         }
         // sslinfo: advertise a secure (TLS) connection
-        if secure && !(hide && s.hidewhois_secure) {
+        if secure && !(hide && crate::modules::hidewhois::hide_secure(s)) {
             s.numeric(
                 uid,
                 RPL_WHOISSECURE,
@@ -307,7 +294,7 @@ impl Command for Whois {
             }
         }
         // 317: idle time + signon time (hidewhois may suppress it)
-        if !(hide && s.hidewhois_idle) {
+        if !(hide && crate::modules::hidewhois::hide_idle(s)) {
             let idle = crate::server::now().saturating_sub(last_active);
             s.numeric(
                 uid,

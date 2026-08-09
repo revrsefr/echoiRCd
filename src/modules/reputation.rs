@@ -49,10 +49,56 @@ fn mask_ip(ip: IpAddr, v4: u8, v6: u8) -> IpAddr {
     }
 }
 
+// --- config, read straight from the config file (no fields on Server) ----------
+fn v4prefix(s: &Server) -> u8 {
+    s.conf_num::<u8>("reputation_ipv4prefix", 32).clamp(1, 32)
+}
+fn v6prefix(s: &Server) -> u8 {
+    s.conf_num::<u8>("reputation_ipv6prefix", 64).clamp(1, 128)
+}
+fn scorecap(s: &Server) -> u32 {
+    s.conf_num("reputation_scorecap", 10000)
+}
+fn minchan(s: &Server) -> usize {
+    s.conf_num("reputation_minchanmembers", 3)
+}
+fn dur(s: &Server, key: &str, def: u64) -> u64 {
+    s.conf(key)
+        .and_then(crate::xline::parse_duration)
+        .filter(|&d| d > 0)
+        .unwrap_or(def)
+}
+fn expire_rules(s: &Server) -> Vec<(i32, u64)> {
+    let rules: Vec<(i32, u64)> = s
+        .conf_all("reputationexpire")
+        .iter()
+        .filter_map(|line| {
+            let mut it = line.split_whitespace();
+            let sc = it.next()?;
+            let age = it.next()?;
+            let score = if sc == "*" { -1 } else { sc.parse().ok()? };
+            let age = crate::xline::parse_duration(age).filter(|&a| a > 0)?;
+            Some((score, age))
+        })
+        .collect();
+    if rules.is_empty() {
+        // Unreal defaults: score<=2 after 1h, <=6 after 7d, <=12 after 30d, any after 90d
+        vec![(2, 3600), (6, 604800), (12, 2592000), (-1, 7776000)]
+    } else {
+        rules
+    }
+}
+fn db_path(s: &Server) -> String {
+    match s.conf("reputation_database") {
+        Some(p) if !p.is_empty() => p.to_string(),
+        _ => format!("{}.reputation", s.conf_path),
+    }
+}
+
 /// The masked key for `uid`'s address.
 fn key_of(s: &Server, uid: Uid) -> Option<IpAddr> {
     let ip = s.users.get(&uid).map(|u| u.addr.ip())?;
-    Some(mask_ip(ip, s.rep_ipv4prefix, s.rep_ipv6prefix))
+    Some(mask_ip(ip, v4prefix(s), v6prefix(s)))
 }
 
 /// Whether `uid` is in at least one channel with `min` or more members (the
@@ -90,15 +136,15 @@ impl Module for ReputationMod {
         self.since_bump += t;
         self.since_expire += t;
         self.since_save += t;
-        if self.since_bump >= s.rep_bump_secs {
+        if self.since_bump >= dur(s, "reputation_bumpinterval", 300) {
             self.since_bump = 0;
             bump_scores(s);
         }
-        if self.since_expire >= s.rep_expire_secs {
+        if self.since_expire >= dur(s, "reputation_expireinterval", 605) {
             self.since_expire = 0;
             expire_old(s);
         }
-        if self.since_save >= s.rep_save_secs {
+        if self.since_save >= dur(s, "reputation_saveinterval", 902) {
             self.since_save = 0;
             save(s);
         }
@@ -109,9 +155,9 @@ impl Module for ReputationMod {
 /// refresh their last_seen so active addresses don't decay.
 fn bump_scores(s: &mut Server) {
     let n = now();
-    let cap = s.rep_scorecap;
-    let min = s.rep_minchanmembers;
-    let (v4, v6) = (s.rep_ipv4prefix, s.rep_ipv6prefix);
+    let cap = scorecap(s);
+    let min = minchan(s);
+    let (v4, v6) = (v4prefix(s), v6prefix(s));
     let bumps: Vec<(IpAddr, u32)> = s
         .users
         .values()
@@ -135,7 +181,7 @@ fn bump_scores(s: &mut Server) {
 /// Drop entries that have aged out under any matching `reputationexpire` rule.
 fn expire_old(s: &mut Server) {
     let n = now();
-    let rules = s.rep_expire_rules.clone();
+    let rules = expire_rules(s);
     if let Some(store) = s.ext.get_mut::<Reputation>() {
         store.0.retain(|_, e| {
             let expired = rules.iter().any(|&(score, age)| {
@@ -179,7 +225,7 @@ pub fn score_ban_match(s: &Server, uid: Uid, spec: &str) -> bool {
 
 /// Whether the WHOIS `source` may see `target`'s reputation, per the `whois` mode.
 pub fn whois_visible(s: &Server, source: Uid, target: Uid) -> bool {
-    match s.rep_whois.as_str() {
+    match s.conf("reputation_whois").unwrap_or("all") {
         "none" => false,
         "self" => source == target,
         "opers" => source == target || s.is_oper(source),
@@ -228,7 +274,7 @@ impl Command for ReputationCmd {
             .map(|u| u.nick.clone())
             .unwrap_or_default();
         if let Some(val) = params.get(1).and_then(|v| v.parse::<u32>().ok()) {
-            let (cap, n) = (s.rep_scorecap, now());
+            let (cap, n) = (scorecap(s), now());
             let store = s.ext.get_or_insert_with::<Reputation>(Reputation::default);
             let e = store.0.entry(k).or_default();
             e.score = val.min(cap);
@@ -252,14 +298,6 @@ impl Command for ReputationCmd {
             );
         }
         CmdResult::Ok
-    }
-}
-
-fn db_path(s: &Server) -> String {
-    if s.rep_database.is_empty() {
-        format!("{}.reputation", s.conf_path)
-    } else {
-        s.rep_database.clone()
     }
 }
 

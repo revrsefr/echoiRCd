@@ -700,7 +700,9 @@ impl Server {
             u.channels.insert(key.clone());
         }
         // chancreate: snotice when a brand-new channel comes into being
-        if is_new && self.announce_chan {
+        if is_new
+            && (self.conf_bool("chancreate", false) || self.conf_bool("announce_channels", false))
+        {
             let who = self
                 .users
                 .get(&uid)

@@ -230,14 +230,15 @@ impl Ircd {
 
         let Some(handler) = self.commands.get(cmd) else {
             if registered {
-                // command aliases (m_alias): `/NS help` -> PRIVMSG NickServ :help
-                if let Some(target) = self
-                    .server
-                    .aliases
-                    .iter()
-                    .find(|(n, _)| n == cmd)
-                    .map(|(_, t)| t.clone())
-                {
+                // command aliases (m_alias): config `alias = <CMD> <target-nick>`
+                // e.g. `alias = NS NickServ` makes `/NS help` -> PRIVMSG NickServ :help
+                if let Some(target) = self.server.conf_all("alias").iter().find_map(|line| {
+                    let mut it = line.split_whitespace();
+                    match (it.next(), it.next()) {
+                        (Some(n), Some(t)) if n.eq_ignore_ascii_case(cmd) => Some(t.to_string()),
+                        _ => None,
+                    }
+                }) {
                     if !msg.params.is_empty() {
                         let text = msg.params.join(" ");
                         crate::coremods::core_message::deliver(
@@ -377,7 +378,6 @@ impl Ircd {
         self.server.ping_links(); // keepalive on every server link
         self.server.purge_xlines(); // drop expired server bans
         self.server.purge_tbans(); // lift expired timed channel bans (TBAN)
-        self.server.prune_conn_history(); // connflood bookkeeping
         for m in &mut self.modules {
             m.on_tick(&mut self.server); // timer-driven modules (e.g. reputation)
         }

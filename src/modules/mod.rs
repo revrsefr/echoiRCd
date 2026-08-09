@@ -6,15 +6,20 @@
 pub mod antimixedutf8;
 pub mod chathistory;
 pub mod cloak;
+pub mod connflood;
 pub mod dnsbl;
 pub mod filter;
 pub mod flood;
+pub mod hidewhois;
 pub mod markread;
 pub mod metadata;
 pub mod multiline;
+pub mod network_icon;
+pub mod profilelink;
 pub mod reputation;
 pub mod securitygroups;
 pub mod snoop;
+pub mod whoisport;
 
 use crate::command::Command;
 use crate::module::Module;
@@ -31,6 +36,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(markread::MarkRead),
         Box::new(multiline::Multiline),
         Box::new(reputation::ReputationMod::default()),
+        Box::new(connflood::ConnFlood),
     ]
 }
 

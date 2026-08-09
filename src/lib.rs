@@ -18,6 +18,7 @@ pub mod command;
 pub mod config;
 pub mod coremods;
 pub mod extensible;
+pub mod http;
 pub mod ircd;
 pub mod link;
 pub mod message;

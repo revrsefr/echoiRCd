@@ -38,11 +38,14 @@ impl Command for Vhost {
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         let (user, pass) = (&params[0], &params[1]);
-        let host = s
-            .vhosts
-            .iter()
-            .find(|(u, p, _)| u == user && p == pass)
-            .map(|(_, _, h)| h.clone());
+        // vhost blocks live in the config: `vhost = <user> <pass> <host>`
+        let host = s.conf_all("vhost").iter().find_map(|line| {
+            let mut it = line.split_whitespace();
+            match (it.next(), it.next(), it.next()) {
+                (Some(u), Some(p), Some(h)) if u == user && p == pass => Some(h.to_string()),
+                _ => None,
+            }
+        });
         let nick = s
             .users
             .get(&uid)
