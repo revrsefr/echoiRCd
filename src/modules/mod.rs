@@ -15,6 +15,7 @@ pub mod connectban;
 pub mod connflood;
 pub mod denychans;
 pub mod dnsbl;
+pub mod extended_isupport;
 pub mod extjwt;
 pub mod filehost;
 pub mod filter;
@@ -97,5 +98,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(cloudflare_challenge::commands())
         .chain(extjwt::commands())
         .chain(filehost::commands())
+        .chain(extended_isupport::commands())
         .collect()
 }

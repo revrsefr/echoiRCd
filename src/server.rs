@@ -579,6 +579,59 @@ impl Server {
 
     /// Send a numeric: `:server NNN <target> <rest>`. `<target>` is the client's
     /// nick, or `*` before it has one.
+    /// The ISUPPORT (005) token blocks this server advertises — the fixed set plus
+    /// the config-driven module tokens (ICON, FILEHOST). Each entry is a token block
+    /// without the trailing `:are supported by this server`. Shared by the welcome
+    /// burst and the `ISUPPORT` command (draft/extended-isupport).
+    pub fn isupport_lines(&self) -> Vec<String> {
+        let mut lines = vec![format!(
+            "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIgX,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnpstuz EXTBAN=,cgjmnrsy WATCH=128 MONITOR=128 SILENCE=32 CALLERID=g WHOX CHATHISTORY=256 MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={}",
+            self.network
+        )];
+        if let Some(tok) = crate::modules::network_icon::isupport(self) {
+            lines.push(tok);
+        }
+        if let Some(tok) = crate::modules::filehost::isupport(self) {
+            lines.push(tok);
+        }
+        lines
+    }
+
+    /// Emit the ISUPPORT numerics to `uid`. When `batched` (the client negotiated
+    /// `draft/extended-isupport` + `batch`), wrap them in a `draft/isupport` BATCH so
+    /// the multi-line set arrives atomically (InspIRCd's m_ircv3_extended_isupport).
+    pub fn send_isupport(&mut self, uid: Uid, batched: bool) {
+        let lines = self.isupport_lines();
+        if batched {
+            let nick = self
+                .users
+                .get(&uid)
+                .map(|u| u.nick.clone())
+                .unwrap_or_default();
+            let bref = self.next_msgid().replace('-', "");
+            self.send(uid, format!(":{} BATCH +{bref} draft/isupport", self.name));
+            for l in &lines {
+                self.send(
+                    uid,
+                    format!(
+                        "@batch={bref} :{} {:03} {nick} {l} :are supported by this server",
+                        self.name,
+                        crate::numeric::RPL_ISUPPORT
+                    ),
+                );
+            }
+            self.send(uid, format!(":{} BATCH -{bref}", self.name));
+        } else {
+            for l in &lines {
+                self.numeric(
+                    uid,
+                    crate::numeric::RPL_ISUPPORT,
+                    &format!("{l} :are supported by this server"),
+                );
+            }
+        }
+    }
+
     pub fn numeric(&self, uid: Uid, code: u16, rest: &str) {
         let target = self
             .users

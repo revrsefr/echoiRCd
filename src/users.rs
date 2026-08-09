@@ -116,6 +116,7 @@ pub const SUPPORTED_CAPS: &[&str] = &[
     "draft/multiline",
     "draft/account-registration",
     "draft/json-log",
+    "draft/extended-isupport",
     "reverse.im/filehost",
     "cap-notify",
 ];
@@ -149,6 +150,7 @@ pub struct Caps {
     pub multiline: bool,        // draft/multiline — may send multiline message batches
     pub acct_registration: bool, // draft/account-registration — REGISTER/VERIFY understood
     pub json_log: bool,         // draft/json-log — structured JSON tag on server notices
+    pub ext_isupport: bool,     // draft/extended-isupport — ISUPPORT command + batched 005
     pub filehost: bool,         // reverse.im/filehost — knows the file-host extension
     pub cap_notify: bool,
 }
@@ -210,6 +212,7 @@ impl Caps {
             "draft/multiline" => self.multiline,
             "draft/account-registration" => self.acct_registration,
             "draft/json-log" => self.json_log,
+            "draft/extended-isupport" => self.ext_isupport,
             "reverse.im/filehost" => self.filehost,
             "cap-notify" => self.cap_notify,
             _ => false,
@@ -243,6 +246,7 @@ impl Caps {
             "draft/multiline" => &mut self.multiline,
             "draft/account-registration" => &mut self.acct_registration,
             "draft/json-log" => &mut self.json_log,
+            "draft/extended-isupport" => &mut self.ext_isupport,
             "reverse.im/filehost" => &mut self.filehost,
             "cap-notify" => &mut self.cap_notify,
             _ => return false,
@@ -460,29 +464,14 @@ impl Server {
                 self.name
             ),
         );
-        self.numeric(
-            uid,
-            RPL_ISUPPORT,
-            &format!(
-                "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIgX,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnpstuz EXTBAN=,cgjmnrsy WATCH=128 MONITOR=128 SILENCE=32 CALLERID=g WHOX CHATHISTORY=256 MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={} :are supported by this server",
-                self.network
-            ),
-        );
-        // ircv3_network_icon: advertise draft/ICON when configured
-        if let Some(tok) = crate::modules::network_icon::isupport(self) {
-            self.numeric(
-                uid,
-                RPL_ISUPPORT,
-                &format!("{tok} :are supported by this server"),
-            );
-        }
-        if let Some(tok) = crate::modules::filehost::isupport(self) {
-            self.numeric(
-                uid,
-                RPL_ISUPPORT,
-                &format!("{tok} :are supported by this server"),
-            );
-        }
+        // ISUPPORT (005): the fixed set + config-driven module tokens (ICON/FILEHOST).
+        // draft/extended-isupport + batch clients get it wrapped in a draft/isupport batch.
+        let batched = self
+            .users
+            .get(&uid)
+            .map(|u| u.caps.ext_isupport && u.caps.batch)
+            .unwrap_or(false);
+        self.send_isupport(uid, batched);
         self.numeric(
             uid,
             RPL_LUSERCLIENT,
