@@ -154,6 +154,7 @@ pub struct ChanModes {
     pub allowinvite: bool,           // +A — any member (not just ops) may INVITE
     pub permanent: bool,             // +P — channel persists with zero members
     pub kicknorejoin: Option<u32>,   // +J <secs> — block rejoin for N secs after a kick
+    pub opmoderated: bool,           // +U — unprivileged users' messages go to ops only
 }
 
 impl ChanModes {
@@ -180,6 +181,7 @@ impl ChanModes {
             'Q' => self.nokicks = on,
             'A' => self.allowinvite = on,
             'P' => self.permanent = on,
+            'U' => self.opmoderated = on,
             _ => {}
         }
     }

@@ -176,13 +176,21 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             }
             return CmdResult::Fail;
         }
+        // +U opmoderated — an unprivileged user's message isn't blocked; it's routed
+        // to channel ops only (below). It also overrides +m's block for that purpose.
+        let op_only = s
+            .channels
+            .get(&key)
+            .map(|c| c.modes.opmoderated)
+            .unwrap_or(false)
+            && s.rank(uid, &key) < RANK_VOICE;
         // +m: only voiced-or-above may speak
         let moderated = s
             .channels
             .get(&key)
             .map(|c| c.modes.moderated)
             .unwrap_or(false);
-        if moderated && s.rank(uid, &key) < RANK_VOICE {
+        if moderated && s.rank(uid, &key) < RANK_VOICE && !op_only {
             if !notice {
                 s.numeric(
                     uid,
@@ -345,6 +353,10 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             .unwrap_or_default();
         for m in members {
             if m == uid || s.users.get(&m).map(|u| u.flags.deaf).unwrap_or(false) {
+                continue;
+            }
+            // +U: an unprivileged sender's message reaches ops (half-op+) only
+            if op_only && s.rank(m, &key) < RANK_HALFOP {
                 continue;
             }
             s.send_tagged(m, uid, &ctags, &msgid, &line);
