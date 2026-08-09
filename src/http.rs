@@ -81,8 +81,9 @@ pub fn post(
     Ok((status, out))
 }
 
-/// Decode an HTTP/1.1 chunked body (best effort).
-fn dechunk(body: &str) -> String {
+/// Decode an HTTP/1.1 chunked body (best effort). Used for both outbound response
+/// bodies here and inbound request bodies in the RPC httpd.
+pub fn dechunk(body: &str) -> String {
     let mut out = String::new();
     let mut rest = body;
     while let Some((size_line, after)) = rest.split_once("\r\n") {

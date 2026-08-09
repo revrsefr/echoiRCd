@@ -68,19 +68,27 @@ fn handle(
     stream.set_read_timeout(Some(IO_TIMEOUT))?;
     stream.set_write_timeout(Some(IO_TIMEOUT))?;
 
-    // read until we have the full header block, then the declared body
+    // read until we have the full header block, then the declared body — whether
+    // it's Content-Length-framed or Transfer-Encoding: chunked (like InspIRCd's
+    // http_parser handles). Body starts 4 bytes past the header terminator.
     let mut buf = Vec::new();
     let mut chunk = [0u8; 8192];
-    let (mut head_end, mut content_len) = (None, 0usize);
+    let mut head_end = None;
+    let mut framing = Framing::Length(0);
     loop {
         if head_end.is_none() {
             if let Some(pos) = find_headers_end(&buf) {
                 head_end = Some(pos);
-                content_len = content_length(&buf[..pos]);
+                framing = framing_of(&buf[..pos]);
             }
         }
         if let Some(he) = head_end {
-            if buf.len() >= he + content_len {
+            let body = &buf[(he + 4).min(buf.len())..];
+            let done = match framing {
+                Framing::Length(n) => body.len() >= n,
+                Framing::Chunked => chunked_complete(body),
+            };
+            if done {
                 break;
             }
         }
@@ -98,8 +106,13 @@ fn handle(
         return respond(&mut stream, 400, "Bad Request", "{}");
     };
     let header_text = String::from_utf8_lossy(&buf[..he]).into_owned();
-    let body =
-        String::from_utf8_lossy(&buf[he + 4..(he + 4 + content_len).min(buf.len())]).into_owned();
+    let raw_body = &buf[(he + 4).min(buf.len())..];
+    let body = match framing {
+        Framing::Length(n) => {
+            String::from_utf8_lossy(&raw_body[..n.min(raw_body.len())]).into_owned()
+        }
+        Framing::Chunked => crate::http::dechunk(&String::from_utf8_lossy(raw_body)),
+    };
 
     // request line: only POST is accepted
     let first = header_text.lines().next().unwrap_or("");
@@ -170,12 +183,59 @@ fn find_headers_end(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
-/// The `Content-Length` from a header block (0 if absent/invalid).
-fn content_length(head: &[u8]) -> usize {
+/// How the request body is framed.
+enum Framing {
+    Length(usize),
+    Chunked,
+}
+
+/// Decide the body framing from the header block: `Transfer-Encoding: chunked`
+/// wins over `Content-Length` (per RFC 7230); otherwise the declared length (0).
+fn framing_of(head: &[u8]) -> Framing {
     let text = String::from_utf8_lossy(head);
-    header_line(&text, "content-length")
-        .and_then(|v| v.trim().parse().ok())
-        .unwrap_or(0)
+    let chunked = header_line(&text, "transfer-encoding")
+        .is_some_and(|v| v.to_ascii_lowercase().contains("chunked"));
+    if chunked {
+        Framing::Chunked
+    } else {
+        let len = header_line(&text, "content-length")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0);
+        Framing::Length(len)
+    }
+}
+
+/// Whether a chunked body is fully received: walk the chunk-size prefixes until a
+/// terminating `0`-size chunk. Returns false if the buffer ends mid-chunk (read more).
+fn chunked_complete(body: &[u8]) -> bool {
+    let mut i = 0;
+    loop {
+        let Some(nl) = find_from(body, i, b"\r\n") else {
+            return false; // size line not fully arrived yet
+        };
+        let size = std::str::from_utf8(&body[i..nl])
+            .ok()
+            .and_then(|s| usize::from_str_radix(s.split(';').next().unwrap_or("").trim(), 16).ok());
+        let Some(size) = size else { return false };
+        if size == 0 {
+            return true; // terminating chunk seen
+        }
+        i = nl + 2 + size + 2; // skip CRLF + data + trailing CRLF
+        if i > body.len() {
+            return false;
+        }
+    }
+}
+
+/// Index of `needle` in `hay` at or after `from`.
+fn find_from(hay: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
+    if from >= hay.len() {
+        return None;
+    }
+    hay[from..]
+        .windows(needle.len())
+        .position(|w| w == needle)
+        .map(|p| from + p)
 }
 
 /// The value of a header, matched case-insensitively.
