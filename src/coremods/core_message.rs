@@ -120,11 +120,7 @@ fn apply_censor(body: &str, censor: &[(String, String)]) -> Option<String> {
 }
 
 pub fn commands() -> Vec<Box<dyn Command>> {
-    vec![
-        Box::new(PrivMsg),
-        Box::new(Notice),
-        Box::new(TagMsg),
-    ]
+    vec![Box::new(PrivMsg), Box::new(Notice), Box::new(TagMsg)]
 }
 
 /// Shared PRIVMSG/NOTICE delivery. NOTICE never generates automatic replies.
@@ -437,7 +433,15 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             s.send_tagged(tuid, uid, &ctags, &msgid, &pm);
             // store for CHATHISTORY under the canonical pair key (both parties share it)
             let sender_nick = prefix.split('!').next().unwrap_or_default();
-            record(s, &dm_key(sender_nick, target), &prefix, cmd, target, text, &msgid);
+            record(
+                s,
+                &dm_key(sender_nick, target),
+                &prefix,
+                cmd,
+                target,
+                text,
+                &msgid,
+            );
         }
         if s.users
             .get(&uid)
