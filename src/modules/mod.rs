@@ -27,6 +27,7 @@ pub mod hidewhois;
 pub mod irccloudtags;
 pub mod jsonlog;
 pub mod jwt;
+pub mod maphide;
 pub mod markread;
 pub mod metadata;
 pub mod multiline;
@@ -45,6 +46,7 @@ pub mod securelist;
 pub mod securitygroups;
 pub mod serverban;
 pub mod snoop;
+pub mod tline;
 pub mod whoisport;
 
 use crate::command::Command;
@@ -76,6 +78,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(irccloudtags::IrcCloudTags),
         Box::new(randquote::RandQuote),
         Box::new(disable::Disable),
+        Box::new(maphide::MapHide),
     ]
 }
 
@@ -105,5 +108,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(extjwt::commands())
         .chain(filehost::commands())
         .chain(extended_isupport::commands())
+        .chain(tline::commands())
         .collect()
 }
