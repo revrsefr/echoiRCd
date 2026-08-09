@@ -6,6 +6,7 @@
 pub mod antimixedutf8;
 pub mod antirandom;
 pub mod blockamsg;
+pub mod channelban;
 pub mod chathistory;
 pub mod cloak;
 pub mod connectban;
@@ -19,10 +20,12 @@ pub mod metadata;
 pub mod multiline;
 pub mod network_icon;
 pub mod profilelink;
+pub mod realnameban;
 pub mod reputation;
 pub mod restrictcommands;
 pub mod restrictmsg;
 pub mod securitygroups;
+pub mod serverban;
 pub mod snoop;
 pub mod whoisport;
 

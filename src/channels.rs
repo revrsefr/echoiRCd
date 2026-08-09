@@ -906,6 +906,9 @@ impl Server {
                     Some(b'y') => {
                         crate::modules::reputation::score_ban_match(self, uid, &b.mask[2..])
                     }
+                    Some(b'r') => crate::modules::realnameban::matches(self, uid, &b.mask[2..]),
+                    Some(b'j') => crate::modules::channelban::matches(self, uid, &b.mask[2..]),
+                    Some(b's') => crate::modules::serverban::matches(self, uid, &b.mask[2..]),
                     _ => false,
                 }
             } else {
@@ -1114,8 +1117,10 @@ pub fn normalize_mask(m: &str) -> String {
 pub fn normalize_ban_mask(m: &str) -> String {
     let b = m.as_bytes();
     if b.len() >= 2 && b[1] == b':' && (b[0] as char).is_ascii_alphabetic() {
-        // g: (security-group name) and y: (reputation score spec) aren't host masks
-        if b[0] == b'g' || b[0] == b'y' {
+        // These extbans carry a name / spec / channel / server, not a host mask,
+        // so they must not be host-normalised: g: (security group), y: (reputation
+        // score), r: (realname), j: (channel), s: (server name).
+        if matches!(b[0], b'g' | b'y' | b'r' | b'j' | b's') {
             return m.to_string();
         }
         return format!("{}:{}", &m[..1], normalize_mask(&m[2..]));
