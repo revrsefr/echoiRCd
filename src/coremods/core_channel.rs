@@ -434,7 +434,18 @@ impl Command for Part {
             } else {
                 format!(":{prefix} PART {target} :{reason}")
             };
-            s.to_channel_vis(&key, &line, uid); // +u: only ops + self see the part
+            // +D delayjoin: a still-hidden member's PART is shown only to themselves
+            let hidden = s
+                .channels
+                .get(&key)
+                .and_then(|c| c.members.get(&uid))
+                .map(|m| m.hidden)
+                .unwrap_or(false);
+            if hidden {
+                s.send(uid, line.clone());
+            } else {
+                s.to_channel_vis(&key, &line, uid); // +u: only ops + self see the part
+            }
             s.propagate_part(uid, target, &reason); // tell linked servers
             if let Some(ch) = s.channels.get_mut(&key) {
                 ch.members.remove(&uid);

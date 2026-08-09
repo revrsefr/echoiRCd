@@ -20,6 +20,7 @@ pub struct Member {
     pub voice: bool,              // +v (+)
     pub joined: u64,              // unix ts this member joined (for +d delaymsg; 0 = unknown)
     pub recent_msgs: Vec<String>, // +K repeat: this member's last few lines here
+    pub hidden: bool,             // +D delayjoin: JOIN withheld until they reveal themselves
 }
 
 /// Prefix ranks, high→low — gate who may grant a prefix / kick whom.
@@ -159,6 +160,7 @@ pub struct ChanModes {
     pub opmoderated: bool,           // +U — unprivileged users' messages go to ops only
     pub delaymsg: Option<u32>,       // +d <secs> — new joiners can't speak for N secs
     pub repeat: Option<u32>,         // +K <n> — block a line repeated within your last n
+    pub delayjoin: bool,             // +D — hide JOINs until the user speaks/reveals
 }
 
 impl ChanModes {
@@ -186,6 +188,7 @@ impl ChanModes {
             'A' => self.allowinvite = on,
             'P' => self.permanent = on,
             'U' => self.opmoderated = on,
+            'D' => self.delayjoin = on,
             _ => {}
         }
     }
@@ -357,6 +360,66 @@ impl Server {
             .unwrap_or(false)
     }
 
+    /// +D delayjoin: announce a hidden member's withheld JOIN now (they revealed
+    /// themselves by speaking / being opped / changing nick). No-op if not hidden.
+    pub fn reveal_member(&mut self, uid: Uid, key: &str) {
+        let hidden = self
+            .channels
+            .get(key)
+            .and_then(|c| c.members.get(&uid))
+            .map(|m| m.hidden)
+            .unwrap_or(false);
+        if !hidden {
+            return;
+        }
+        if let Some(m) = self
+            .channels
+            .get_mut(key)
+            .and_then(|c| c.members.get_mut(&uid))
+        {
+            m.hidden = false;
+        }
+        let name = self
+            .channels
+            .get(key)
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| key.to_string());
+        let aud = self
+            .channels
+            .get(key)
+            .map(|c| c.modes.auditorium)
+            .unwrap_or(false);
+        let (prefix, acct, realname) = match self.users.get(&uid) {
+            Some(u) => (
+                u.prefix(),
+                u.account.clone().unwrap_or_else(|| "*".to_string()),
+                u.realname.clone(),
+            ),
+            None => return,
+        };
+        let plain = format!(":{prefix} JOIN {name}");
+        let extended = format!(":{prefix} JOIN {name} {acct} :{realname}");
+        let members: Vec<Uid> = self
+            .channels
+            .get(key)
+            .map(|c| c.members.keys().copied().collect())
+            .unwrap_or_default();
+        for m in members {
+            if m == uid {
+                continue; // they already saw their own JOIN
+            }
+            if aud && self.rank(m, key) < RANK_OP {
+                continue; // +u auditorium still hides them from non-ops
+            }
+            let ext = self
+                .users
+                .get(&m)
+                .map(|u| u.caps.extended_join)
+                .unwrap_or(false);
+            self.send(m, if ext { extended.clone() } else { plain.clone() });
+        }
+    }
+
     /// +X exemptchanops — is `uid` exempt from `restriction` in this channel? True
     /// when a `+X <restriction>:<rankchar>` entry names a rank they meet or exceed.
     pub fn chanop_exempt(&self, uid: Uid, key: &str, restriction: &str) -> bool {
@@ -412,7 +475,19 @@ impl Server {
             return;
         }
         let prefix = self.users[&uid].prefix();
-        self.to_channel(&key, &format!(":{prefix} PART {chan} :{reason}"), None);
+        // +D delayjoin: a still-hidden member's PART is shown only to themselves
+        let hidden = self
+            .channels
+            .get(&key)
+            .and_then(|c| c.members.get(&uid))
+            .map(|m| m.hidden)
+            .unwrap_or(false);
+        let line = format!(":{prefix} PART {chan} :{reason}");
+        if hidden {
+            self.send(uid, line);
+        } else {
+            self.to_channel(&key, &line, None);
+        }
         self.propagate_part(uid, chan, reason);
         if let Some(ch) = self.channels.get_mut(&key) {
             ch.members.remove(&uid);
@@ -639,10 +714,25 @@ impl Server {
         let plain = format!(":{prefix} JOIN {name}");
         let extended = format!(":{prefix} JOIN {name} {acct} :{realname}");
         let aud = self.channels[&key].modes.auditorium;
+        // +D delayjoin: withhold the JOIN from everyone else until they speak/reveal
+        let delayjoin = self.channels[&key].modes.delayjoin;
+        if delayjoin {
+            if let Some(m) = self
+                .channels
+                .get_mut(&key)
+                .and_then(|c| c.members.get_mut(&uid))
+            {
+                m.hidden = true;
+            }
+        }
         let members: Vec<Uid> = self.channels[&key].members.keys().copied().collect();
         for m in members {
             // +u auditorium: non-op members don't see other users join
             if aud && m != uid && self.rank(m, &key) < RANK_OP {
+                continue;
+            }
+            // +D: only the joining user sees their own JOIN for now
+            if delayjoin && m != uid {
                 continue;
             }
             let ext = self
@@ -745,6 +835,10 @@ impl Server {
         let mut names = String::new();
         for (m, flags) in &ch.members {
             if hide && *m != uid && flags.rank() < RANK_OP {
+                continue;
+            }
+            // +D delayjoin: a still-hidden member isn't shown to anyone but themselves
+            if flags.hidden && *m != uid {
                 continue;
             }
             let p = if multi {

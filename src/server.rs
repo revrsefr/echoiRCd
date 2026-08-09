@@ -451,9 +451,13 @@ impl Server {
             let mut seen: HashSet<Uid> = HashSet::new();
             for key in &user.channels {
                 if let Some(ch) = self.channels.get_mut(key) {
+                    // +D delayjoin: if their JOIN here was never announced, no QUIT either
+                    let hidden = ch.members.get(&uid).map(|m| m.hidden).unwrap_or(false);
                     ch.members.remove(&uid);
-                    for &m in ch.members.keys() {
-                        seen.insert(m);
+                    if !hidden {
+                        for &m in ch.members.keys() {
+                            seen.insert(m);
+                        }
                     }
                 }
             }

@@ -373,6 +373,10 @@ impl Server {
             let chans: Vec<String> = self.users[&uid].channels.iter().cloned().collect();
             for key in &chans {
                 if let Some(ch) = self.channels.get(key) {
+                    // +D delayjoin: a still-hidden member's NICK isn't shown here
+                    if ch.members.get(&uid).map(|m| m.hidden).unwrap_or(false) {
+                        continue;
+                    }
                     for &m in ch.members.keys() {
                         targets.insert(m);
                     }
@@ -418,7 +422,7 @@ impl Server {
             uid,
             RPL_MYINFO,
             &format!(
-                "{} echoircd-{VERSION} iowxsgBDIHrRzWc qaohvbeIklimnpstzCTcSNORMfjFLgGuBQAPJUdKX",
+                "{} echoircd-{VERSION} iowxsgBDIHrRzWc qaohvbeIklimnpstzCTcSNORMfjFLgGuBQAPJUdKXD",
                 self.name
             ),
         );
@@ -426,7 +430,7 @@ impl Server {
             uid,
             RPL_ISUPPORT,
             &format!(
-                "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIgX,k,lfjFLHBJdK,ACGMNOPQRSTUcimnpstuz EXTBAN=,cmn WATCH=128 MONITOR=128 SILENCE=32 CALLERID=g WHOX CHATHISTORY=256 MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={} :are supported by this server",
+                "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIgX,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnpstuz EXTBAN=,cmn WATCH=128 MONITOR=128 SILENCE=32 CALLERID=g WHOX CHATHISTORY=256 MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={} :are supported by this server",
                 self.network
             ),
         );

@@ -93,6 +93,7 @@ static CHAN_MODES: &[&(dyn ChanMode + Sync)] = &[
     &DELAYMSG,
     &REPEAT,
     &EXEMPTCHANOPS,
+    &DELAYJOIN,
 ];
 
 // --- prefix modes (+q/+a/+o/+h/+v): a per-member rank, needs a nick ----------
@@ -179,6 +180,10 @@ impl ChanMode for Prefix {
                 RANK_HALFOP => m.halfop = adding,
                 _ => m.voice = adding,
             }
+        }
+        // +D delayjoin: gaining a prefix reveals a hidden member
+        if adding {
+            s.reveal_member(tuid, key);
         }
         Applied::Yes(Some(pn.to_string()))
     }
@@ -314,6 +319,9 @@ fn set_permanent(m: &mut ChanModes, v: bool) {
 fn set_opmoderated(m: &mut ChanModes, v: bool) {
     m.opmoderated = v;
 }
+fn set_delayjoin(m: &mut ChanModes, v: bool) {
+    m.delayjoin = v;
+}
 static NOKICKS: Flag = Flag {
     ch: 'Q',
     set: set_nokicks,
@@ -329,6 +337,10 @@ static PERMANENT: Flag = Flag {
 static OPMODERATED: Flag = Flag {
     ch: 'U',
     set: set_opmoderated,
+};
+static DELAYJOIN: Flag = Flag {
+    ch: 'D',
+    set: set_delayjoin,
 };
 
 impl ChanMode for Flag {
@@ -1247,7 +1259,7 @@ mod tests {
 
     #[test]
     fn registry_covers_all_channel_modes() {
-        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuBQAPJUdKX".chars() {
+        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuBQAPJUdKXD".chars() {
             assert!(chan_mode(c).is_some(), "missing handler for +{c}");
         }
         assert!(chan_mode('y').is_none());

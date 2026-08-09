@@ -400,6 +400,8 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
                 }
             }
         }
+        // +D delayjoin: speaking reveals a hidden member (their JOIN goes out first)
+        s.reveal_member(uid, &key);
         // deliver to every member except the sender and +D (deaf) users, tagging
         // per-recipient (server-time + any client-only tags on the line)
         let line = format!(":{prefix} {cmd} {target} :{body}");
