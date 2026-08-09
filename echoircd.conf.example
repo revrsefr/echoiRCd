@@ -117,6 +117,13 @@ amu_target    = both
 # hidewhois_hide_server = yes  # hide 312
 # hidewhois_hide_idle = yes    # hide 317
 # hidewhois_hide_secure = yes  # hide 671
+# --- dccallow (m_dccallow): block unwanted DCC transfers unless the recipient
+#     ran /DCCALLOW +<nick>. Blocked file globs are repeatable; blockchat also
+#     gates DCC CHAT. Recipients manage their allow-list with DCCALLOW +/-/LIST.
+# dccallow_blockfile = *.exe
+# dccallow_blockfile = *.scr
+# dccallow_blockchat = yes
+# dccallow_maxentries = 20
 # --- conn_waitpong (m_conn_waitpong): hold registration until the client answers
 #     a server PING with the exact cookie — filters bots that never PONG. Real
 #     clients auto-reply, so it's transparent to them.

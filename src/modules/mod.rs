@@ -16,6 +16,7 @@ pub mod conn_waitpong;
 pub mod connectban;
 pub mod connflood;
 pub mod customtitle;
+pub mod dccallow;
 pub mod denychans;
 pub mod disable;
 pub mod dnsbl;
@@ -84,6 +85,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(randquote::RandQuote),
         Box::new(disable::Disable),
         Box::new(maphide::MapHide),
+        Box::new(dccallow::DccAllow),
     ]
 }
 
@@ -116,6 +118,7 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(tline::commands())
         .chain(rmode::commands())
         .chain(customtitle::commands())
+        .chain(dccallow::commands())
         .chain(geoip::commands())
         .collect()
 }
