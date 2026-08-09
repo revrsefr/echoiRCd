@@ -187,6 +187,7 @@ pub fn run_reactor(mut listener: MioListener, core: Sender<Event>, counter: Arc<
                                     certfp: None,
                                     link: false,
                                     outbound: false,
+                                    websocket: false,
                                 })
                                 .is_err()
                             {
@@ -384,6 +385,7 @@ pub fn accept_loop(
                         certfp: None,
                         link,
                         outbound: false,
+                        websocket: false,
                     })
                     .is_err()
                 {
@@ -432,6 +434,7 @@ pub fn connect_link(addr: &str, core: Sender<Event>, counter: Arc<AtomicU64>) {
             certfp: None,
             link: true,
             outbound: true,
+            websocket: false,
         })
         .is_err()
     {
@@ -516,6 +519,7 @@ fn tls_conn(
             certfp,
             link,
             outbound: false,
+            websocket: false,
         })
         .is_err()
     {

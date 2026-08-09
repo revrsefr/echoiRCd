@@ -32,4 +32,5 @@ pub mod socketengine;
 pub mod tls;
 pub mod users;
 pub mod watch;
+pub mod websocket;
 pub mod xline;

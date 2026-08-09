@@ -104,6 +104,9 @@ fn main() {
     // optional JSON-RPC-over-HTTP control interface (see crate::modules::rpc)
     echoircd::modules::rpc::maybe_start(&cfg, tx.clone());
 
+    // optional WebSocket transport for browser IRC clients (see crate::websocket)
+    echoircd::websocket::maybe_start(&cfg, tx.clone(), counter.clone());
+
     // dial any autoconnect uplinks (after a short delay so the peer can boot)
     for block in cfg.links.iter().filter(|b| b.autoconnect) {
         let addr = format!("{}:{}", block.ip, block.port);

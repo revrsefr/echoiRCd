@@ -1,0 +1,616 @@
+//! WebSocket transport (RFC 6455) — lets browser IRC clients (KiwiIRC, gamja,
+//! The Lounge, reverse's Orbit, …) connect straight to echoIRCd, no Node bridge.
+//! It's a transport, not a pluggable module, so it lives beside `tls.rs`/`http.rs`
+//! at the I/O edge: a thread-per-connection listener that does the HTTP Upgrade
+//! handshake, then frames the IRC byte stream in and out of WebSocket frames. One
+//! thread owns each socket (like the TLS path) so frames never interleave.
+//!
+//! Native only: SHA-1 + base64 for the accept key come from OpenSSL; the framing
+//! is hand-rolled; no new crate, no `unsafe`.
+//!
+//! Config (flat keys):
+//!   bind_ws              = 127.0.0.1:8097   plaintext ws:// listener
+//!   bind_wss             = 0.0.0.0:7799     wss:// listener (uses tls_cert/tls_key)
+//!   ws_origin            = https://x.example (repeatable) allowed Origin globs; empty = any
+//!   ws_handshake_timeout = 10               seconds to finish the Upgrade
+//!   ws_ping_interval     = 60               seconds between server keepalive pings (0 = off)
+//!   ws_timeout           = 120              seconds with no traffic before we drop it
+//!   ws_trust_proxy       = no               read X-Forwarded-For / -Proto (behind nginx)
+
+use std::io::{self, Read, Write};
+use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError};
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
+
+use crate::channels::glob_match;
+use crate::config::Config;
+use crate::ircd::Event;
+use crate::socketengine::OutSink;
+use crate::tls::{OpensslBackend, TlsBackend, TlsConn};
+use crate::Uid;
+
+/// The RFC 6455 handshake GUID appended to the client key.
+const GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+/// Largest single WebSocket frame payload we'll accept (flood guard).
+const MAX_FRAME: usize = 128 * 1024;
+/// Largest reassembled message before we drop the connection.
+const MAX_MSG: usize = 256 * 1024;
+/// How long a session blocks on a read before draining writes / doing keepalive.
+const POLL: Duration = Duration::from_millis(100);
+
+// opcodes
+const OP_CONT: u8 = 0x0;
+const OP_TEXT: u8 = 0x1;
+const OP_BIN: u8 = 0x2;
+const OP_CLOSE: u8 = 0x8;
+const OP_PING: u8 = 0x9;
+const OP_PONG: u8 = 0xA;
+
+/// Tunables read once from the config.
+#[derive(Clone)]
+pub struct WsConfig {
+    origins: Vec<String>,
+    handshake_timeout: Duration,
+    ping_interval: Duration,
+    idle_timeout: Duration,
+    trust_proxy: bool,
+    binary_ok: bool,
+}
+
+/// A stream the WS session can drive — implemented for a plaintext `TcpStream`
+/// (`ws://`) and a TLS connection (`wss://`), so one session loop serves both.
+pub trait WsStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize>;
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()>;
+    fn flush(&mut self) -> io::Result<()>;
+    fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()>;
+    fn shutdown(&mut self);
+}
+
+impl WsStream for TcpStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        Read::read(self, buf)
+    }
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        Write::write_all(self, buf)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Write::flush(self)
+    }
+    fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
+        TcpStream::set_read_timeout(self, dur)
+    }
+    fn shutdown(&mut self) {
+        let _ = TcpStream::shutdown(self, Shutdown::Both);
+    }
+}
+
+impl WsStream for Box<dyn TlsConn> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        (**self).read(buf)
+    }
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        (**self).write_all(buf)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        (**self).flush()
+    }
+    fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
+        (**self).set_read_timeout(dur)
+    }
+    fn shutdown(&mut self) {
+        (**self).shutdown()
+    }
+}
+
+/// `Sec-WebSocket-Accept` = base64(SHA1(key + GUID)).
+pub fn accept_key(client_key: &str) -> String {
+    let digest = openssl::hash::hash(
+        openssl::hash::MessageDigest::sha1(),
+        format!("{client_key}{GUID}").as_bytes(),
+    )
+    .map(|d| d.to_vec())
+    .unwrap_or_default();
+    openssl::base64::encode_block(&digest)
+}
+
+/// Start the ws:// and/or wss:// listeners if configured. Called from `main`.
+pub fn maybe_start(cfg: &Config, core: Sender<Event>, counter: Arc<AtomicU64>) {
+    let get = |k: &str| cfg.raw.get(k).and_then(|v| v.last()).map(|s| s.as_str());
+    let dur = |k: &str, d: u64| {
+        get(k)
+            .and_then(|v| v.parse().ok())
+            .map(Duration::from_secs)
+            .unwrap_or(Duration::from_secs(d))
+    };
+    let wscfg = WsConfig {
+        origins: cfg.raw.get("ws_origin").cloned().unwrap_or_default(),
+        handshake_timeout: dur("ws_handshake_timeout", 10),
+        ping_interval: dur("ws_ping_interval", 60),
+        idle_timeout: dur("ws_timeout", 120),
+        trust_proxy: get("ws_trust_proxy")
+            .map(crate::config::yesish)
+            .unwrap_or(false),
+        binary_ok: true,
+    };
+
+    if let Some(bind) = get("bind_ws").map(str::to_string) {
+        match TcpListener::bind(&bind) {
+            Ok(l) => {
+                eprintln!("echoircd WebSocket (ws) on {bind}");
+                let (c, n, w) = (core.clone(), counter.clone(), wscfg.clone());
+                thread::spawn(move || accept_ws(l, c, n, None, w));
+            }
+            Err(e) => eprintln!("echoircd: cannot bind ws {bind}: {e}"),
+        }
+    }
+
+    if let Some(bind) = get("bind_wss").map(str::to_string) {
+        match (get("tls_cert"), get("tls_key")) {
+            (Some(cert), Some(key)) => match OpensslBackend::new(cert, key) {
+                Ok(backend) => match TcpListener::bind(&bind) {
+                    Ok(l) => {
+                        eprintln!("echoircd WebSocket (wss) on {bind} (openssl)");
+                        let backend: Arc<dyn TlsBackend> = Arc::new(backend);
+                        let (c, n, w) = (core.clone(), counter.clone(), wscfg.clone());
+                        thread::spawn(move || accept_ws(l, c, n, Some(backend), w));
+                    }
+                    Err(e) => eprintln!("echoircd: cannot bind wss {bind}: {e}"),
+                },
+                Err(e) => eprintln!("echoircd: wss disabled (cert/key error): {e}"),
+            },
+            _ => eprintln!("echoircd: bind_wss set but tls_cert/tls_key missing — wss OFF"),
+        }
+    }
+}
+
+/// Accept forever; one thread per connection.
+fn accept_ws(
+    listener: TcpListener,
+    core: Sender<Event>,
+    counter: Arc<AtomicU64>,
+    tls: Option<Arc<dyn TlsBackend>>,
+    cfg: WsConfig,
+) {
+    for conn in listener.incoming() {
+        let Ok(stream) = conn else { continue };
+        let Ok(addr) = stream.peer_addr() else {
+            continue;
+        };
+        let _ = stream.set_nodelay(true);
+        let uid = counter.fetch_add(1, Ordering::Relaxed);
+        let (core, tls, cfg) = (core.clone(), tls.clone(), cfg.clone());
+        thread::spawn(move || ws_conn(stream, uid, addr, core, tls, cfg));
+    }
+}
+
+/// Per-connection entry: wrap in TLS for wss, keep a raw handle for force-close,
+/// then run the generic session.
+fn ws_conn(
+    raw: TcpStream,
+    uid: Uid,
+    addr: SocketAddr,
+    core: Sender<Event>,
+    tls: Option<Arc<dyn TlsBackend>>,
+    cfg: WsConfig,
+) {
+    let Ok(shutdown) = raw.try_clone() else {
+        return;
+    };
+    match tls {
+        Some(backend) => match backend.accept(raw) {
+            Ok(conn) => ws_session(conn, uid, addr, true, core, shutdown, cfg),
+            Err(_) => {
+                let _ = shutdown.shutdown(Shutdown::Both);
+            }
+        },
+        None => ws_session(raw, uid, addr, false, core, shutdown, cfg),
+    }
+}
+
+/// The result of a successful handshake.
+struct Handshake {
+    real_ip: Option<IpAddr>,
+    secure: bool,
+    binary: bool,
+}
+
+/// Drive one WebSocket connection: handshake, then frame IRC lines both ways until
+/// close/EOF/idle-timeout or the core drops us.
+fn ws_session<S: WsStream>(
+    mut stream: S,
+    uid: Uid,
+    addr: SocketAddr,
+    tls_secure: bool,
+    core: Sender<Event>,
+    shutdown: TcpStream,
+    cfg: WsConfig,
+) {
+    // --- HTTP Upgrade handshake (bounded by the handshake timeout) ---
+    let _ = stream.set_read_timeout(Some(cfg.handshake_timeout));
+    let hs = match do_handshake(&mut stream, &cfg) {
+        Ok(h) => h,
+        Err(_) => {
+            let _ = shutdown.shutdown(Shutdown::Both);
+            return;
+        }
+    };
+    let real_addr = hs
+        .real_ip
+        .map(|ip| SocketAddr::new(ip, addr.port()))
+        .unwrap_or(addr);
+    let secure = tls_secure || hs.secure;
+    let send_opcode = if hs.binary { OP_BIN } else { OP_TEXT };
+
+    let (out_tx, out_rx) = std::sync::mpsc::channel::<String>();
+    if core
+        .send(Event::Connect {
+            uid,
+            addr: real_addr,
+            out: OutSink::Thread(out_tx),
+            sock: Some(shutdown),
+            secure,
+            certfp: None,
+            link: false,
+            outbound: false,
+            websocket: true,
+        })
+        .is_err()
+    {
+        stream.shutdown();
+        return;
+    }
+
+    // --- framed I/O loop (one thread, poll-read + drain-writes, like TLS) ---
+    let _ = stream.set_read_timeout(Some(POLL));
+    io_loop(&mut stream, uid, &core, &out_rx, &cfg, send_opcode);
+
+    // best-effort close handshake, then tell the core we're gone
+    let _ = stream.write_all(&encode(OP_CLOSE, &[]));
+    stream.shutdown();
+    let _ = core.send(Event::Disconnect { uid });
+}
+
+/// The read/deframe + write/frame loop. Returns when the connection should end.
+fn io_loop<S: WsStream>(
+    stream: &mut S,
+    uid: Uid,
+    core: &Sender<Event>,
+    out_rx: &Receiver<String>,
+    cfg: &WsConfig,
+    send_opcode: u8,
+) {
+    let mut acc: Vec<u8> = Vec::new(); // raw bytes awaiting a full frame
+    let mut msg: Vec<u8> = Vec::new(); // reassembled data message
+    let mut chunk = [0u8; 8192];
+    let mut last_rx = Instant::now();
+    let mut last_ping = Instant::now();
+
+    loop {
+        // 1) read
+        match stream.read(&mut chunk) {
+            Ok(0) => break, // EOF
+            Ok(n) => {
+                last_rx = Instant::now();
+                acc.extend_from_slice(&chunk[..n]);
+                loop {
+                    match parse_frame(&acc) {
+                        Ok(Some((frame, consumed))) => {
+                            acc.drain(..consumed);
+                            match frame.opcode {
+                                OP_CLOSE => return,
+                                OP_PING => {
+                                    let _ = stream.write_all(&encode(OP_PONG, &frame.payload));
+                                }
+                                OP_PONG => {}
+                                OP_TEXT | OP_BIN => {
+                                    msg = frame.payload;
+                                    if frame.fin && !deliver(&mut msg, uid, core) {
+                                        return;
+                                    }
+                                }
+                                OP_CONT => {
+                                    msg.extend_from_slice(&frame.payload);
+                                    if msg.len() > MAX_MSG {
+                                        return;
+                                    }
+                                    if frame.fin && !deliver(&mut msg, uid, core) {
+                                        return;
+                                    }
+                                }
+                                _ => return, // unknown opcode
+                            }
+                        }
+                        Ok(None) => break, // need more bytes
+                        Err(()) => return, // protocol violation
+                    }
+                }
+            }
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) => {}
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+
+        // 2) drain queued output → frames
+        loop {
+            match out_rx.try_recv() {
+                Ok(line) => {
+                    let mut payload = line.into_bytes();
+                    payload.extend_from_slice(b"\r\n");
+                    if stream.write_all(&encode(send_opcode, &payload)).is_err() {
+                        return;
+                    }
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => return, // core removed us
+            }
+        }
+        let _ = stream.flush();
+
+        // 3) keepalive + idle timeout
+        if cfg.ping_interval > Duration::ZERO && last_ping.elapsed() >= cfg.ping_interval {
+            last_ping = Instant::now();
+            if stream.write_all(&encode(OP_PING, b"echo")).is_err() {
+                return;
+            }
+        }
+        if last_rx.elapsed() >= cfg.idle_timeout {
+            return; // dead connection
+        }
+    }
+}
+
+/// Split a completed data message into IRC lines and forward them; returns false if
+/// the core has gone away. Clears `msg`.
+fn deliver(msg: &mut Vec<u8>, uid: Uid, core: &Sender<Event>) -> bool {
+    let text = String::from_utf8_lossy(msg);
+    for piece in text.split('\n') {
+        let l = piece.trim_end_matches('\r');
+        if !l.is_empty()
+            && core
+                .send(Event::Line {
+                    uid,
+                    line: l.to_string(),
+                })
+                .is_err()
+        {
+            msg.clear();
+            return false;
+        }
+    }
+    msg.clear();
+    true
+}
+
+/// One decoded WebSocket frame (payload already unmasked).
+struct Frame {
+    fin: bool,
+    opcode: u8,
+    payload: Vec<u8>,
+}
+
+/// Parse one frame from the front of `buf`, returning it plus the bytes consumed.
+/// `Ok(None)` = need more bytes; `Err(())` = protocol violation (caller closes).
+/// Client frames must be masked.
+fn parse_frame(buf: &[u8]) -> Result<Option<(Frame, usize)>, ()> {
+    if buf.len() < 2 {
+        return Ok(None);
+    }
+    let b0 = buf[0];
+    let b1 = buf[1];
+    let fin = b0 & 0x80 != 0;
+    let opcode = b0 & 0x0F;
+    let masked = b1 & 0x80 != 0;
+    if !masked {
+        return Err(()); // RFC 6455 §5.1: client→server frames MUST be masked
+    }
+    let len7 = (b1 & 0x7F) as usize;
+    let mut idx = 2;
+    let payload_len = match len7 {
+        126 => {
+            if buf.len() < idx + 2 {
+                return Ok(None);
+            }
+            let l = u16::from_be_bytes([buf[idx], buf[idx + 1]]) as usize;
+            idx += 2;
+            l
+        }
+        127 => {
+            if buf.len() < idx + 8 {
+                return Ok(None);
+            }
+            let mut a = [0u8; 8];
+            a.copy_from_slice(&buf[idx..idx + 8]);
+            idx += 8;
+            u64::from_be_bytes(a) as usize
+        }
+        n => n,
+    };
+    if payload_len > MAX_FRAME {
+        return Err(());
+    }
+    if buf.len() < idx + 4 + payload_len {
+        return Ok(None); // mask key (4) + payload not fully arrived
+    }
+    let mask = [buf[idx], buf[idx + 1], buf[idx + 2], buf[idx + 3]];
+    idx += 4;
+    let mut payload = buf[idx..idx + payload_len].to_vec();
+    for (i, b) in payload.iter_mut().enumerate() {
+        *b ^= mask[i % 4];
+    }
+    Ok(Some((
+        Frame {
+            fin,
+            opcode,
+            payload,
+        },
+        idx + payload_len,
+    )))
+}
+
+/// Encode a server frame (FIN set, never masked).
+fn encode(opcode: u8, payload: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(payload.len() + 10);
+    out.push(0x80 | opcode);
+    let n = payload.len();
+    if n < 126 {
+        out.push(n as u8);
+    } else if n <= 0xFFFF {
+        out.push(126);
+        out.extend_from_slice(&(n as u16).to_be_bytes());
+    } else {
+        out.push(127);
+        out.extend_from_slice(&(n as u64).to_be_bytes());
+    }
+    out.extend_from_slice(payload);
+    out
+}
+
+/// Read and validate the HTTP Upgrade request, then write the 101 response.
+fn do_handshake<S: WsStream>(stream: &mut S, cfg: &WsConfig) -> io::Result<Handshake> {
+    // read headers (bounded)
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 2048];
+    while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+        if buf.len() > 16 * 1024 {
+            return Err(io::Error::other("headers too large"));
+        }
+        let n = stream.read(&mut chunk)?;
+        if n == 0 {
+            return Err(io::Error::other("eof in handshake"));
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    let head = String::from_utf8_lossy(&buf).into_owned();
+    let first = head.lines().next().unwrap_or("");
+    if !first
+        .split_whitespace()
+        .next()
+        .is_some_and(|m| m.eq_ignore_ascii_case("GET"))
+    {
+        return Err(io::Error::other("not a GET"));
+    }
+    let hdr = |name: &str| header(&head, name);
+    if !hdr("upgrade").is_some_and(|v| v.to_ascii_lowercase().contains("websocket"))
+        || !hdr("connection").is_some_and(|v| v.to_ascii_lowercase().contains("upgrade"))
+    {
+        return Err(io::Error::other("missing upgrade"));
+    }
+    let key = hdr("sec-websocket-key").ok_or_else(|| io::Error::other("no key"))?;
+
+    // origin check (CSWSH guard): if any configured, the Origin must match one
+    if !cfg.origins.is_empty() {
+        let origin = hdr("origin").unwrap_or_default();
+        if !cfg.origins.iter().any(|g| glob_match(g, &origin)) {
+            let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+            return Err(io::Error::other("origin rejected"));
+        }
+    }
+
+    // subprotocol: prefer text.ircv3.net; accept binary.ircv3.net
+    let offered = hdr("sec-websocket-protocol")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let (chosen, binary) = if offered.split(',').any(|p| p.trim() == "text.ircv3.net") {
+        (Some("text.ircv3.net"), false)
+    } else if cfg.binary_ok && offered.split(',').any(|p| p.trim() == "binary.ircv3.net") {
+        (Some("binary.ircv3.net"), true)
+    } else {
+        (None, false)
+    };
+
+    // real IP / scheme from a trusted reverse proxy
+    let (mut real_ip, mut secure) = (None, false);
+    if cfg.trust_proxy {
+        if let Some(xff) = hdr("x-forwarded-for") {
+            if let Some(ip) = xff.split(',').next().and_then(|s| s.trim().parse().ok()) {
+                real_ip = Some(ip);
+            }
+        }
+        secure = hdr("x-forwarded-proto").is_some_and(|v| v.eq_ignore_ascii_case("https"));
+    }
+
+    // 101 response
+    let mut resp = format!(
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+         Sec-WebSocket-Accept: {}\r\n",
+        accept_key(key.trim())
+    );
+    if let Some(proto) = chosen {
+        resp.push_str(&format!("Sec-WebSocket-Protocol: {proto}\r\n"));
+    }
+    resp.push_str("\r\n");
+    stream.write_all(resp.as_bytes())?;
+    stream.flush()?;
+    Ok(Handshake {
+        real_ip,
+        secure,
+        binary,
+    })
+}
+
+/// Case-insensitive header lookup from a raw HTTP header block.
+fn header(head: &str, name: &str) -> Option<String> {
+    head.lines().skip(1).find_map(|l| {
+        let (k, v) = l.split_once(':')?;
+        k.trim()
+            .eq_ignore_ascii_case(name)
+            .then(|| v.trim().to_string())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accept_key_matches_rfc_example() {
+        // RFC 6455 §1.3 worked example
+        assert_eq!(
+            accept_key("dGhlIHNhbXBsZSBub25jZQ=="),
+            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+        );
+    }
+
+    #[test]
+    fn roundtrip_masked_text_frame() {
+        // build a masked client TEXT frame carrying "NICK bob"
+        let payload = b"NICK bob";
+        let mask = [0x12u8, 0x34, 0x56, 0x78];
+        let mut frame = vec![0x81, 0x80 | payload.len() as u8];
+        frame.extend_from_slice(&mask);
+        for (i, b) in payload.iter().enumerate() {
+            frame.push(b ^ mask[i % 4]);
+        }
+        let (parsed, consumed) = parse_frame(&frame).unwrap().unwrap();
+        assert!(
+            parsed.fin
+                && parsed.opcode == OP_TEXT
+                && parsed.payload == payload
+                && consumed == frame.len()
+        );
+    }
+
+    #[test]
+    fn unmasked_client_frame_is_rejected() {
+        assert!(parse_frame(&[0x81, 0x03, b'a', b'b', b'c']).is_err());
+    }
+
+    #[test]
+    fn partial_frame_needs_more() {
+        assert!(parse_frame(&[0x81]).unwrap().is_none());
+    }
+
+    #[test]
+    fn encode_sets_fin_and_length() {
+        let f = encode(OP_TEXT, b"hi");
+        assert_eq!(f, vec![0x81, 0x02, b'h', b'i']);
+    }
+}

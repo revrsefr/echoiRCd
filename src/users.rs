@@ -34,6 +34,7 @@ pub struct UserFlags {
     pub deny_uncommon: bool,  // +c (only users sharing a channel may PM you)
     pub nick_locked: bool,    // NICKLOCK: services/oper holds this nick (no self-change)
     pub via_webirc: bool,     // connected through a WEBIRC gateway (securitygroups)
+    pub via_websocket: bool,  // connected over the WebSocket transport (ws://, wss://)
     pub away: Option<String>, // AWAY message, if set
 }
 

@@ -64,6 +64,7 @@ fn full(s: &Server, uid: Uid) -> String {
         ("channels", format!("[{}]", channels.join(","))),
         ("oper", u.flags.oper.to_string()),
         ("secure", u.secure.to_string()),
+        ("websocket", u.flags.via_websocket.to_string()),
     ];
     if let Some(acct) = &u.account {
         fields.push(("account", qstr(acct)));
