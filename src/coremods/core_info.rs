@@ -229,6 +229,15 @@ impl Command for Whois {
         if let Some(line) = &swhois {
             s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));
         }
+        // security groups (public ones to all; opers/self see private ones too)
+        let groups = crate::modules::securitygroups::user_groups(s, tuid, is_self || asker_oper);
+        if !groups.is_empty() {
+            s.numeric(
+                uid,
+                RPL_WHOISSPECIAL,
+                &format!(":is in security groups: {}", groups.join(", ")),
+            );
+        }
         // opers can see through the cloak to the real host/ip
         if asker_oper && disp != realhost {
             s.numeric(

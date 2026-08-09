@@ -13,6 +13,7 @@ pub mod markread;
 pub mod metadata;
 pub mod multiline;
 pub mod reputation;
+pub mod securitygroups;
 pub mod snoop;
 
 use crate::command::Command;
@@ -43,5 +44,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(multiline::commands())
         .chain(chathistory::commands())
         .chain(reputation::commands())
+        .chain(securitygroups::commands())
         .collect()
 }

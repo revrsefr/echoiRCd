@@ -545,10 +545,8 @@ impl Server {
                 }
             }
             // +b — bans block even an invited user, unless a +e exception matches
-            let mask = self.users.get(&uid).map(|u| u.prefix()).unwrap_or_default();
-            if ch.bans.iter().any(|b| glob_match(&b.mask, &mask))
-                && !ch.excepts.iter().any(|e| glob_match(&e.mask, &mask))
-            {
+            // (both honour the g: security-group extban)
+            if self.ban_list_hit(uid, &ch.bans) && !self.ban_list_hit(uid, &ch.excepts) {
                 if !is_oper {
                     self.numeric(
                         uid,
@@ -562,7 +560,7 @@ impl Server {
             // +i — unless invited or matched by a +I invite exception
             if ch.modes.invite_only
                 && !ch.invites.contains(&uid)
-                && !ch.invex.iter().any(|e| glob_match(&e.mask, &mask))
+                && !self.ban_list_hit(uid, &ch.invex)
             {
                 if !is_oper {
                     self.numeric(
@@ -885,6 +883,23 @@ impl Server {
     /// True if `uid` is caught by an acting extban of type `kind` (`m`/`c`/`n`) on
     /// `key` with no matching `kind:` exception in +e. The stored mask is
     /// `kind:<hostmask>`; we glob the hostmask part against the user's prefix.
+    /// Whether any entry in `list` catches `uid`: a plain `nick!user@host` glob,
+    /// or the `g:<group>` security-group matching extban. Acting extbans (`m:`/`c:`/
+    /// `n:`) never match here — they restrict actions, not join/ban membership.
+    pub fn ban_list_hit(&self, uid: Uid, list: &[Ban]) -> bool {
+        let who = self.users.get(&uid).map(|u| u.prefix()).unwrap_or_default();
+        list.iter().any(|b| {
+            if b.mask.as_bytes().get(1) == Some(&b':') {
+                match b.mask.as_bytes().first() {
+                    Some(b'g') => crate::modules::securitygroups::in_group(self, uid, &b.mask[2..]),
+                    _ => false,
+                }
+            } else {
+                glob_match(&b.mask, &who)
+            }
+        })
+    }
+
     pub fn extban_active(&self, uid: Uid, key: &str, kind: char) -> bool {
         let Some(ch) = self.channels.get(key) else {
             return false;
@@ -1085,6 +1100,10 @@ pub fn normalize_mask(m: &str) -> String {
 pub fn normalize_ban_mask(m: &str) -> String {
     let b = m.as_bytes();
     if b.len() >= 2 && b[1] == b':' && (b[0] as char).is_ascii_alphabetic() {
+        // the g: security-group extban's argument is a group name, not a host mask
+        if b[0] == b'g' {
+            return m.to_string();
+        }
         return format!("{}:{}", &m[..1], normalize_mask(&m[2..]));
     }
     normalize_mask(m)

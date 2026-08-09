@@ -83,3 +83,10 @@ amu_target    = both
 
 # --- connflood: refuse >max connections per <secs> from a single IP ---
 # connflood = 5 10
+
+# --- security groups (UnrealIRCd-style): securitygroup = <name> [criteria...]
+#     criteria: public tls insecure account unregistered oper exclude-oper
+#     bot exclude-bot webirc exclude-webirc mask=<glob> exclude=<glob>
+#     scoremin=<n> scoremax=<n>   — use as an extban: MODE #c +b g:<name>
+# securitygroup = trusted account tls public
+# securitygroup = newbies scoremax=10 public

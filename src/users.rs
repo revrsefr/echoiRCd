@@ -33,6 +33,7 @@ pub struct UserFlags {
     pub showwhois: bool,      // +W (get a notice when someone WHOISes you)
     pub deny_uncommon: bool,  // +c (only users sharing a channel may PM you)
     pub nick_locked: bool,    // NICKLOCK: services/oper holds this nick (no self-change)
+    pub via_webirc: bool,     // connected through a WEBIRC gateway (securitygroups)
     pub away: Option<String>, // AWAY message, if set
 }
 
@@ -430,7 +431,7 @@ impl Server {
             uid,
             RPL_ISUPPORT,
             &format!(
-                "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIgX,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnpstuz EXTBAN=,cmn WATCH=128 MONITOR=128 SILENCE=32 CALLERID=g WHOX CHATHISTORY=256 MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={} :are supported by this server",
+                "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIgX,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnpstuz EXTBAN=,cgmn WATCH=128 MONITOR=128 SILENCE=32 CALLERID=g WHOX CHATHISTORY=256 MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN=30 CHANNELLEN=50 NETWORK={} :are supported by this server",
                 self.network
             ),
         );

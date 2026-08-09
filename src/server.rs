@@ -137,6 +137,7 @@ pub struct Server {
     pub aliases: Vec<(String, String)>,            // command aliases: (name, target-nick)
     pub connflood: Option<(u32, u64)>,             // (max, secs) connection throttle per IP
     pub conn_history: HashMap<IpAddr, Vec<u64>>,   // recent connection times per IP (connflood)
+    pub sec_groups: Vec<crate::config::SecGroup>,  // UnrealIRCd-style security groups
     // labeled-response: while Some((uid, buf)), that client's own responses are
     // diverted into `buf` instead of the socket, so `on_line` can wrap them with
     // the command's `label` (single tag, BATCH, or ACK). RefCell because the
@@ -193,6 +194,7 @@ impl Server {
             aliases: cfg.aliases,
             connflood: cfg.connflood,
             conn_history: HashMap::new(),
+            sec_groups: cfg.sec_groups,
             label_capture: RefCell::new(None),
             event_tx,
             conn_counter,

@@ -8,6 +8,32 @@
 //! oper       = god secret
 //! ```
 
+/// Tri-state for a security-group criterion: don't-care / must-be / must-not-be.
+#[derive(Clone, Copy, PartialEq, Default)]
+pub enum Tri {
+    #[default]
+    Ignore,
+    Yes,
+    No,
+}
+
+/// A UnrealIRCd-style security group (InspIRCd `m_securitygroups`). All criteria
+/// are AND-ed: a user is a member iff every set criterion matches.
+#[derive(Clone, Default)]
+pub struct SecGroup {
+    pub name: String,
+    pub public: bool,               // shown to non-opers
+    pub masks: Vec<String>,         // positive: match any one nick!user@host glob
+    pub exclude_masks: Vec<String>, // negative: matching any one vetoes membership
+    pub tls: Tri,
+    pub account: Tri,
+    pub oper: Tri,
+    pub bot: Tri,
+    pub webirc: Tri,
+    pub score_min: Option<u32>, // reputation lower bound
+    pub score_max: Option<u32>, // reputation upper bound
+}
+
 /// A server-link block: how to authenticate a peer named `name` (and, if
 /// `autoconnect`, where to dial it). Passwords are the shared link secret.
 #[derive(Clone)]
@@ -80,6 +106,7 @@ pub struct Config {
     pub vhosts: Vec<(String, String, String)>, // self-service vhosts: (user, pass, host)
     pub aliases: Vec<(String, String)>, // command aliases: (name, target-nick)
     pub connflood: Option<(u32, u64)>, // (max conns, per secs) from one IP before refusing
+    pub sec_groups: Vec<SecGroup>,     // UnrealIRCd-style security groups
 }
 
 impl Default for Config {
@@ -112,6 +139,7 @@ impl Default for Config {
             vhosts: Vec::new(),
             aliases: Vec::new(),
             connflood: None,
+            sec_groups: Vec::new(),
         }
     }
 }
@@ -279,6 +307,45 @@ impl Config {
                                 c.connflood = Some((mx, sc));
                             }
                         }
+                    }
+                }
+                "securitygroup" | "secgroup" => {
+                    // securitygroup = <name> [public] [tls|insecure] [account|unregistered]
+                    //   [oper|exclude-oper] [bot|exclude-bot] [webirc|exclude-webirc]
+                    //   [mask=<glob>]... [exclude=<glob>]... [scoremin=N] [scoremax=N]
+                    let mut it = v.split_whitespace();
+                    if let Some(name) = it.next() {
+                        let mut g = SecGroup {
+                            name: name.to_string(),
+                            ..Default::default()
+                        };
+                        for tok in it {
+                            let (k, val) = match tok.split_once('=') {
+                                Some((a, b)) => (a, Some(b)),
+                                None => (tok, None),
+                            };
+                            match (k, val) {
+                                ("public", _) => g.public = true,
+                                ("mask", Some(m)) => g.masks.push(m.to_string()),
+                                ("exclude", Some(m)) | ("exclude-mask", Some(m)) => {
+                                    g.exclude_masks.push(m.to_string())
+                                }
+                                ("tls", _) | ("tls-users", _) => g.tls = Tri::Yes,
+                                ("insecure", _) | ("exclude-tls", _) => g.tls = Tri::No,
+                                ("account", _) | ("registered", _) => g.account = Tri::Yes,
+                                ("unregistered", _) | ("exclude-account", _) => g.account = Tri::No,
+                                ("oper", _) => g.oper = Tri::Yes,
+                                ("exclude-oper", _) => g.oper = Tri::No,
+                                ("bot", _) | ("bmode", _) => g.bot = Tri::Yes,
+                                ("exclude-bot", _) | ("exclude-bmode", _) => g.bot = Tri::No,
+                                ("webirc", _) => g.webirc = Tri::Yes,
+                                ("exclude-webirc", _) => g.webirc = Tri::No,
+                                ("scoremin", Some(n)) => g.score_min = n.parse().ok(),
+                                ("scoremax", Some(n)) => g.score_max = n.parse().ok(),
+                                _ => {}
+                            }
+                        }
+                        c.sec_groups.push(g);
                     }
                 }
                 _ => {}

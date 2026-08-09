@@ -106,6 +106,7 @@ impl Command for WebIrc {
         };
         let newip = ip.parse::<IpAddr>().ok();
         if let Some(u) = s.users.get_mut(&uid) {
+            u.flags.via_webirc = true; // securitygroups: webirc criterion
             u.host = host.clone();
             if let Some(a) = newip {
                 u.addr = SocketAddr::new(a, u.addr.port());
