@@ -14,9 +14,11 @@
 //! (default `127.0.0.1:8080`); every request must carry the token (HTTP Basic or
 //! Bearer), checked constant-time on the listener thread before anything dispatches.
 
+pub mod channel;
 pub mod core;
 pub mod httpd;
 pub mod json;
+pub mod user;
 
 use std::sync::mpsc::Sender;
 
@@ -59,17 +61,36 @@ impl RpcError {
 
 /// Every method name the interface exposes (drives `rpc.methods`). Keep in sync
 /// with the `dispatch` routes as providers are added.
-pub const ALL_METHODS: &[&str] = &["rpc.methods", "rpc.info", "server.info", "stats.get"];
+pub const ALL_METHODS: &[&str] = &[
+    "rpc.methods",
+    "rpc.info",
+    "server.info",
+    "stats.get",
+    "user.list",
+    "user.get",
+    "user.kill",
+    "user.set_mode",
+    "user.set_vhost",
+    "user.set_nick",
+    "user.set_oper",
+    "channel.list",
+    "channel.get",
+    "channel.kick",
+    "channel.set_topic",
+];
 
 /// Run a parsed JSON-RPC request on the core thread. `params` is the raw JSON of
 /// the `params` member (`{}` if none); `id` is the raw JSON of the request id
 /// (echoed verbatim). Returns the full JSON-RPC response envelope.
-pub fn dispatch(s: &mut Server, method: &str, _params: &str, id: &str) -> String {
-    // `_params` is consumed once the param-taking providers (user/channel/…) land.
+pub fn dispatch(s: &mut Server, method: &str, params: &str, id: &str) -> String {
     let result: Result<String, RpcError> = match method {
         "rpc.methods" | "rpc.info" => core::rpc_info(s, method),
         "server.info" | "stats.get" => core::server_info(s),
-        other => Err(RpcError::method_not_found(other)),
+        _ => match method.split_once('.') {
+            Some(("user", action)) => user::handle(s, action, params),
+            Some(("channel", action)) => channel::handle(s, action, params),
+            _ => Err(RpcError::method_not_found(method)),
+        },
     };
     envelope(method, id, result)
 }
