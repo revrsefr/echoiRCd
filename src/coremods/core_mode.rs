@@ -113,6 +113,8 @@ pub fn apply_mode(s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
     let mut applied = String::new();
     let mut last = ' ';
     let mut echoed: Vec<String> = Vec::new();
+    // (sign, letter, displayed-param) per applied change — for hidemode filtering
+    let mut changes: Vec<(char, char, Option<String>)> = Vec::new();
     for c in modestring.chars() {
         if c == '+' || c == '-' {
             sign = c;
@@ -138,6 +140,7 @@ pub fn apply_mode(s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         };
         if let Applied::Yes(echo) = handler.apply(s, target, &key, uid, adding, param.as_deref()) {
             emit(&mut applied, &mut last, sign, c);
+            changes.push((sign, c, echo.clone()));
             if let Some(p) = echo {
                 echoed.push(p);
             }
@@ -150,11 +153,21 @@ pub fn apply_mode(s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         } else {
             format!(" {}", echoed.join(" "))
         };
-        s.to_channel(
-            &key,
-            &format!(":{prefix} MODE {target} {applied}{pstr}"),
-            None,
-        );
+        // hidemode: if any changed mode is configured hidden, deliver per-recipient
+        // so members below the required rank don't see it; the setter, opers and
+        // linked servers always get the full line.
+        if changes
+            .iter()
+            .any(|(_, c, _)| crate::modules::hidemode::hidden_rank(s, *c).is_some())
+        {
+            crate::modules::hidemode::broadcast(s, &key, target, uid, &prefix, &changes);
+        } else {
+            s.to_channel(
+                &key,
+                &format!(":{prefix} MODE {target} {applied}{pstr}"),
+                None,
+            );
+        }
         s.propagate_from_user(uid, &format!("MODE {target} {applied}{pstr}"));
         // links
     }

@@ -34,6 +34,7 @@ pub mod geoip;
 pub mod globops;
 pub mod hashident;
 pub mod hidelist;
+pub mod hidemode;
 pub mod hidewhois;
 pub mod irccloudtags;
 pub mod jsonlog;
