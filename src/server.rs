@@ -317,6 +317,8 @@ impl Server {
                 registered: false,
                 dns_pending: false,
                 waitpong: None,
+                class: None,
+                pass: None,
                 deferred: Vec::new(),
                 cap: false,
                 cap_302: false,
@@ -349,6 +351,13 @@ impl Server {
 
         // connectban — z-line an IP range that opens too many connections (see modules::connectban)
         crate::modules::connectban::on_connect(self, ip);
+
+        // connectclass — assign a connection class; a deny class or per-IP cap rejects
+        if let Some(reason) = crate::modules::connclass::assign(self, uid) {
+            self.send(uid, format!("ERROR :Closing link: ({reason})"));
+            self.remove_user(uid, &reason);
+            return;
+        }
 
         // Pre-registration connection notices. The ident-113 notices are cosmetic
         // (ident is archaic and firewalled); the hostname lookup is real (see
@@ -1003,15 +1012,18 @@ impl Server {
         let mut quit = Vec::new();
         for (&uid, u) in &self.users {
             let idle = now.saturating_sub(u.last_active);
+            // a connection class may override the registration timeout / ping frequency
+            let reg_to = crate::modules::connclass::reg_timeout(self, uid).unwrap_or(reg_timeout);
+            let pa = crate::modules::connclass::ping_freq(self, uid).unwrap_or(ping_after);
             if !u.registered {
-                if idle >= reg_timeout {
+                if idle >= reg_to {
                     quit.push(uid); // never registered in time
                 }
             } else if u.ping_sent {
-                if idle >= ping_after + ping_timeout {
+                if idle >= pa + ping_timeout {
                     quit.push(uid); // no reply to the server PING
                 }
-            } else if idle >= ping_after {
+            } else if idle >= pa {
                 ping.push(uid); // idle — poke it
             }
         }
@@ -1048,6 +1060,8 @@ mod tests {
                 registered: true,
                 dns_pending: false,
                 waitpong: None,
+                class: None,
+                pass: None,
                 deferred: Vec::new(),
                 cap: false,
                 cap_302: false,

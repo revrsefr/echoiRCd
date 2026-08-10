@@ -525,6 +525,19 @@ impl Server {
         // `overrode`, snoticed once the join succeeds.
         let is_oper = self.users.get(&uid).map(|u| u.flags.oper).unwrap_or(false);
         let mut overrode = false;
+        // connectclass max-channels cap (opers exempt)
+        if !is_oper {
+            if let Some(max) = crate::modules::connclass::max_chans(self, uid) {
+                if self.users.get(&uid).map(|u| u.channels.len()).unwrap_or(0) >= max {
+                    self.numeric(
+                        uid,
+                        ERR_TOOMANYCHANNELS,
+                        &format!("{name} :You have joined too many channels"),
+                    );
+                    return;
+                }
+            }
+        }
         // CBAN — a forbidden channel name (opers bypass)
         if !is_oper {
             if let Some(reason) = self.matched_cban(&key) {

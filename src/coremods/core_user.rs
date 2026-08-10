@@ -18,6 +18,7 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(UserCmd),
         Box::new(Ping),
         Box::new(Pong),
+        Box::new(Pass),
         Box::new(Quit),
         Box::new(Away),
         Box::new(SetName),
@@ -559,6 +560,29 @@ impl Command for Pong {
         // conn_waitpong: a pre-registration PONG may be answering our cookie
         crate::modules::conn_waitpong::on_pong(s, uid, params);
         CmdResult::Ok // otherwise just a keepalive
+    }
+}
+
+struct Pass;
+impl Command for Pass {
+    fn name(&self) -> &'static str {
+        "PASS"
+    }
+    fn min_params(&self) -> usize {
+        1
+    }
+    fn before_reg(&self) -> bool {
+        true
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        // stored for a connectclass password check at registration
+        if let Some(u) = s.users.get_mut(&uid) {
+            if u.registered {
+                return CmdResult::Fail; // can't re-send PASS after registering
+            }
+            u.pass = Some(params[0].clone());
+        }
+        CmdResult::Ok
     }
 }
 

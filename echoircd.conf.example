@@ -84,6 +84,15 @@ amu_target    = both
 # --- connflood: refuse >max connections per <secs> from a single IP ---
 # connflood = 5 10
 
+# --- connectclass: per-class connection policy. Each line matches connecting
+#     clients by IP glob (+ optional TLS); first match wins, else global limits.
+#     Keys: allow=<ip glob>, deny=yes (reject), ssl=yes (TLS only), password=<pw>
+#     (client must PASS it), localmax=<n> (max connections per IP in this class),
+#     maxchans=<n>, pingfreq=<secs>, timeout=<secs> (registration), modes=<+modes>.
+# connectclass = trusted allow=10.0.0.* maxchans=200 pingfreq=120
+# connectclass = vpn     allow=*         localmax=2 maxchans=20 modes=+ix
+# connectclass = banned  allow=1.2.3.*   deny=yes
+
 # --- security groups: securitygroup = <name> [criteria...]
 #     criteria: public tls insecure account unregistered oper exclude-oper
 #     bot exclude-bot webirc exclude-webirc mask=<glob> exclude=<glob>

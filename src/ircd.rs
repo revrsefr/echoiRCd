@@ -11,7 +11,7 @@ use crate::config::Config;
 use crate::coremods::command_table;
 use crate::message;
 use crate::module::{Hook, ModResult, Module};
-use crate::numeric::{ERR_NEEDMOREPARAMS, ERR_NOTREGISTERED, ERR_UNKNOWNCOMMAND};
+use crate::numeric::{ERR_NEEDMOREPARAMS, ERR_NOTREGISTERED, ERR_PASSWDMISMATCH, ERR_UNKNOWNCOMMAND};
 use crate::server::Server;
 use crate::socketengine::OutSink;
 use crate::Uid;
@@ -409,6 +409,15 @@ impl Ircd {
             (u.ident.clone(), u.host.clone(), u.addr.ip().to_string())
         };
         if let Some(reason) = self.server.matched_xline(&ident, &host, &ip) {
+            self.server
+                .send(uid, format!("ERROR :Closing link: ({reason})"));
+            self.server.remove_user(uid, &reason);
+            return;
+        }
+        // connectclass: verify the class password and apply its on-connect modes
+        if let Some(reason) = crate::modules::connclass::on_register(&mut self.server, uid) {
+            self.server
+                .numeric(uid, ERR_PASSWDMISMATCH, &format!(":{reason}"));
             self.server
                 .send(uid, format!("ERROR :Closing link: ({reason})"));
             self.server.remove_user(uid, &reason);

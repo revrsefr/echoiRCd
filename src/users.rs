@@ -293,6 +293,8 @@ pub struct User {
     pub registered: bool,
     pub dns_pending: bool,     // holding registration for a reverse-DNS lookup
     pub waitpong: Option<String>, // conn_waitpong: cookie the client must PONG before registering
+    pub class: Option<String>, // connectclass: assigned connection class name
+    pub pass: Option<String>,  // password sent via PASS (for connectclass passwords)
     pub deferred: Vec<String>, // handshake lines held while dns_pending (replayed after)
     pub cap: bool,             // CAP negotiation in progress (holds registration)
     pub cap_302: bool,         // client sent CAP LS 302 (cap-notify aware)
