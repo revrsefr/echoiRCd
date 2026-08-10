@@ -30,6 +30,7 @@ pub struct UserFlags {
     pub snomask: bool,        // +s (oper: receive server notices)
     pub callerid: bool,       // +g (only accept PMs from users on the ACCEPT list)
     pub showwhois: bool,      // +W (get a notice when someone WHOISes you)
+    pub helpop: bool,         // +h (helpop: available for help; shown in WHOIS)
     pub deny_uncommon: bool,  // +c (only users sharing a channel may PM you)
     pub nick_locked: bool,    // NICKLOCK: services/oper holds this nick (no self-change)
     pub via_webirc: bool,     // connected through a WEBIRC gateway (securitygroups)
@@ -81,6 +82,9 @@ impl UserFlags {
         }
         if self.showwhois {
             s.push('W');
+        }
+        if self.helpop {
+            s.push('h');
         }
         if self.deny_uncommon {
             s.push('c');
@@ -465,7 +469,7 @@ impl Server {
             uid,
             RPL_MYINFO,
             &format!(
-                "{} echoircd-{VERSION} iowxsgBDIHrRzWc qaohvbeIklimnpstzCTcSNORMfjFLgGuBQAPJUdKXwD",
+                "{} echoircd-{VERSION} iowxsgBDIHrRzWhc qaohvbeIklimnpstzCTcSNORMfjFLgGuBQAPJUdKXwD",
                 self.name
             ),
         );

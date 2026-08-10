@@ -1064,6 +1064,7 @@ pub fn user_mode(c: char) -> Option<&'static (dyn UserMode + Sync)> {
 static USER_MODES: &[&(dyn UserMode + Sync)] = &[
     &INVISIBLE,
     &WALLOPS,
+    &HELPOP,
     &OPER,
     &CLOAK,
     &BOT,
@@ -1196,6 +1197,27 @@ impl UserMode for OperMode {
     }
 }
 
+/// `+h` — helpop: marks a user as available for help (shown in WHOIS). Only opers
+/// may set it on themselves; anyone may clear it.
+struct HelpMode;
+static HELPOP: HelpMode = HelpMode;
+impl UserMode for HelpMode {
+    fn letter(&self) -> char {
+        'h'
+    }
+    fn apply(&self, s: &mut Server, uid: Uid, adding: bool) -> bool {
+        if adding && !s.is_oper(uid) {
+            return false; // only opers may declare themselves a helpop
+        }
+        if let Some(u) = s.users.get_mut(&uid) {
+            u.flags.helpop = adding;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// `+x` — host cloaking. The cloak string is computed once at connect by
 /// [`crate::modules::cloak`]; this handler only toggles whether it's shown.
 /// `-x` (revealing the real host) is oper-only, so +x can't be flipped to dodge
@@ -1301,7 +1323,7 @@ mod tests {
 
     #[test]
     fn registry_covers_all_user_modes() {
-        for c in "iwoxBDIHrRzsgWc".chars() {
+        for c in "iwoxBDIHrRzsgWhc".chars() {
             assert!(user_mode(c).is_some(), "missing umode +{c}");
         }
         assert!(user_mode('Q').is_none());

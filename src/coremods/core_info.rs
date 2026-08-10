@@ -253,6 +253,10 @@ impl Command for Whois {
         if let Some(line) = crate::modules::profilelink::line(s, &account) {
             s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));
         }
+        // helpmode: +h marks a user available for help (visible to everyone)
+        if s.users.get(&tuid).map(|u| u.flags.helpop).unwrap_or(false) {
+            s.numeric(uid, RPL_WHOISSPECIAL, ":is available for help.");
+        }
         // customtitle: a claimed vanity title
         if let Some(line) = crate::modules::customtitle::line(s, tuid) {
             s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));

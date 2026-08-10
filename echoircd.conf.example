@@ -120,6 +120,8 @@ amu_target    = both
 # --- chanlog (m_chanlog): mirror the oper server-notice stream into a channel so
 #     staff can watch it in a normal window. Set the channel (create/keep it opped):
 # chanlog = #snotices
+# --- helpmode (m_helpmode): no config — adds oper-settable user mode +h (helpop),
+#     which shows "is available for help" in the user's WHOIS.
 # --- globops (m_globops): no config — adds the oper command /GLOBOPS <message>,
 #     broadcasting to all opers (like the server-notice stream).
 # --- autodrop (m_autodrop): silently drop a not-yet-registered client that sends
