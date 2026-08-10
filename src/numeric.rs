@@ -119,6 +119,7 @@ pub const RPL_LINKS: u16 = 364;
 pub const RPL_ENDOFLINKS: u16 = 365;
 
 pub const ERR_NOSUCHNICK: u16 = 401;
+pub const ERR_BADRELAYNICK: u16 = 573; // RELAYMSG: bad/taken spoofed nick
 pub const ERR_NOSUCHCHANNEL: u16 = 403;
 pub const ERR_CANNOTSENDTOCHAN: u16 = 404;
 pub const ERR_NORECIPIENT: u16 = 411;

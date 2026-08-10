@@ -47,6 +47,7 @@ pub mod profilelink;
 pub mod randquote;
 pub mod realnameban;
 pub mod recaptcha;
+pub mod relaymsg;
 pub mod reputation;
 pub mod restrictchans;
 pub mod restrictcommands;
@@ -131,5 +132,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(dccallow::commands())
         .chain(geoip::commands())
         .chain(globops::commands())
+        .chain(relaymsg::commands())
         .collect()
 }

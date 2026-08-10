@@ -121,6 +121,7 @@ pub const SUPPORTED_CAPS: &[&str] = &[
     "draft/json-log",
     "draft/extended-isupport",
     "reverse.im/filehost",
+    "draft/relaymsg",
     "cap-notify",
 ];
 
@@ -155,6 +156,7 @@ pub struct Caps {
     pub json_log: bool,         // draft/json-log — structured JSON tag on server notices
     pub ext_isupport: bool,     // draft/extended-isupport — ISUPPORT command + batched 005
     pub filehost: bool,         // reverse.im/filehost — knows the file-host extension
+    pub relaymsg: bool,         // draft/relaymsg — may use RELAYMSG (bridge relaying)
     pub cap_notify: bool,
 }
 
@@ -222,6 +224,7 @@ impl Caps {
             "draft/json-log" => self.json_log,
             "draft/extended-isupport" => self.ext_isupport,
             "reverse.im/filehost" => self.filehost,
+            "draft/relaymsg" => self.relaymsg,
             "cap-notify" => self.cap_notify,
             _ => false,
         }
@@ -256,6 +259,7 @@ impl Caps {
             "draft/json-log" => &mut self.json_log,
             "draft/extended-isupport" => &mut self.ext_isupport,
             "reverse.im/filehost" => &mut self.filehost,
+            "draft/relaymsg" => &mut self.relaymsg,
             "cap-notify" => &mut self.cap_notify,
             _ => return false,
         };
