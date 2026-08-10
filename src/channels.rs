@@ -939,6 +939,7 @@ impl Server {
                     Some(b'j') => crate::modules::channelban::matches(self, uid, &b.mask[2..]),
                     Some(b's') => crate::modules::serverban::matches(self, uid, &b.mask[2..]),
                     Some(b'G') => crate::modules::geoip::geoban_match(self, uid, &b.mask[2..]),
+                    Some(b'b') => crate::modules::extbanbanlist::matches(self, uid, &b.mask[2..]),
                     _ => false,
                 }
             } else {
@@ -1151,7 +1152,7 @@ pub fn normalize_ban_mask(m: &str) -> String {
         // These extbans carry a name / spec / channel / server, not a host mask,
         // so they must not be host-normalised: g: (security group), y: (reputation
         // score), r: (realname), j: (channel), s: (server name).
-        if matches!(b[0], b'g' | b'y' | b'r' | b'j' | b's' | b'G') {
+        if matches!(b[0], b'g' | b'y' | b'r' | b'j' | b's' | b'G' | b'b') {
             return m.to_string();
         }
         return format!("{}:{}", &m[..1], normalize_mask(&m[2..]));

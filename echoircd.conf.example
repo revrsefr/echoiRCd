@@ -120,6 +120,9 @@ amu_target    = both
 # --- chanlog (m_chanlog): mirror the oper server-notice stream into a channel so
 #     staff can watch it in a normal window. Set the channel (create/keep it opped):
 # chanlog = #snotices
+# --- extbanbanlist (m_extbanbanlist): no config — adds the matching extban
+#     `b:<#channel>`, so `+b b:#staff` catches everyone banned in #staff (shares a
+#     ban list between channels).
 # --- relaymsg (m_relaymsg / draft/relaymsg): a member whose client negotiated the
 #     capability can /RELAYMSG <#chan> <nick> <text> to speak under a spoofed relay
 #     nick (for bridges). The nick must contain a separator and not collide.

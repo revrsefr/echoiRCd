@@ -24,6 +24,7 @@ pub mod dccallow;
 pub mod denychans;
 pub mod disable;
 pub mod dnsbl;
+pub mod extbanbanlist;
 pub mod extended_isupport;
 pub mod extjwt;
 pub mod filehost;
