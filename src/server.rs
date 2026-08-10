@@ -294,6 +294,7 @@ impl Server {
         sock: Option<TcpStream>,
         secure: bool,
         certfp: Option<String>,
+        local_port: u16,
     ) {
         let uuid = self.next_uuid();
         self.uuid_local.insert(uuid.clone(), uid);
@@ -314,8 +315,10 @@ impl Server {
                 account: None,
                 signon: now(),
                 addr,
+                port: local_port,
                 registered: false,
                 dns_pending: false,
+                ident_pending: false,
                 waitpong: None,
                 class: None,
                 pass: None,
@@ -358,13 +361,24 @@ impl Server {
             self.remove_user(uid, &reason);
             return;
         }
+        // push any per-class queue caps (recvq/hardsendq/softsendq) to the reactor
+        let caps = (
+            crate::modules::connclass::recvq(self, uid),
+            crate::modules::connclass::hardsendq(self, uid),
+            crate::modules::connclass::softsendq(self, uid),
+        );
+        if caps.0.is_some() || caps.1.is_some() || caps.2.is_some() {
+            if let Some(u) = self.users.get(&uid) {
+                u.out.set_limits(caps.0, caps.1, caps.2);
+            }
+        }
 
-        // Pre-registration connection notices. The ident-113 notices are cosmetic
-        // (ident is archaic and firewalled); the hostname lookup is real (see
-        // `resolver`) and its result arrives later as an Event.
-        self.notice_star(uid, "Checking Ident");
-        self.notice_star(uid, "No Ident response");
-        let do_rdns = self.resolve_hosts;
+        // ident: optionally ask the client's host who owns the connection (only when
+        // the class or global config wants it — see modules::ident). Holds
+        // registration via ident_pending until the reply arrives.
+        crate::modules::ident::dispatch(self, uid);
+        // a connection class may opt out of reverse-DNS (resolvehostnames=no)
+        let do_rdns = self.resolve_hosts && crate::modules::connclass::resolve_hostnames(self, uid);
         let zones = self.dnsbl_zones.clone(); // DNSBL runs if any zones are configured
         if do_rdns {
             self.notice_star(uid, "Looking up your hostname...");
@@ -1057,8 +1071,10 @@ mod tests {
                 account: None,
                 signon: 0,
                 addr: "127.0.0.1:1".parse().unwrap(),
+                port: 6667,
                 registered: true,
                 dns_pending: false,
+                ident_pending: false,
                 waitpong: None,
                 class: None,
                 pass: None,

@@ -853,7 +853,8 @@ impl Command for Connect {
         }
         let addr = format!("{}:{}", b.ip, b.port);
         let (tx, counter) = (s.event_tx.clone(), s.conn_counter.clone());
-        std::thread::spawn(move || crate::socketengine::connect_link(&addr, tx, counter));
+        let max_line = s.conf_num("max_line", crate::socketengine::DEFAULT_MAX_LINE);
+        std::thread::spawn(move || crate::socketengine::connect_link(&addr, tx, counter, max_line));
         let by = oper_nick(s, uid);
         s.snotice(&format!(
             "{by} used CONNECT to {} ({}:{})",

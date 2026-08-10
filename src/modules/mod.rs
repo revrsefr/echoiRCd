@@ -37,6 +37,7 @@ pub mod hashident;
 pub mod hidelist;
 pub mod hidemode;
 pub mod hidewhois;
+pub mod ident;
 pub mod irccloudtags;
 pub mod jsonlog;
 pub mod jwt;

@@ -57,7 +57,10 @@ pub fn handle(s: &mut Server, action: &str, params: &str) -> Result<String, RpcE
             }
             let addr = format!("{}:{}", b.ip, b.port);
             let (tx, counter) = (s.event_tx.clone(), s.conn_counter.clone());
-            std::thread::spawn(move || crate::socketengine::connect_link(&addr, tx, counter));
+            let max_line = s.conf_num("max_line", crate::socketengine::DEFAULT_MAX_LINE);
+            std::thread::spawn(move || {
+                crate::socketengine::connect_link(&addr, tx, counter, max_line)
+            });
             s.snotice(&format!("RPC initiated a link to {}", b.name));
             Ok(obj(&[("result", "true".into())]))
         }

@@ -26,19 +26,28 @@ use crate::ircd::Event;
 use crate::tls::TlsBackend;
 use crate::Uid;
 
-/// Longest single line we'll buffer before dropping it (crude flood guard).
-const MAX_LINE: usize = 16 * 1024;
-/// Most bytes we'll queue to a slow client before dropping them (backpressure).
-const MAX_WBUF: usize = 1 << 20; // 1 MiB
+/// Default recvq: longest single line we'll buffer before dropping it. Overridable
+/// globally (`max_line`) and per connection class (`recvq`).
+pub const DEFAULT_MAX_LINE: usize = 16 * 1024;
+/// Default hardsendq: most bytes we'll queue to a slow client before dropping them
+/// and closing. Overridable globally (`max_sendq`) and per class (`hardsendq`).
+pub const DEFAULT_MAX_SENDQ: usize = 1 << 20; // 1 MiB
 /// How long a TLS thread blocks on a read before draining its write queue.
 const TLS_POLL: Duration = Duration::from_millis(100);
 
 /// A queued output action the core hands the reactor: a line to write to a
-/// connection, or a request to flush-then-close it (sent when the core drops the
-/// [`OutSink`], e.g. on quit).
+/// connection, a request to flush-then-close it (sent when the core drops the
+/// [`OutSink`], e.g. on quit), or a per-connection queue-limit override (from the
+/// assigned connection class).
 pub enum Out {
     Line(usize, String),
     Close(usize),
+    Limits {
+        token: usize,
+        recvq: Option<usize>,
+        hardsendq: Option<usize>,
+        softsendq: Option<usize>,
+    },
 }
 
 /// The core's handle to one connection's output. Thread-model connections (TLS,
@@ -68,6 +77,30 @@ impl OutSink {
             }
         }
     }
+
+    /// Override this connection's queue limits (from its connection class). Only the
+    /// reactor (plaintext client) model honours these; thread-model connections (TLS,
+    /// links) use the global defaults.
+    pub fn set_limits(
+        &self,
+        recvq: Option<usize>,
+        hardsendq: Option<usize>,
+        softsendq: Option<usize>,
+    ) {
+        if let OutSink::Reactor { token, tx, waker } = self {
+            if tx
+                .send(Out::Limits {
+                    token: *token,
+                    recvq,
+                    hardsendq,
+                    softsendq,
+                })
+                .is_ok()
+            {
+                let _ = waker.wake();
+            }
+        }
+    }
 }
 
 impl Drop for OutSink {
@@ -94,8 +127,13 @@ struct Conn {
     rbuf: Vec<u8>, // bytes read, awaiting a newline
     wbuf: Vec<u8>, // bytes queued to write
     wpos: usize,   // how far into wbuf we've written
+    want_read: bool,
     want_write: bool,
-    closing: bool, // flush wbuf, then close
+    closing: bool,     // flush wbuf, then close
+    paused: bool,      // reads paused (softsendq backpressure); ⟺ pending > softsendq
+    recvq: usize,      // max buffered unterminated-line bytes before dropping
+    hardsendq: usize,  // max queued output bytes before dropping + closing
+    softsendq: usize,  // queued output above this pauses reads until it drains
 }
 
 impl Conn {
@@ -104,9 +142,35 @@ impl Conn {
     }
 }
 
+/// Reregister `t`'s epoll interest to match its current read/write intent, but only
+/// if it changed. A paused connection drops READABLE (so the client stops being
+/// serviced) while keeping WRITABLE to drain the backlog that paused it.
+fn set_interest(poll: &mut Poll, c: &mut Conn, t: usize) {
+    let want_read = !c.paused;
+    let want_write = !c.wbuf.is_empty() || c.paused;
+    if want_read == c.want_read && want_write == c.want_write {
+        return;
+    }
+    c.want_read = want_read;
+    c.want_write = want_write;
+    let interest = match (want_read, want_write) {
+        (true, true) => Interest::READABLE | Interest::WRITABLE,
+        (false, true) => Interest::WRITABLE,
+        // never both-false (paused ⟹ backlog ⟹ want_write); READABLE is a safe floor
+        _ => Interest::READABLE,
+    };
+    let _ = poll.registry().reregister(&mut c.stream, Token(t), interest);
+}
+
 /// Run the client plaintext reactor on this thread. `listener` is an already-bound
 /// mio listener (bound in `main` so a bind failure is fatal and fails fast).
-pub fn run_reactor(mut listener: MioListener, core: Sender<Event>, counter: Arc<AtomicU64>) {
+pub fn run_reactor(
+    mut listener: MioListener,
+    core: Sender<Event>,
+    counter: Arc<AtomicU64>,
+    max_line: usize,
+    max_sendq: usize,
+) {
     let mut poll = match Poll::new() {
         Ok(p) => p,
         Err(e) => {
@@ -158,6 +222,7 @@ pub fn run_reactor(mut listener: MioListener, core: Sender<Event>, counter: Arc<
                             let addr = stream
                                 .peer_addr()
                                 .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap());
+                            let local_port = stream.local_addr().map(|a| a.port()).unwrap_or(0);
                             conns.insert(
                                 token,
                                 Conn {
@@ -166,8 +231,13 @@ pub fn run_reactor(mut listener: MioListener, core: Sender<Event>, counter: Arc<
                                     rbuf: Vec::new(),
                                     wbuf: Vec::new(),
                                     wpos: 0,
+                                    want_read: true,
                                     want_write: false,
                                     closing: false,
+                                    paused: false,
+                                    recvq: max_line,
+                                    hardsendq: max_sendq,
+                                    softsendq: max_sendq,
                                 },
                             );
                             let out = OutSink::Reactor {
@@ -183,6 +253,7 @@ pub fn run_reactor(mut listener: MioListener, core: Sender<Event>, counter: Arc<
                                     sock: None,
                                     secure: false,
                                     certfp: None,
+                                    local_port,
                                     link: false,
                                     outbound: false,
                                     websocket: false,
@@ -203,8 +274,8 @@ pub fn run_reactor(mut listener: MioListener, core: Sender<Event>, counter: Arc<
                         match msg {
                             Out::Line(t, line) => {
                                 if let Some(c) = conns.get_mut(&t) {
-                                    if c.pending() + line.len() + 2 > MAX_WBUF {
-                                        // slow client: drop queued data and close
+                                    if c.pending() + line.len() + 2 > c.hardsendq {
+                                        // hardsendq: drop queued data and close
                                         c.wbuf.clear();
                                         c.wpos = 0;
                                         c.closing = true;
@@ -215,6 +286,11 @@ pub fn run_reactor(mut listener: MioListener, core: Sender<Event>, counter: Arc<
                                         }
                                         c.wbuf.extend_from_slice(line.as_bytes());
                                         c.wbuf.extend_from_slice(b"\r\n");
+                                        // softsendq: over the soft cap, stop reading
+                                        // their commands until the backlog drains
+                                        if c.pending() > c.softsendq {
+                                            c.paused = true;
+                                        }
                                     }
                                     touched.insert(t);
                                 }
@@ -223,6 +299,24 @@ pub fn run_reactor(mut listener: MioListener, core: Sender<Event>, counter: Arc<
                                 if let Some(c) = conns.get_mut(&t) {
                                     c.closing = true;
                                     touched.insert(t);
+                                }
+                            }
+                            Out::Limits {
+                                token,
+                                recvq,
+                                hardsendq,
+                                softsendq,
+                            } => {
+                                if let Some(c) = conns.get_mut(&token) {
+                                    if let Some(v) = recvq {
+                                        c.recvq = v;
+                                    }
+                                    if let Some(v) = hardsendq {
+                                        c.hardsendq = v;
+                                    }
+                                    if let Some(v) = softsendq {
+                                        c.softsendq = v;
+                                    }
                                 }
                             }
                         }
@@ -267,7 +361,7 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
                             lines.push((c.uid, l.to_string()));
                         }
                     }
-                    if c.rbuf.len() > MAX_LINE {
+                    if c.rbuf.len() > c.recvq {
                         c.rbuf.clear(); // overlong line with no newline: drop it
                     }
                 }
@@ -290,10 +384,13 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
     }
 }
 
-/// Write as much of `t`'s queued output as the socket accepts, adjust WRITABLE
-/// interest, and close once a `closing` connection's buffer is drained.
+/// Write as much of `t`'s queued output as the socket accepts, adjust epoll
+/// interest, and close once a `closing` connection's buffer is drained. If the
+/// backlog dropped back under softsendq, un-pause reads and catch up (edge-triggered:
+/// data that arrived while paused won't re-fire, so read it here).
 fn flush_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: &Sender<Event>) {
     let mut close = false;
+    let mut unpaused = false;
     if let Some(c) = conns.get_mut(&t) {
         while c.wpos < c.wbuf.len() {
             match c.stream.write(&c.wbuf[c.wpos..]) {
@@ -311,25 +408,19 @@ fn flush_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core:
             c.wbuf.clear();
             c.wpos = 0;
         }
-        // re-arm WRITABLE only while there's a backlog (edge-triggered)
-        let want = !c.wbuf.is_empty();
-        if want != c.want_write {
-            c.want_write = want;
-            let interest = if want {
-                Interest::READABLE | Interest::WRITABLE
-            } else {
-                Interest::READABLE
-            };
-            let _ = poll
-                .registry()
-                .reregister(&mut c.stream, Token(t), interest);
+        if c.paused && c.pending() <= c.softsendq {
+            c.paused = false;
+            unpaused = true;
         }
+        set_interest(poll, c, t);
         if c.closing && c.wbuf.is_empty() {
             close = true;
         }
     }
     if close {
         close_conn(poll, conns, t, core);
+    } else if unpaused {
+        read_conn(poll, conns, t, core); // catch reads missed while paused
     }
 }
 
@@ -354,6 +445,7 @@ pub fn accept_loop(
     tls: Option<Arc<dyn TlsBackend>>,
     counter: Arc<AtomicU64>,
     link: bool,
+    max_line: usize,
 ) {
     for conn in listener.incoming() {
         let Ok(stream) = conn else { continue };
@@ -361,6 +453,7 @@ pub fn accept_loop(
             continue;
         };
         let _ = stream.set_nodelay(true);
+        let local_port = stream.local_addr().map(|a| a.port()).unwrap_or(0);
         let uid = counter.fetch_add(1, Ordering::Relaxed);
 
         match &tls {
@@ -381,6 +474,7 @@ pub fn accept_loop(
                         sock: Some(shutdown),
                         secure: false,
                         certfp: None,
+                        local_port,
                         link,
                         outbound: false,
                         websocket: false,
@@ -390,12 +484,12 @@ pub fn accept_loop(
                     break; // core gone
                 }
                 let core_tx = core.clone();
-                thread::spawn(move || reader_loop(reader, uid, core_tx));
+                thread::spawn(move || reader_loop(reader, uid, core_tx, max_line));
             }
             Some(backend) => {
                 let backend = backend.clone();
                 let core_tx = core.clone();
-                thread::spawn(move || tls_conn(backend, stream, uid, addr, core_tx, link));
+                thread::spawn(move || tls_conn(backend, stream, uid, addr, core_tx, link, max_line));
             }
         }
     }
@@ -403,7 +497,7 @@ pub fn accept_loop(
 
 /// Dial an outbound server link and wire it to the core (an `outbound` link that
 /// introduces itself first). Used for auto-connecting to a configured uplink.
-pub fn connect_link(addr: &str, core: Sender<Event>, counter: Arc<AtomicU64>) {
+pub fn connect_link(addr: &str, core: Sender<Event>, counter: Arc<AtomicU64>, max_line: usize) {
     let stream = match TcpStream::connect(addr) {
         Ok(s) => s,
         Err(e) => {
@@ -430,6 +524,7 @@ pub fn connect_link(addr: &str, core: Sender<Event>, counter: Arc<AtomicU64>) {
             sock: Some(shutdown),
             secure: false,
             certfp: None,
+            local_port: 0,
             link: true,
             outbound: true,
             websocket: false,
@@ -438,12 +533,12 @@ pub fn connect_link(addr: &str, core: Sender<Event>, counter: Arc<AtomicU64>) {
     {
         return;
     }
-    thread::spawn(move || reader_loop(reader, uid, core));
+    thread::spawn(move || reader_loop(reader, uid, core, max_line));
 }
 
 // --- plaintext link: two blocking threads -----------------------------------
 
-fn reader_loop(stream: TcpStream, uid: Uid, core: Sender<Event>) {
+fn reader_loop(stream: TcpStream, uid: Uid, core: Sender<Event>, max_line: usize) {
     let mut buf = BufReader::new(stream);
     let mut line = String::new();
     loop {
@@ -451,7 +546,7 @@ fn reader_loop(stream: TcpStream, uid: Uid, core: Sender<Event>) {
         match buf.read_line(&mut line) {
             Ok(0) => break, // EOF
             Ok(_) => {
-                if line.len() > MAX_LINE {
+                if line.len() > max_line {
                     continue;
                 }
                 let l = line.trim_end_matches(['\r', '\n']);
@@ -493,11 +588,13 @@ fn tls_conn(
     addr: SocketAddr,
     core: Sender<Event>,
     link: bool,
+    max_line: usize,
 ) {
     // Keep a raw handle so the core can force the socket shut later.
     let Ok(shutdown) = stream.try_clone() else {
         return;
     };
+    let local_port = stream.local_addr().map(|a| a.port()).unwrap_or(0);
     let mut conn = match backend.accept(stream) {
         Ok(c) => c,
         Err(_) => {
@@ -515,6 +612,7 @@ fn tls_conn(
             sock: Some(shutdown),
             secure: true,
             certfp,
+            local_port,
             link,
             outbound: false,
             websocket: false,
@@ -548,7 +646,7 @@ fn tls_conn(
                         break 'io;
                     }
                 }
-                if acc.len() > MAX_LINE {
+                if acc.len() > max_line {
                     acc.clear(); // overlong line with no newline: drop it
                 }
             }

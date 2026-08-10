@@ -1,7 +1,10 @@
 //! Per-user message-rate limit (`flood_messages` within `flood_seconds`); opers
-//! exempt. Recent message times live in the user's typed
+//! exempt. A connection class can override the limit (`penaltythreshold` /
+//! `commandrate`) and, with `fakelag=no`, have flooders disconnected instead of
+//! rate-limited. Recent message times live in the user's typed
 //! [`crate::extensible::Extensible`] slot, so the state is freed when the user quits.
 
+use crate::modules::connclass;
 use crate::module::{ModResult, Module};
 use crate::server::{now, Server};
 use crate::Uid;
@@ -32,8 +35,11 @@ impl Module for Flood {
         _text: &str,
     ) -> ModResult {
         let now = now();
-        let max = srv.conf_num("flood_messages", FLOOD_MAX);
-        let window = srv.conf_num("flood_seconds", FLOOD_WINDOW);
+        // a connection class may raise the limit and/or opt out of fake lag
+        let (cls_max, cls_window, fakelag) =
+            connclass::flood_over(srv, uid).unwrap_or((None, None, true));
+        let max = cls_max.unwrap_or_else(|| srv.conf_num("flood_messages", FLOOD_MAX));
+        let window = cls_window.unwrap_or_else(|| srv.conf_num("flood_seconds", FLOOD_WINDOW));
         let (over, warn) = {
             let Some(u) = srv.users.get_mut(&uid) else {
                 return ModResult::Passthru;
@@ -50,6 +56,12 @@ impl Module for Flood {
             (over, warn)
         };
         if over {
+            if !fakelag {
+                // fakelag disabled: disconnect the flooder instead of throttling
+                srv.send(uid, "ERROR :Closing link: (Excess flood)".to_string());
+                srv.mark_quit(uid, "Excess flood".to_string());
+                return ModResult::Deny;
+            }
             if warn {
                 let nick = srv
                     .users

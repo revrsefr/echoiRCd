@@ -55,6 +55,7 @@ pub struct RemoteUser {
     pub host: String,
     pub realname: String,
     pub account: Option<String>,
+    pub ip: String,  // client IP (for network-wide clone limits); "" if a peer omitted it
     pub sid: String, // origin server id
     pub via: Uid,    // local link uid it is reached through
 }
@@ -313,13 +314,14 @@ impl Server {
     fn uid_line(&self, u: &User) -> String {
         let acct = u.account.clone().unwrap_or_else(|| "*".to_string());
         format!(
-            ":{} UID {} {} {} {} {} :{}",
+            ":{} UID {} {} {} {} {} {} :{}",
             self.sid,
             u.uuid,
             u.nick,
             u.ident,
             u.host_display(),
             acct,
+            u.addr.ip(),
             u.realname
         )
     }
@@ -674,10 +676,22 @@ impl Server {
     // --- inbound S2S records --------------------------------------------------
 
     fn link_uid_recv(&mut self, via: Uid, msg: &Message) {
-        // :<sid> UID <uuid> <nick> <ident> <host> <account> :<realname>
+        // :<sid> UID <uuid> <nick> <ident> <host> <account> <ip> :<realname>
+        // The <ip> field is newer; tolerate the older 6-param form (no IP).
         if msg.params.len() < 6 {
             return;
         }
+        let has_ip = msg.params.len() >= 7;
+        let ip = if has_ip {
+            msg.params[5].clone()
+        } else {
+            String::new()
+        };
+        let realname = if has_ip {
+            msg.params[6].clone()
+        } else {
+            msg.params[5].clone()
+        };
         let sid = msg.source.clone().unwrap_or_default();
         let uuid = msg.params[0].clone();
         let nick = msg.params[1].clone();
@@ -705,21 +719,36 @@ impl Server {
                 nick,
                 ident: msg.params[2].clone(),
                 host: msg.params[3].clone(),
-                realname: msg.params[5].clone(),
+                realname,
                 account,
+                ip: ip.clone(),
                 sid: sid.clone(),
                 via,
             },
         );
-        let line = format!(
-            ":{sid} UID {} {} {} {} {} :{}",
-            msg.params[0],
-            msg.params[1],
-            msg.params[2],
-            msg.params[3],
-            msg.params[4],
-            msg.params[5]
-        );
+        // re-propagate to our other peers, carrying the IP when we have one
+        let line = if has_ip {
+            format!(
+                ":{sid} UID {} {} {} {} {} {} :{}",
+                msg.params[0],
+                msg.params[1],
+                msg.params[2],
+                msg.params[3],
+                msg.params[4],
+                ip,
+                msg.params[6]
+            )
+        } else {
+            format!(
+                ":{sid} UID {} {} {} {} {} :{}",
+                msg.params[0],
+                msg.params[1],
+                msg.params[2],
+                msg.params[3],
+                msg.params[4],
+                msg.params[5]
+            )
+        };
         self.propagate(&line, Some(via));
     }
 

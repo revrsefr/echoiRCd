@@ -241,6 +241,7 @@ fn ws_session<S: WsStream>(
         .unwrap_or(addr);
     let secure = tls_secure || hs.secure;
     let send_opcode = if hs.binary { OP_BIN } else { OP_TEXT };
+    let local_port = shutdown.local_addr().map(|a| a.port()).unwrap_or(0);
 
     let (out_tx, out_rx) = std::sync::mpsc::channel::<String>();
     if core
@@ -251,6 +252,7 @@ fn ws_session<S: WsStream>(
             sock: Some(shutdown),
             secure,
             certfp: None,
+            local_port,
             link: false,
             outbound: false,
             websocket: true,

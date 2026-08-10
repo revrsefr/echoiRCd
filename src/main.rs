@@ -44,6 +44,17 @@ fn main() {
         cfg.servername
     );
 
+    // global queue limits (per-class overrides layer on top of these in the reactor)
+    let raw_num = |k: &str, d: usize| {
+        cfg.raw
+            .get(k)
+            .and_then(|v| v.first())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(d)
+    };
+    let max_line = raw_num("max_line", socketengine::DEFAULT_MAX_LINE);
+    let max_sendq = raw_num("max_sendq", socketengine::DEFAULT_MAX_SENDQ);
+
     // one uid counter shared by every listener (and by CONNECT) so ids stay unique
     let counter = Arc::new(AtomicU64::new(1));
 
@@ -79,6 +90,7 @@ fn main() {
                             Some(backend),
                             tls_counter,
                             false,
+                            max_line,
                         )
                     });
                 }
@@ -95,7 +107,9 @@ fn main() {
                 eprintln!("echoircd S2S link listener on {bind_srv} (sid {})", cfg.sid);
                 let s_tx = tx.clone();
                 let s_counter = counter.clone();
-                thread::spawn(move || socketengine::accept_loop(sl, s_tx, None, s_counter, true));
+                thread::spawn(move || {
+                    socketengine::accept_loop(sl, s_tx, None, s_counter, true, max_line)
+                });
             }
             Err(e) => eprintln!("echoircd: cannot bind server port {bind_srv}: {e}"),
         }
@@ -114,11 +128,13 @@ fn main() {
         let u_counter = counter.clone();
         thread::spawn(move || {
             thread::sleep(std::time::Duration::from_secs(2));
-            socketengine::connect_link(&addr, u_tx, u_counter);
+            socketengine::connect_link(&addr, u_tx, u_counter, max_line);
         });
     }
 
     // client plaintext connections: one mio reactor thread drives them all
-    thread::spawn(move || socketengine::run_reactor(client_listener, tx, counter));
+    thread::spawn(move || {
+        socketengine::run_reactor(client_listener, tx, counter, max_line, max_sendq)
+    });
     let _ = core.join();
 }

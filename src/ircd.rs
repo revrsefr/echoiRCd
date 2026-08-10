@@ -25,6 +25,7 @@ pub enum Event {
         sock: Option<TcpStream>,
         secure: bool,
         certfp: Option<String>, // TLS client-cert fingerprint (clients only)
+        local_port: u16,        // the listener port the client connected to
         link: bool,             // a server-to-server connection, not a client
         outbound: bool,         // (link) we dialed them
         websocket: bool,        // arrived over the WebSocket transport
@@ -42,6 +43,12 @@ pub enum Event {
         uid: Uid,
         host: Option<String>,
         dnsbl: crate::modules::dnsbl::Outcome,
+    },
+    /// A client's ident (RFC 1413) lookup finished: the confirmed username, or
+    /// `None` if the host gave no valid response (see `crate::modules::ident`).
+    Ident {
+        uid: Uid,
+        ident: Option<String>,
     },
     /// A module's async HTTP request finished. `tag` is `"<module>:<detail>"`
     /// so the core can route the reply back to the module that issued it (e.g.
@@ -114,6 +121,7 @@ impl Ircd {
                     sock,
                     secure,
                     certfp,
+                    local_port,
                     link,
                     outbound,
                     websocket,
@@ -121,7 +129,8 @@ impl Ircd {
                     if link {
                         self.server.add_link(uid, addr, out, sock, outbound);
                     } else {
-                        self.server.add_conn(uid, addr, out, sock, secure, certfp);
+                        self.server
+                            .add_conn(uid, addr, out, sock, secure, certfp, local_port);
                         if websocket {
                             if let Some(u) = self.server.users.get_mut(&uid) {
                                 u.flags.via_websocket = true;
@@ -156,6 +165,10 @@ impl Ircd {
                         self.on_line(uid, &line);
                     }
                     self.try_register(uid); // DNS may have been the last thing we waited on
+                }
+                Event::Ident { uid, ident } => {
+                    crate::modules::ident::on_result(&mut self.server, uid, ident);
+                    self.try_register(uid); // ident may have been the last hold
                 }
                 Event::HttpResult {
                     uid,
@@ -384,6 +397,7 @@ impl Ircd {
                     && !u.ident.is_empty()
                     && !u.cap
                     && !u.dns_pending
+                    && !u.ident_pending
                     && u.waitpong.is_none()
             })
             .unwrap_or(false);
@@ -409,6 +423,13 @@ impl Ircd {
             (u.ident.clone(), u.host.clone(), u.addr.ip().to_string())
         };
         if let Some(reason) = self.server.matched_xline(&ident, &host, &ip) {
+            self.server
+                .send(uid, format!("ERROR :Closing link: ({reason})"));
+            self.server.remove_user(uid, &reason);
+            return;
+        }
+        // ident: apply a confirmed username (dropping `~`) and enforce requireident
+        if let Some(reason) = crate::modules::ident::finalize(&mut self.server, uid) {
             self.server
                 .send(uid, format!("ERROR :Closing link: ({reason})"));
             self.server.remove_user(uid, &reason);

@@ -1,98 +1,334 @@
 //! connclass — connection classes. Each `connectclass` config line matches
-//! connecting clients by IP glob (and optionally TLS), then applies per-class
-//! policy: reject (deny), a per-IP connection cap, a password, usermodes on
-//! connect, and overrides for max channels / ping frequency / registration
-//! timeout. Config, one line per class (first token = name, rest key=value):
+//! connecting clients by IP/host mask (CIDR or glob) and optional TLS/port, then
+//! applies per-class policy: reject (deny), per-IP and per-class connection caps, a
+//! password, on-connect usermodes, queue/flood limits, and overrides for max
+//! channels / ping frequency / registration timeout. One line per class — the first
+//! token is the name, the rest are `key=value`:
 //!
 //! ```text
-//! connectclass = <name> allow=<ip glob> [deny=yes] [ssl=yes] [password=<pw>]
-//!   [localmax=<n>] [maxchans=<n>] [pingfreq=<secs>] [timeout=<secs>] [modes=<+modes>]
+//! connectclass = <name> allow=<mask[,mask]> [parent=<name>] [deny=yes]
+//!   [requiressl=yes|trusted] [password=<pw>] [hash=<algo>] [port=<p[,p]>]
+//!   [localmax=<n>] [globalmax=<n>] [limit=<n>] [maxchans=<n>] [pingfreq=<secs>]
+//!   [timeout=<secs>] [modes=<+modes>] [recvq=<bytes>] [hardsendq=<bytes>]
+//!   [softsendq=<bytes>] [fakelag=yes|no] [penaltythreshold=<n>] [commandrate=<secs>]
+//!   [useident=yes] [requireident=yes] [resolvehostnames=no] [maxconnwarn=yes]
 //! ```
 //!
-//! The first class whose `allow` glob (and `ssl` if given) matches a client is
-//! assigned at connect. With no class, the global limits apply. Matching is against
-//! the IP (the host isn't resolved yet at connect).
+//! The first class whose masks (and TLS/port conditions) match a client is assigned.
+//! Masks are tested against the IP at connect and re-tested against the resolved
+//! host at registration, so host masks work once rDNS returns. With no class the
+//! global limits apply; set `connectclass_required = yes` to refuse clients that
+//! match no allow class.
+
+use std::net::IpAddr;
 
 use crate::channels::glob_match;
 use crate::server::Server;
 use crate::Uid;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ConnClass {
     pub name: String,
-    pub allow: String,
-    pub deny: bool,
-    pub ssl: bool,
-    pub password: Option<String>,
-    pub localmax: Option<usize>,
+    pub allow: Vec<String>,          // IP/host masks (glob or CIDR); any match = match
+    pub deny: bool,                  // deny class: matching clients are refused
+    pub ssl: bool,                   // require TLS
+    pub ssl_trusted: bool,           // require a TLS client certificate (requiressl=trusted)
+    pub password: Option<String>,    // PASS credential (plain or hashed; verify auto-detects)
+    pub ports: Vec<u16>,             // restrict to these listener ports (empty = any)
+    pub localmax: Option<usize>,     // max local connections per IP in this class
+    pub globalmax: Option<usize>,    // max network-wide connections per IP
+    pub limit: Option<usize>,        // max total local users in this class
     pub maxchans: Option<usize>,
     pub pingfreq: Option<u64>,
-    pub timeout: Option<u64>,
-    pub modes: Option<String>,
+    pub timeout: Option<u64>,        // registration timeout
+    pub modes: Option<String>,       // usermodes set on connect
+    pub recvq: Option<usize>,        // per-conn receive-queue byte cap
+    pub hardsendq: Option<usize>,    // send-queue byte cap → disconnect
+    pub softsendq: Option<usize>,    // send-queue byte cap → pause reading (backpressure)
+    pub penaltythreshold: Option<usize>, // flood message cap override (see modules::flood)
+    pub commandrate: Option<u64>,    // flood window override, seconds
+    pub fakelag: bool,               // apply flood limiting (default); false = kill on flood
+    pub useident: bool,              // do an ident (RFC1413) lookup for this class
+    pub requireident: bool,          // refuse if the ident lookup fails
+    pub resolvehostnames: bool,      // resolve rDNS for this class (default yes)
+    pub maxconnwarn: bool,           // snotice opers when a limit refuses a client
 }
 
-fn parse(line: &str) -> Option<ConnClass> {
-    let mut it = line.split_whitespace();
+/// Split a `key=value` value on commas into non-empty pieces.
+fn list(v: &str) -> impl Iterator<Item = &str> {
+    v.split(',').map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// Apply one `key=value` token to `c`.
+fn apply(c: &mut ConnClass, k: &str, v: &str) {
+    match k {
+        "allow" => c.allow.extend(list(v).map(str::to_string)),
+        "deny" => c.deny = v.eq_ignore_ascii_case("yes"),
+        "ssl" | "requiressl" => {
+            c.ssl = !v.eq_ignore_ascii_case("no") && !v.is_empty();
+            c.ssl_trusted = v.eq_ignore_ascii_case("trusted");
+        }
+        "password" | "pass" => c.password = Some(v.to_string()),
+        "hash" => {
+            // name the algorithm of a hashed password: fold it into the stored
+            // credential (`<algo>:<digest>`) that verify() auto-detects, unless the
+            // password value already carries its own prefix.
+            if let Some(pw) = c.password.take() {
+                c.password = Some(if pw.contains(':') {
+                    pw
+                } else {
+                    format!("{v}:{pw}")
+                });
+            }
+        }
+        "port" => c.ports.extend(list(v).filter_map(|p| p.parse::<u16>().ok())),
+        "localmax" => c.localmax = v.parse().ok(),
+        "globalmax" => c.globalmax = v.parse().ok(),
+        "limit" => c.limit = v.parse().ok(),
+        "maxchans" => c.maxchans = v.parse().ok(),
+        "pingfreq" => c.pingfreq = v.parse().ok(),
+        "timeout" => c.timeout = v.parse().ok(),
+        "modes" => c.modes = Some(v.to_string()),
+        "recvq" => c.recvq = v.parse().ok(),
+        "hardsendq" => c.hardsendq = v.parse().ok(),
+        "softsendq" => c.softsendq = v.parse().ok(),
+        "penaltythreshold" => c.penaltythreshold = v.parse().ok(),
+        "commandrate" => c.commandrate = v.parse().ok(),
+        "fakelag" => c.fakelag = !v.eq_ignore_ascii_case("no"),
+        "useident" => c.useident = v.eq_ignore_ascii_case("yes"),
+        "requireident" => c.requireident = v.eq_ignore_ascii_case("yes"),
+        "resolvehostnames" => c.resolvehostnames = !v.eq_ignore_ascii_case("no"),
+        "maxconnwarn" => c.maxconnwarn = v.eq_ignore_ascii_case("yes"),
+        _ => {}
+    }
+}
+
+/// The raw `connectclass` line whose first token is `name`.
+fn raw_line(s: &Server, name: &str) -> Option<String> {
+    s.conf_all("connectclass")
+        .iter()
+        .find(|l| l.split_whitespace().next() == Some(name))
+        .map(|l| l.to_string())
+}
+
+/// The effective token list for `name` with `parent=` inheritance applied: a
+/// parent's tokens come first (so the child overrides), minus the block-defining
+/// `allow`/`deny`/`parent` keys, which stay class-local. Bounded against cycles.
+fn tokens_for(s: &Server, name: &str, depth: u8) -> Option<Vec<String>> {
+    let line = raw_line(s, name)?;
+    let own: Vec<String> = line.split_whitespace().skip(1).map(str::to_string).collect();
+    let parent = own
+        .iter()
+        .find_map(|t| t.strip_prefix("parent="))
+        .map(str::to_string);
+    let mut merged = Vec::new();
+    if let Some(p) = parent {
+        if depth < 8 {
+            if let Some(pt) = tokens_for(s, &p, depth + 1) {
+                merged.extend(pt.into_iter().filter(|t| {
+                    !t.starts_with("allow=")
+                        && !t.starts_with("deny=")
+                        && !t.starts_with("parent=")
+                }));
+            }
+        }
+    }
+    merged.extend(own);
+    Some(merged)
+}
+
+/// Build a resolved class (parent inheritance applied) from its config line.
+fn build(s: &Server, name: &str) -> Option<ConnClass> {
+    let toks = tokens_for(s, name, 0)?;
     let mut c = ConnClass {
-        name: it.next()?.to_string(),
-        allow: "*".to_string(),
+        name: name.to_string(),
+        fakelag: true,
+        resolvehostnames: true,
         ..Default::default()
     };
-    for tok in it {
-        let Some((k, v)) = tok.split_once('=') else {
-            continue;
-        };
-        match k {
-            "allow" => c.allow = v.to_string(),
-            "deny" => c.deny = v.eq_ignore_ascii_case("yes"),
-            "ssl" | "requiressl" => c.ssl = v.eq_ignore_ascii_case("yes"),
-            "password" | "pass" => c.password = Some(v.to_string()),
-            "localmax" => c.localmax = v.parse().ok(),
-            "maxchans" => c.maxchans = v.parse().ok(),
-            "pingfreq" => c.pingfreq = v.parse().ok(),
-            "timeout" => c.timeout = v.parse().ok(),
-            "modes" => c.modes = Some(v.to_string()),
-            _ => {}
+    for tok in toks {
+        if let Some((k, v)) = tok.split_once('=') {
+            apply(&mut c, k, v);
         }
+    }
+    if c.allow.is_empty() {
+        c.allow.push("*".to_string()); // an unqualified class matches everyone
     }
     Some(c)
 }
 
+/// Every configured class, resolved.
 pub fn all(s: &Server) -> Vec<ConnClass> {
     s.conf_all("connectclass")
         .iter()
-        .filter_map(|l| parse(l))
+        .filter_map(|l| l.split_whitespace().next())
+        .filter_map(|name| build(s, name))
         .collect()
 }
 
+/// A single resolved class by name.
 pub fn named(s: &Server, name: &str) -> Option<ConnClass> {
-    all(s).into_iter().find(|c| c.name == name)
+    build(s, name)
+}
+
+// --- mask matching -----------------------------------------------------------
+
+/// Whether the first `bits` bits of `a` and `b` are equal.
+fn prefix_eq(a: &[u8], b: &[u8], bits: u8) -> bool {
+    let full = (bits / 8) as usize;
+    if a[..full] != b[..full] {
+        return false;
+    }
+    let rem = bits % 8;
+    if rem == 0 {
+        return true;
+    }
+    let mask = 0xffu8 << (8 - rem);
+    (a[full] & mask) == (b[full] & mask)
+}
+
+/// Whether `target` falls inside the CIDR `base`/`bits` (same family required).
+fn cidr_contains(base: IpAddr, bits: u8, target: IpAddr) -> bool {
+    match (base, target) {
+        (IpAddr::V4(b), IpAddr::V4(t)) => prefix_eq(&b.octets(), &t.octets(), bits.min(32)),
+        (IpAddr::V6(b), IpAddr::V6(t)) => prefix_eq(&b.octets(), &t.octets(), bits.min(128)),
+        _ => false,
+    }
+}
+
+/// Match one mask against a client's IP and (once known) resolved host. A mask with
+/// a `/` is a CIDR range tested against the IP; otherwise it's a glob tested against
+/// both the IP text and the host.
+fn mask_match(mask: &str, ip: &str, host: &str) -> bool {
+    if let Some((net, bits)) = mask.split_once('/') {
+        if let (Ok(base), Ok(bits), Ok(target)) =
+            (net.parse::<IpAddr>(), bits.parse::<u8>(), ip.parse::<IpAddr>())
+        {
+            return cidr_contains(base, bits, target);
+        }
+        return false;
+    }
+    glob_match(mask, ip) || (!host.is_empty() && glob_match(mask, host))
+}
+
+// --- class selection ---------------------------------------------------------
+
+enum Pick {
+    Class(ConnClass),
+    Deny(String),
+    None,
+}
+
+/// Choose the first suitable class for a client. Suitability = a matching mask plus
+/// any TLS/port/limit conditions; an unsuitable class is skipped, a matching deny
+/// class rejects. `host` is empty at connect (pre-rDNS) and the resolved name later.
+fn pick(
+    s: &Server,
+    uid: Uid,
+    ip: &str,
+    host: &str,
+    secure: bool,
+    has_cert: bool,
+    port: u16,
+) -> Pick {
+    for c in all(s) {
+        if !c.allow.iter().any(|m| mask_match(m, ip, host)) {
+            continue;
+        }
+        if c.ssl && !secure {
+            continue;
+        }
+        if c.ssl_trusted && !has_cert {
+            continue;
+        }
+        if !c.ports.is_empty() && !c.ports.contains(&port) {
+            continue;
+        }
+        if c.deny {
+            return Pick::Deny(c.name);
+        }
+        if let Some(max) = c.limit {
+            if class_count(s, &c.name, uid) >= max {
+                if c.maxconnwarn {
+                    s.snotice(&format!("connect class {} is full ({max})", c.name));
+                }
+                continue; // full — try the next class
+            }
+        }
+        return Pick::Class(c);
+    }
+    Pick::None
+}
+
+/// Local users currently in class `name` (excluding `uid`).
+fn class_count(s: &Server, name: &str, uid: Uid) -> usize {
+    s.users
+        .iter()
+        .filter(|(&k, u)| k != uid && u.class.as_deref() == Some(name))
+        .count()
+}
+
+/// Local connections from `ip` in class `name` (excluding `uid`).
+fn local_clones(s: &Server, ip: &str, name: &str, uid: Uid) -> usize {
+    s.users
+        .iter()
+        .filter(|(&k, u)| {
+            k != uid && u.addr.ip().to_string() == ip && u.class.as_deref() == Some(name)
+        })
+        .count()
+}
+
+/// Connections from `ip` across the whole network (local + remote), excluding `uid`.
+fn global_clones(s: &Server, ip: &str, uid: Uid) -> usize {
+    let local = s
+        .users
+        .iter()
+        .filter(|(&k, u)| k != uid && u.addr.ip().to_string() == ip)
+        .count();
+    let remote = s.remote_users.values().filter(|ru| ru.ip == ip).count();
+    local + remote
 }
 
 /// Assign the connecting client to the first matching class. Returns `Some(reason)`
-/// if the connection must be rejected (a deny class or a per-IP cap); otherwise sets
-/// the class name on the user and returns `None`. Called from `add_conn`.
+/// if the connection must be rejected (a deny class or a per-IP/per-class cap);
+/// otherwise sets the class on the user and returns `None`. Called from `add_conn`.
 pub fn assign(s: &mut Server, uid: Uid) -> Option<String> {
-    let (ip, secure) = {
+    let (ip, secure, has_cert, port) = {
         let u = s.users.get(&uid)?;
-        (u.addr.ip().to_string(), u.secure)
+        (
+            u.addr.ip().to_string(),
+            u.secure,
+            u.certfp.is_some(),
+            u.port,
+        )
     };
-    let class = all(s)
-        .into_iter()
-        .find(|c| glob_match(&c.allow, &ip) && (!c.ssl || secure))?;
-    if class.deny {
-        return Some(format!("Connection class {} denies your address", class.name));
-    }
+    let class = match pick(s, uid, &ip, "", secure, has_cert, port) {
+        Pick::Deny(name) => {
+            return Some(format!("Connection class {name} denies your address"));
+        }
+        Pick::None => {
+            if !all(s).iter().any(|c| !c.deny) || !s.conf_bool("connectclass_required", false) {
+                return None; // no allow classes, or strict mode off: allow, no class
+            }
+            return Some("You are not allowed to connect to this server".to_string());
+        }
+        Pick::Class(c) => c,
+    };
+    let warn = |s: &Server, why: &str| {
+        if class.maxconnwarn {
+            s.snotice(&format!("connect class {} refused {ip}: {why}", class.name));
+        }
+    };
     if let Some(max) = class.localmax {
-        let n = s
-            .users
-            .values()
-            .filter(|u| {
-                u.addr.ip().to_string() == ip && u.class.as_deref() == Some(class.name.as_str())
-            })
-            .count();
-        if n >= max {
+        if local_clones(s, &ip, &class.name, uid) >= max {
+            warn(s, "local clone limit");
             return Some("Too many connections from your address".to_string());
+        }
+    }
+    if let Some(max) = class.globalmax {
+        if global_clones(s, &ip, uid) >= max {
+            warn(s, "global clone limit");
+            return Some("Too many global connections from your address".to_string());
         }
     }
     if let Some(u) = s.users.get_mut(&uid) {
@@ -101,22 +337,53 @@ pub fn assign(s: &mut Server, uid: Uid) -> Option<String> {
     None
 }
 
-/// At registration: verify the class password (if any) and apply the class's
-/// on-connect usermodes. Returns `Some(reason)` to reject.
+/// At registration: re-pick the class now the host is resolved (host masks), verify
+/// the class password, enforce a required client cert, and apply on-connect modes.
+/// Returns `Some(reason)` to reject.
 pub fn on_register(s: &mut Server, uid: Uid) -> Option<String> {
+    let (ip, host, secure, has_cert, port, sent) = {
+        let u = s.users.get(&uid)?;
+        (
+            u.addr.ip().to_string(),
+            u.host.clone(),
+            u.secure,
+            u.certfp.is_some(),
+            u.port,
+            u.pass.clone(),
+        )
+    };
+    match pick(s, uid, &ip, &host, secure, has_cert, port) {
+        Pick::Deny(name) => {
+            return Some(format!("Connection class {name} denies your address"));
+        }
+        Pick::Class(c) => {
+            if let Some(u) = s.users.get_mut(&uid) {
+                u.class = Some(c.name);
+            }
+        }
+        Pick::None => {} // keep whatever was assigned at connect
+    }
     let name = s.users.get(&uid)?.class.clone()?;
     let class = named(s, &name)?;
     if let Some(pw) = &class.password {
-        let ok = s.users.get(&uid).and_then(|u| u.pass.clone());
-        if ok.as_deref() != Some(pw.as_str()) {
+        let ok = sent
+            .as_deref()
+            .map(|p| crate::modules::password_hash::verify(pw, p))
+            .unwrap_or(false);
+        if !ok {
             return Some("Password mismatch for your connection class".to_string());
         }
+    }
+    if class.ssl_trusted && !has_cert {
+        return Some("Your connection class requires a client certificate".to_string());
     }
     if let Some(m) = class.modes {
         crate::coremods::core_mode::svs_set_user_modes(s, uid, &m);
     }
     None
 }
+
+// --- per-class getters consulted by the core / other modules -----------------
 
 fn class_of(s: &Server, uid: Uid) -> Option<ConnClass> {
     let name = s.users.get(&uid).and_then(|u| u.class.clone())?;
@@ -131,4 +398,58 @@ pub fn reg_timeout(s: &Server, uid: Uid) -> Option<u64> {
 }
 pub fn max_chans(s: &Server, uid: Uid) -> Option<usize> {
     class_of(s, uid)?.maxchans
+}
+pub fn recvq(s: &Server, uid: Uid) -> Option<usize> {
+    class_of(s, uid)?.recvq
+}
+pub fn hardsendq(s: &Server, uid: Uid) -> Option<usize> {
+    class_of(s, uid)?.hardsendq
+}
+pub fn softsendq(s: &Server, uid: Uid) -> Option<usize> {
+    class_of(s, uid)?.softsendq
+}
+/// Per-class flood override: `(message cap, window secs, fakelag)`. `fakelag=false`
+/// means flooders are killed rather than rate-limited.
+pub fn flood_over(s: &Server, uid: Uid) -> Option<(Option<usize>, Option<u64>, bool)> {
+    let c = class_of(s, uid)?;
+    Some((c.penaltythreshold, c.commandrate, c.fakelag))
+}
+/// Whether reverse-DNS should be resolved for this client's class (default yes).
+pub fn resolve_hostnames(s: &Server, uid: Uid) -> bool {
+    class_of(s, uid).map(|c| c.resolvehostnames).unwrap_or(true)
+}
+/// `(useident, requireident)` for this client's class.
+pub fn ident_policy(s: &Server, uid: Uid) -> (bool, bool) {
+    class_of(s, uid)
+        .map(|c| (c.useident, c.requireident))
+        .unwrap_or((false, false))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
+    #[test]
+    fn cidr_v4_ranges() {
+        let base = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0));
+        assert!(cidr_contains(base, 8, "10.9.9.9".parse().unwrap()));
+        assert!(!cidr_contains(base, 8, "11.0.0.1".parse().unwrap()));
+        let net = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 0));
+        assert!(cidr_contains(net, 24, "192.168.1.200".parse().unwrap()));
+        assert!(!cidr_contains(net, 24, "192.168.2.1".parse().unwrap()));
+        // a /32 is an exact host
+        let host = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 5));
+        assert!(cidr_contains(host, 32, "203.0.113.5".parse().unwrap()));
+        assert!(!cidr_contains(host, 32, "203.0.113.6".parse().unwrap()));
+    }
+
+    #[test]
+    fn mask_glob_and_cidr() {
+        assert!(mask_match("10.0.0.0/8", "10.1.2.3", ""));
+        assert!(!mask_match("10.0.0.0/8", "192.0.2.1", ""));
+        assert!(mask_match("*.example.com", "192.0.2.1", "host.example.com"));
+        assert!(mask_match("192.0.2.*", "192.0.2.7", ""));
+        assert!(!mask_match("nomatch/33", "1.2.3.4", "")); // unparseable → no match
+    }
 }
