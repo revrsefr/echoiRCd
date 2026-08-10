@@ -30,6 +30,7 @@ pub mod filter;
 pub mod flood;
 pub mod geoip;
 pub mod hashident;
+pub mod hidelist;
 pub mod hidewhois;
 pub mod irccloudtags;
 pub mod jsonlog;

@@ -120,6 +120,11 @@ amu_target    = both
 # --- chanlog (m_chanlog): mirror the oper server-notice stream into a channel so
 #     staff can watch it in a normal window. Set the channel (create/keep it opped):
 # chanlog = #snotices
+# --- hidelist (m_hidelist): list modes (+b/+e/+I/…) are viewable by members by
+#     default; this restricts a given list to a minimum rank. Repeatable,
+#     `hidelist = <modechar> <rank>` (rank: owner|admin|op|halfop|voice). Opers see
+#     everything. e.g. only ops may view the ban list:
+# hidelist = b op
 # --- autoop (m_autoop): no config needed — it's the channel list mode +w. Grant a
 #     status prefix to matching users on join, `+w <prefix>:<hostmask>`, e.g.
 #       /MODE #chan +w o:*!*@trusted.host   (auto-op)

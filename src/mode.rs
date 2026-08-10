@@ -32,6 +32,11 @@ pub trait ChanMode: Sync {
     fn letter(&self) -> char;
     /// Whether to consume an argument for this sign (taken only if one remains).
     fn wants_param(&self, adding: bool) -> bool;
+    /// A list mode (+b/+e/+I/+g/+X/+w): a query with no argument is just viewing,
+    /// so it needn't require channel-operator rank (unlike setting an entry).
+    fn is_list(&self) -> bool {
+        false
+    }
     /// Apply `+`/`-` to channel `key` (display name `chan`) on behalf of `uid`.
     fn apply(
         &self,
@@ -571,6 +576,9 @@ impl ChanMode for ListMode {
     fn letter(&self) -> char {
         self.ch
     }
+    fn is_list(&self) -> bool {
+        true
+    }
     fn wants_param(&self, _adding: bool) -> bool {
         true // a mask to add/remove; absent ⇒ list query
     }
@@ -586,6 +594,15 @@ impl ChanMode for ListMode {
         let (entry_num, end_num, noun) = self.kind.numerics();
         // no mask ⇒ list query
         let Some(mask) = param else {
+            // hidelist: low-rank members may be barred from viewing this list
+            if crate::modules::hidelist::denied(s, uid, key, self.ch) {
+                s.numeric(
+                    uid,
+                    ERR_CHANOPRIVSNEEDED,
+                    &format!("{chan} :You do not have access to view the {noun}"),
+                );
+                return Applied::No;
+            }
             let rows: Vec<(String, String, u64)> = s
                 .channels
                 .get(key)

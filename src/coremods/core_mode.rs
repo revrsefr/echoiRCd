@@ -88,9 +88,19 @@ pub fn apply_mode(s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         s.numeric(uid, RPL_CREATIONTIME, &format!("{target} {created}"));
         return CmdResult::Ok;
     }
-    // setting modes needs at least half-op; each handler then enforces its
-    // own finer rule (prefixes need enough rank, +z needs all-secure, …)
-    if s.rank(uid, &key) < RANK_HALFOP {
+    // dispatch each mode letter to its handler
+    let modestring = params[1].clone();
+    let args = &params[2..];
+    // a *pure list query* (only list-mode letters, no arguments, e.g. `MODE #c +b`)
+    // is just viewing — allow it for anyone (the hidelist module may still restrict
+    // it). Anything that changes a mode needs at least half-op; each handler then
+    // enforces its own finer rule (prefixes need enough rank, +z needs all-secure…).
+    let pure_list_query = args.is_empty()
+        && modestring
+            .chars()
+            .filter(|c| *c != '+' && *c != '-')
+            .all(|c| chan_mode(c).is_some_and(|h| h.is_list()));
+    if !pure_list_query && s.rank(uid, &key) < RANK_HALFOP {
         s.numeric(
             uid,
             ERR_CHANOPRIVSNEEDED,
@@ -98,10 +108,6 @@ pub fn apply_mode(s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         );
         return CmdResult::Fail;
     }
-
-    // dispatch each mode letter to its handler
-    let modestring = params[1].clone();
-    let args = &params[2..];
     let mut argi = 0usize;
     let mut sign = '+';
     let mut applied = String::new();
