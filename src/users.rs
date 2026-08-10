@@ -465,7 +465,7 @@ impl Server {
             uid,
             RPL_MYINFO,
             &format!(
-                "{} echoircd-{VERSION} iowxsgBDIHrRzWc qaohvbeIklimnpstzCTcSNORMfjFLgGuBQAPJUdKXD",
+                "{} echoircd-{VERSION} iowxsgBDIHrRzWc qaohvbeIklimnpstzCTcSNORMfjFLgGuBQAPJUdKXwD",
                 self.name
             ),
         );

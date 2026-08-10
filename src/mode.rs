@@ -93,6 +93,7 @@ static CHAN_MODES: &[&(dyn ChanMode + Sync)] = &[
     &DELAYMSG,
     &REPEAT,
     &EXEMPTCHANOPS,
+    &AUTOOP,
     &DELAYJOIN,
 ];
 
@@ -492,6 +493,7 @@ enum ListKind {
     Invex,
     Filter,        // +g — message word/glob filters (not host masks)
     ExemptChanOps, // +X — "restriction:rankchar" exemptions
+    AutoOp,        // +w — "prefixchar:hostmask" auto-status on join
 }
 impl ListKind {
     fn list<'a>(&self, c: &'a Channel) -> &'a Vec<Ban> {
@@ -501,6 +503,7 @@ impl ListKind {
             ListKind::Invex => &c.invex,
             ListKind::Filter => &c.filters,
             ListKind::ExemptChanOps => &c.exemptchanops,
+            ListKind::AutoOp => &c.autoop,
         }
     }
     fn list_mut<'a>(&self, c: &'a mut Channel) -> &'a mut Vec<Ban> {
@@ -510,6 +513,7 @@ impl ListKind {
             ListKind::Invex => &mut c.invex,
             ListKind::Filter => &mut c.filters,
             ListKind::ExemptChanOps => &mut c.exemptchanops,
+            ListKind::AutoOp => &mut c.autoop,
         }
     }
     /// (per-entry numeric, end-of-list numeric, name for the "End of …" line)
@@ -524,6 +528,7 @@ impl ListKind {
                 RPL_ENDOFEXEMPTIONLIST,
                 "exemptchanops list",
             ),
+            ListKind::AutoOp => (RPL_AUTOOPLIST, RPL_ENDOFAUTOOP, "autoop list"),
         }
     }
     /// Ban-style lists hold host masks and get filled out to `nick!user@host`;
@@ -556,6 +561,10 @@ static FILTER: ListMode = ListMode {
 static EXEMPTCHANOPS: ListMode = ListMode {
     ch: 'X',
     kind: ListKind::ExemptChanOps,
+};
+static AUTOOP: ListMode = ListMode {
+    ch: 'w',
+    kind: ListKind::AutoOp,
 };
 
 impl ChanMode for ListMode {
@@ -1259,7 +1268,7 @@ mod tests {
 
     #[test]
     fn registry_covers_all_channel_modes() {
-        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuBQAPJUdKXD".chars() {
+        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuBQAPJUdKXwD".chars() {
             assert!(chan_mode(c).is_some(), "missing handler for +{c}");
         }
         assert!(chan_mode('y').is_none());

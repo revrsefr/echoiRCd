@@ -596,7 +596,7 @@ impl Server {
         let maxnick = self.conf_num("maxnick", 30usize);
         let maxchan = self.conf_num("maxchannel", 50usize);
         let mut lines = vec![format!(
-            "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIgX,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnpstuz EXTBAN=,Gcgjmnrsy WATCH={maxwatch} MONITOR={maxmon} SILENCE={maxsil} CALLERID=g WHOX CHATHISTORY={chathist} MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN={maxnick} CHANNELLEN={maxchan} NETWORK={}",
+            "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIgXw,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnpstuz EXTBAN=,Gcgjmnrsy WATCH={maxwatch} MONITOR={maxmon} SILENCE={maxsil} CALLERID=g WHOX CHATHISTORY={chathist} MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN={maxnick} CHANNELLEN={maxchan} NETWORK={}",
             self.network
         )];
         if let Some(tok) = crate::modules::network_icon::isupport(self) {

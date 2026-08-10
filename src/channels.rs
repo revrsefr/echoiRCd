@@ -282,6 +282,7 @@ pub struct Channel {
     pub invex: Vec<Ban>,         // +I invite exceptions
     pub filters: Vec<Ban>,       // +g word/glob message filters (mask = the glob)
     pub exemptchanops: Vec<Ban>, // +X exemptions (mask = "restriction:rankchar")
+    pub autoop: Vec<Ban>,        // +w auto-status (mask = "prefixchar:hostmask")
     pub invites: HashSet<Uid>,   // uids allowed past +i
     pub created: u64,
     // --- ephemeral flood counters (not modes; never rendered or synced) -------
@@ -311,6 +312,7 @@ impl Channel {
             invex: Vec::new(),
             filters: Vec::new(),
             exemptchanops: Vec::new(),
+            autoop: Vec::new(),
             invites: HashSet::new(),
             created: now(),
             msgflood_hits: HashMap::new(),

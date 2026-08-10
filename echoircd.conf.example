@@ -120,6 +120,11 @@ amu_target    = both
 # --- chanlog (m_chanlog): mirror the oper server-notice stream into a channel so
 #     staff can watch it in a normal window. Set the channel (create/keep it opped):
 # chanlog = #snotices
+# --- autoop (m_autoop): no config needed — it's the channel list mode +w. Grant a
+#     status prefix to matching users on join, `+w <prefix>:<hostmask>`, e.g.
+#       /MODE #chan +w o:*!*@trusted.host   (auto-op)
+#       /MODE #chan +w v:*!*@*.friend.net   (auto-voice)
+#     /MODE #chan +w  lists the entries.
 # --- banredirect (m_banredirect): no config needed — it extends ban syntax. A
 #     ban `+b <mask>$<#channel>` bounces a matching user into #channel instead of
 #     refusing them, e.g.  /MODE #main +b *!*@*.spammer.net$#quarantine

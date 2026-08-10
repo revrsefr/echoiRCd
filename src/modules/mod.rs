@@ -6,6 +6,7 @@
 pub mod account_registration;
 pub mod antimixedutf8;
 pub mod antirandom;
+pub mod autoop;
 pub mod banredirect;
 pub mod blockamsg;
 pub mod channames;
@@ -90,6 +91,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(maphide::MapHide),
         Box::new(dccallow::DccAllow),
         Box::new(solvemsg::SolveMsg),
+        Box::new(autoop::AutoOp),
     ]
 }
 
