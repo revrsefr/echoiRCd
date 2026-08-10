@@ -6,8 +6,6 @@
 //! ```text
 //! autodrop_commands = GET POST HEAD CONNECT PUT DELETE OPTIONS TRACE PATCH
 //! ```
-//!
-//! Reference: InspIRCd's `m_autodrop`. Original native Rust.
 
 use crate::module::{ModResult, Module};
 use crate::server::Server;

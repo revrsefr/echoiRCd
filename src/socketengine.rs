@@ -2,15 +2,13 @@
 //!
 //! - **Client plaintext** connections run on a single **mio epoll reactor**
 //!   ([`run_reactor`]) — one thread drives tens of thousands of sockets, so the
-//!   daemon scales to ~50k users without a thread per connection. This is the
-//!   same readiness layer Tokio is built on; the core stays single-threaded and
-//!   there is no async runtime.
+//!   daemon scales to ~50k users without a thread per connection. The core stays
+//!   single-threaded and there is no async runtime.
 //! - **TLS** and **server links** keep a thread per connection (few of them, and
 //!   a TLS session can't be split across reader+writer threads).
 //!
 //! Both hand the core the same [`OutSink`] output handle, so the core never
-//! knows or cares which model a connection uses. (InspIRCd has a `socketengines/`
-//! dir of epoll/kqueue/select backends; this is ours, written from scratch.)
+//! knows or cares which model a connection uses.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, BufReader, Read, Write};

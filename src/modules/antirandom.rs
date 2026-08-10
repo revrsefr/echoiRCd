@@ -1,8 +1,5 @@
 //! antirandom — detect spam drones whose nick/ident/realname is random-looking,
-//! by scoring character patterns and acting when a threshold is crossed. This is
-//! reverse's own detection model (the run rules + the unlikely-trigram penalty
-//! table are the spec — they define what counts as random); everything around
-//! them is original native Rust.
+//! by scoring character patterns and acting when a threshold is crossed.
 //!
 //! Score, summed over nick (+ ident + realname when `checkfull`):
 //!  - a run reaching 5 digits / 4 vowels / 4 consonants adds that length; each
@@ -11,7 +8,7 @@
 //!
 //! At/above `antirandom_threshold` the action fires: kill | gline | kline |
 //! zline | block. Opers and logged-in accounts are always exempt. Off unless
-//! `antirandom = yes` — read entirely from the config, nothing on `Server`.
+//! `antirandom = yes`.
 
 use crate::module::{ModResult, Module};
 use crate::server::Server;
@@ -19,7 +16,7 @@ use crate::xline::XKind;
 use crate::Uid;
 
 /// Adjacent letter pairs that rarely occur in real words but pepper random
-/// strings — each occurrence adds 1 to the score. reverse's high-signal subset.
+/// strings — each occurrence adds 1 to the score.
 const TRIPLES: &[&[u8; 2]] = &[
     b"aj", b"aq", b"av", b"aw", b"ax", b"az", b"bd", b"bg", b"bk", b"bq", b"bx", b"bz", b"cb",
     b"cf", b"cg", b"cj", b"cp", b"cv", b"cw", b"cx", b"dx", b"fb", b"fc", b"fg", b"fh", b"fj",

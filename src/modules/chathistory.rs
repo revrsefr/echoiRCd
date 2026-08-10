@@ -1,9 +1,9 @@
-//! chathistory — InspIRCd's `m_chathistory` family (draft/chathistory +
-//! draft/message-redaction). Recent PRIVMSG/NOTICE traffic is kept in a capped
-//! per-conversation ring (channels and DM pairs) so clients can replay it on
-//! demand or on join (the channel `+H` backlog lives in `channels::replay_chanhistory`).
-//! Self-contained: the ring lives in `Server.ext`; the message path records into it
-//! via [`record`], and the CHATHISTORY and REDACT commands read/edit it here.
+//! chathistory — draft/chathistory + draft/message-redaction. Recent PRIVMSG/NOTICE
+//! traffic is kept in a capped per-conversation ring (channels and DM pairs) so
+//! clients can replay it on demand or on join (the channel `+H` backlog lives in
+//! `channels::replay_chanhistory`). The ring lives in `Server.ext`; the message path
+//! records into it via [`record`], and the CHATHISTORY and REDACT commands
+//! read/edit it here.
 
 use std::collections::{HashMap, VecDeque};
 

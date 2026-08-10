@@ -1,8 +1,6 @@
-//! hidelist — hide a channel list mode's entries (e.g. the +b ban list) from users
-//! below a configured rank, so ordinary members can't enumerate who's banned.
-//! Config, repeatable: `hidelist = <modechar> <rank>` where rank is one of
-//! owner|admin|op|halfop|voice. Opers always see. Reference: InspIRCd's
-//! `m_hidelist`. Original native Rust.
+//! Hides a channel list mode's entries (e.g. the +b ban list) from members below a
+//! configured rank. Config, repeatable: `hidelist = <modechar> <rank>` where rank is
+//! one of owner|admin|op|halfop|voice. Opers always see.
 
 use crate::channels::{RANK_ADMIN, RANK_HALFOP, RANK_OP, RANK_OWNER, RANK_VOICE};
 use crate::server::Server;

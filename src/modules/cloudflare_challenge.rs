@@ -1,12 +1,10 @@
-//! cloudflare_challenge — gate registration behind a Cloudflare Turnstile-style
-//! challenge, verified by an IP-bound HS256 JWT. Structurally like [`recaptcha`]
-//! but keyed on `cloudflare_*` config and driven by the `VERIFYCHALLENGE <token>`
-//! command. reverse's own module; runs in JWT-only mode (a validly-signed,
-//! unexpired, IP-matching token is proof — no backend call needed).
+//! cloudflare_challenge: gate registration behind a challenge verified by an
+//! IP-bound HS256 JWT, presented via the `VERIFYCHALLENGE <token>` command. A
+//! validly-signed, unexpired, IP-matching token is sufficient proof; no backend
+//! call is made.
 //!
 //! Off unless `cloudflare_challenge = yes` with `cloudflare_secret` +
-//! `cloudflare_url` set. Config-driven; the passed-verification set lives in
-//! `Server.ext`.
+//! `cloudflare_url` set. The passed-verification set lives in `Server.ext`.
 
 use std::collections::HashSet;
 

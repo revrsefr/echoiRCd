@@ -1,6 +1,5 @@
-//! rpc channel provider — `channel.list`, `channel.get`, and the mutators
-//! `channel.kick`, `channel.set_topic`. InspIRCd's `m_rpc_channel`. (`channel.set_mode`
-//! lands with the shared server-side mode applier in a later pass.)
+//! Channel RPC provider: `channel.list`, `channel.get`, and the mutators
+//! `channel.kick`, `channel.set_topic`, `channel.set_mode`.
 
 use super::json::{obj, qstr};
 use super::RpcError;

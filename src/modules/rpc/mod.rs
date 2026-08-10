@@ -1,11 +1,10 @@
-//! rpc — a JSON-RPC 2.0 control interface over a small native HTTP server, the
-//! echoIRCd analogue of InspIRCd's `m_httpd` + `m_jsonrpc` + `m_rpc_*`. Admin tools
-//! call it to introspect and drive the ircd (list/kill users, manage bans, rehash…).
+//! JSON-RPC 2.0 control interface over a small HTTP server. Admin tools call it to
+//! introspect and drive the ircd (list/kill users, manage bans, rehash…).
 //!
-//! Layering (each provider is its own file, per [[echoircd-module-per-file]]):
+//! Layering (each provider is its own file):
 //!   * [`httpd`] — the listener thread: accept, parse HTTP, authenticate, and hand
 //!     the JSON-RPC body to the core as `Event::RpcRequest`.
-//!   * [`json`] — native JSON scan/build (no serde).
+//!   * [`json`] — JSON scan/build.
 //!   * `core` / `user` / `channel` / `server` / `stats` / `ban` / `message` /
 //!     `whowas` / `spamfilter` / `log` — the method providers, called on the core
 //!     thread with `&mut Server`.
@@ -128,7 +127,7 @@ pub fn dispatch(s: &mut Server, method: &str, params: &str, id: &str) -> String 
 }
 
 /// Wrap a provider result (or error) in the JSON-RPC 2.0 response envelope, echoing
-/// the method and id (InspIRCd includes the method in its responses too).
+/// the method and id.
 pub fn envelope(method: &str, id: &str, result: Result<String, RpcError>) -> String {
     let id = if id.trim().is_empty() { "null" } else { id };
     match result {

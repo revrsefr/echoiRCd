@@ -1,6 +1,5 @@
-//! core_mode — the MODE command. Both channel and user modes are dispatched to
-//! the handler objects in [`crate::mode`] (InspIRCd-style `ModeHandler`s); this
-//! file just parses the modestring and orchestrates.
+//! MODE: parse the modestring and dispatch each letter to its handler in
+//! [`crate::mode`] (channel and user modes alike).
 
 use crate::channels::RANK_HALFOP;
 use crate::command::{CmdResult, Command};

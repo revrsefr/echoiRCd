@@ -1,6 +1,7 @@
-//! hidewhois — InspIRCd `m_hidewhois`. Hides sensitive WHOIS lines (server, idle,
-//! secure, …) from ordinary users. Opers and the user themselves are exempt when
-//! the matching config toggle is on. All config-driven; nothing lives on `Server`.
+//! Hides sensitive WHOIS lines (server, idle, secure, …) from ordinary users. Opers
+//! and the user themselves are exempt when the matching config toggle is on.
+//! Config: `hidewhois`, `hidewhois_selfview`, `hidewhois_opers`,
+//! `hidewhois_hide_server`, `hidewhois_hide_idle`, `hidewhois_hide_secure`.
 
 use crate::server::Server;
 use crate::Uid;

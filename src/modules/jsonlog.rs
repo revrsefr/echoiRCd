@@ -1,11 +1,8 @@
-//! jsonlog — the `draft/json-log` capability. reverse's own module. When an oper
-//! negotiates `CAP REQ draft/json-log`, every server notice they receive carries a
-//! structured JSON object (timestamp, level, subsystem, msg, …) as an IRCv3 message
-//! **tag** — the human-readable text stays in the NOTICE, the machine-readable copy
-//! rides alongside. Companion to the RPC `log.*` methods, which expose the same data
-//! over HTTP. Dispatched straight from `Server::snotice`; the tag build lives here.
-//!
-//! Behaviour reference: reverse's InspIRCd `m_jsonrpclog`. Original native Rust.
+//! jsonlog — the `draft/json-log` capability. When an oper negotiates
+//! `CAP REQ draft/json-log`, every server notice they receive carries a structured
+//! JSON object (timestamp, level, subsystem, msg, …) as an IRCv3 message tag; the
+//! human-readable text stays in the NOTICE. Dispatched from `Server::snotice`; the
+//! tag build lives here.
 
 use crate::modules::rpc::json::{obj, qstr};
 use crate::server::{iso_time, now, Server};

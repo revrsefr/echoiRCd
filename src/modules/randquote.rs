@@ -1,7 +1,5 @@
-//! randquote — greet each connecting user with a random line from a configured
-//! set of quotes. Off unless one or more `randquote = <line>` are configured.
-//!
-//! Behaviour reference: InspIRCd's `m_randquote`. Original native Rust.
+//! Greet each connecting user with a random line from the configured quote set.
+//! Off unless one or more `randquote = <line>` are configured.
 
 use openssl::rand::rand_bytes;
 

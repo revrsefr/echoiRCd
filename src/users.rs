@@ -1,6 +1,5 @@
 //! Users: the `User` record plus nick handling, user modes, oper status and the
-//! registration/welcome burst — the same job InspIRCd splits across users/
-//! usermanager, written from scratch in Rust (InspIRCd is a behaviour reference).
+//! registration/welcome burst.
 
 use std::collections::HashSet;
 use std::net::{SocketAddr, TcpStream};
@@ -93,7 +92,7 @@ impl UserFlags {
     }
 }
 
-/// The IRCv3 capabilities echoIRCd advertises. Order = the CAP LS order.
+/// The IRCv3 capabilities advertised. Order = the CAP LS order.
 pub const SUPPORTED_CAPS: &[&str] = &[
     "sasl",
     "server-time",
@@ -125,9 +124,8 @@ pub const SUPPORTED_CAPS: &[&str] = &[
     "cap-notify",
 ];
 
-/// Per-connection IRCv3 capability state — echoIRCd's answer to InspIRCd's `m_cap`
-/// plus the individual `m_ircv3_*` modules, as one flat set (not a plugin per cap).
-/// Toggled by `CAP REQ`; consulted wherever a line is formatted per-client.
+/// Per-connection IRCv3 capability state, one flat set. Toggled by `CAP REQ`;
+/// consulted wherever a line is formatted per-client.
 #[derive(Default)]
 pub struct Caps {
     pub sasl: bool,
@@ -307,7 +305,7 @@ pub struct User {
     pub accept: Vec<String>,   // ACCEPT list — lowercased nicks (callerid +g)
     pub quitting: Option<String>, // set by QUIT; drained by the core
     pub flags: UserFlags,
-    pub last_active: u64, // unix secs of the last line we received
+    pub last_active: u64, // unix secs of the last line received
     pub ping_sent: bool,  // a server PING is outstanding
     pub ext: Extensible,  // typed, module-owned per-user metadata
     pub out: OutSink,
@@ -316,10 +314,9 @@ pub struct User {
 }
 
 impl User {
-    /// The host others see: an explicit vhost (CHGHOST/SETHOST) wins, then the
-    /// cloak when +x is set (and one was computed), otherwise the real host.
-    /// Everything that broadcasts a prefix — JOIN, QUIT, NICK, PRIVMSG source, ban
-    /// matching — goes through here, so the displayed host is consistent for free.
+    /// Displayed host: explicit vhost (CHGHOST/SETHOST), else cloak (when +x and
+    /// one was computed), else real host. Used everywhere a prefix is broadcast so
+    /// the shown host stays consistent.
     pub fn host_display(&self) -> &str {
         if let Some(v) = &self.vhost {
             v
@@ -358,6 +355,8 @@ impl Server {
         self.numeric(uid, RPL_YOUREOPER, ":You are now an IRC operator");
         self.send(uid, format!(":{} MODE {nick} :+os", self.name));
         self.snotice(&format!("{nick} is now an IRC operator"));
+        // operprefix: give this oper the ! prefix in every channel they're already in
+        crate::modules::operprefix::grant_all(self, uid);
         // opermodes: extra umodes on oper-up
         let om = self.conf("opermodes").or_else(|| self.conf("oper_umodes"));
         if let Some(modes) = om.map(str::to_string) {

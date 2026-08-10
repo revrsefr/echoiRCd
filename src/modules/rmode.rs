@@ -1,10 +1,8 @@
-//! rmode — `RMODE <channel> <listmode> [pattern]`, bulk-remove entries from a
-//! channel list mode (`b` bans, `e` ban exceptions, `I` invite exceptions). With a
-//! `pattern` glob only matching entries are cleared; without one, all are. Needs
-//! half-op+ (opers bypass). The removals go through the normal mode engine (chunked
-//! to keep each `MODE` line legal), so they broadcast and propagate like any other.
-//!
-//! Behaviour reference: InspIRCd's `m_rmode`. Original native Rust.
+//! `RMODE <channel> <listmode> [pattern]` — bulk-remove entries from a channel list
+//! mode (`b` bans, `e` ban exceptions, `I` invite exceptions). With a `pattern` glob
+//! only matching entries are cleared; without one, all are. Needs half-op+ (opers
+//! bypass). Removals go through the normal mode engine (chunked to keep each `MODE`
+//! line legal), so they broadcast and propagate like any other.
 
 use crate::channels::{glob_match, RANK_HALFOP};
 use crate::command::{CmdResult, Command};

@@ -1,8 +1,8 @@
-//! markread — InspIRCd's `m_ircv3_read_marker` (draft/read-marker). A client sets
-//! or queries the "last read" timestamp per conversation; markers are keyed by
-//! account when logged in (so they're shared across a user's devices and survive
-//! reconnects) and echoed to every connection sharing that identity. Self-contained:
-//! the marker store lives in `Server.ext`, cleaned up by the on_user_quit hook.
+//! markread — IRCv3 draft/read-marker. A client sets or queries the "last read"
+//! timestamp per conversation; markers are keyed by account when logged in (shared
+//! across a user's devices, surviving reconnects) and echoed to every connection
+//! sharing that identity. The store lives in `Server.ext`, cleaned up by the
+//! on_user_quit hook.
 
 use std::collections::HashMap;
 

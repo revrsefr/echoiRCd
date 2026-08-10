@@ -1,16 +1,11 @@
-//! password_hash — hashed `<oper>` passwords plus a `/MKPASSWD` helper to make
-//! them. This is echoIRCd's answer to InspIRCd's hash-provider family (md5, sha1,
-//! sha2, pbkdf2): one module, backed entirely by OpenSSL (already a dependency),
-//! that both verifies a stored hash against a supplied password and generates new
-//! hashes for the config.
+//! Hashed `<oper>` passwords plus a `/MKPASSWD` helper, backed by OpenSSL.
+//! Verifies stored hashes and generates new ones (md5, sha1, sha2, pbkdf2).
 //!
-//! A stored password is either plaintext (no recognised prefix — backward
-//! compatible) or `"<algo>:<hex>"`:
+//! A stored password is either plaintext (no recognised prefix) or `"<algo>:<hex>"`:
 //!   * `md5:` `sha1:` `sha256:` `sha512:` — a plain hex digest of the password
 //!   * `pbkdf2:<iters>:<salthex>:<hashhex>` — PBKDF2-HMAC-SHA256, salted
 //!
-//! Comparisons are constant-time (`openssl::memcmp`). Everything is self-contained
-//! here; the OPER handler just calls [`verify`].
+//! Comparisons are constant-time (`openssl::memcmp`). The OPER handler calls [`verify`].
 
 use openssl::hash::{hash, MessageDigest};
 use openssl::pkcs5::pbkdf2_hmac;

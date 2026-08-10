@@ -1,7 +1,7 @@
-//! rpc spamfilter provider — `spamfilter.list`, `spamfilter.add`, `spamfilter.del`.
-//! InspIRCd's `m_rpc_spamfilter`. Operates on the same [`crate::modules::filter`]
-//! rule set (stored in `Server.ext`) that the `FILTER` command and the enforcement
-//! hook use, so a rule added here takes effect immediately.
+//! Spamfilter RPC provider: `spamfilter.list`, `spamfilter.add`, `spamfilter.del`.
+//! Operates on the same [`crate::modules::filter`] rule set (in `Server.ext`) that
+//! the `FILTER` command and the enforcement hook use, so a rule added here takes
+//! effect immediately.
 
 use super::json::{self, obj, qstr};
 use super::RpcError;

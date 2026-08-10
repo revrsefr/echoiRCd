@@ -2,9 +2,7 @@
 //! are in. `+b j:#lobby` bans everyone who is also in `#lobby`; an optional status
 //! prefix narrows it to members at/above that rank, e.g. `+b j:@#staff` matches
 //! only ops-or-higher in `#staff`. The channel part is a glob. Dispatched from the
-//! channel ban matcher; the logic lives here in its own file.
-//!
-//! Behaviour reference: InspIRCd's `m_channelban`. Original native Rust.
+//! channel ban matcher.
 
 use crate::channels::{glob_match, RANK_ADMIN, RANK_HALFOP, RANK_OP, RANK_OWNER, RANK_VOICE};
 use crate::server::Server;

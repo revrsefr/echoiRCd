@@ -1,8 +1,7 @@
-//! hidemode — hide specific mode changes from channel members below a rank, so
-//! ordinary users don't see e.g. bans being set/removed. Config, repeatable:
-//! `hidemode = <modechar> <rank>` (rank: owner|admin|op|halfop|voice). The setter,
-//! opers and linked servers always see the full change. Reference: InspIRCd's
-//! `m_hidemode`. Original native Rust.
+//! Hides specific mode changes from channel members below a rank (e.g. bans being
+//! set/removed). Config, repeatable: `hidemode = <modechar> <rank>` (rank:
+//! owner|admin|op|halfop|voice). The setter, opers and linked servers always see
+//! the full change.
 
 use crate::channels::{RANK_ADMIN, RANK_HALFOP, RANK_OP, RANK_OWNER, RANK_VOICE};
 use crate::server::Server;

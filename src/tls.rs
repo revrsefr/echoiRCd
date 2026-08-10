@@ -1,12 +1,9 @@
-//! TLS backends — echoIRCd's answer to InspIRCd's `IOHook` seam and its
-//! `ssl_openssl` / `ssl_gnutls` modules. A [`TlsBackend`] wraps an accepted
-//! socket in a TLS session; the socket engine then drives the resulting
-//! [`TlsConn`] for any listener that has a backend attached.
+//! TLS backends: a [`TlsBackend`] wraps an accepted socket in a TLS session; the
+//! socket engine then drives the resulting [`TlsConn`] for any listener that has a
+//! backend attached.
 //!
-//! This backend is openssl. The `openssl` crate keeps all its `unsafe` internal,
-//! so the daemon itself stays `#![forbid(unsafe_code)]`. A pure-Rust `rustls`
-//! backend (or a gnutls one) only has to implement these same two traits and it
-//! slots straight in — exactly the pluggable-provider shape InspIRCd uses.
+//! This backend is openssl. An alternative backend (e.g. rustls) only has to
+//! implement these same two traits and it slots straight in.
 
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpStream};

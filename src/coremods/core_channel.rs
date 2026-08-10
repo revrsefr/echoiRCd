@@ -24,9 +24,9 @@ pub fn commands() -> Vec<Box<dyn Command>> {
     ]
 }
 
-/// TBAN — set a +b ban that lifts itself after a duration (InspIRCd `m_timedbans`).
-/// `TBAN <#chan> <duration> <mask>`; needs half-op or above. The background tick
-/// removes it and announces `MODE -b` when it expires.
+/// TBAN — set a +b ban that lifts itself after a duration. `TBAN <#chan>
+/// <duration> <mask>`; needs half-op or above. The background tick removes it and
+/// announces `MODE -b` when it expires.
 struct Tban;
 impl Command for Tban {
     fn name(&self) -> &'static str {
@@ -313,8 +313,8 @@ impl Command for Invite {
     }
 }
 
-/// UNINVITE — revoke a pending invite (InspIRCd `m_uninvite`). `UNINVITE <nick>
-/// <#chan>`; a channel op cancels an invite they (or another op) issued.
+/// UNINVITE — revoke a pending invite. `UNINVITE <nick> <#chan>`; a channel op
+/// cancels an invite they (or another op) issued.
 struct Uninvite;
 impl Command for Uninvite {
     fn name(&self) -> &'static str {

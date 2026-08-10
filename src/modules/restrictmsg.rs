@@ -1,10 +1,7 @@
-//! restrictmsg — stop ordinary users from private-messaging each other. A PM
-//! between two users is allowed only when the sender is an oper, the target is an
-//! oper, or the target is a service/bot (so users can still reach NickServ etc.).
-//! Channel messages are never affected. Off unless `restrictmsg = yes` — read
-//! straight from the config, nothing on `Server`.
-//!
-//! Behaviour reference: InspIRCd's `m_restrictmsg`. Original native Rust.
+//! Stop ordinary users from private-messaging each other. A PM between two users is
+//! allowed only when the sender is an oper, the target is an oper, or the target is a
+//! service/bot (so users can still reach NickServ etc.). Channel messages are never
+//! affected. Off unless `restrictmsg = yes`.
 
 use crate::module::{ModResult, Module};
 use crate::numeric::ERR_CANTSENDTOUSER;

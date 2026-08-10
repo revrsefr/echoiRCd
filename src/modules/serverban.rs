@@ -1,10 +1,8 @@
-//! serverban — the `s:` matching extban: match a user by the name of the server
-//! they are connected to. `+b s:irc.example.net` bans everyone on that server.
-//! Ban matching only ever runs against local users (join happens locally), so a
-//! matched user is on this server — we glob the mask against our own name.
-//! Dispatched from the channel ban matcher; the logic lives here.
-//!
-//! Behaviour reference: InspIRCd's `m_serverban`. Original native Rust.
+//! The `s:` matching extban: match a user by the name of the server they are
+//! connected to. `+b s:irc.example.net` bans everyone on that server. Ban matching
+//! only ever runs against local users, so a matched user is on this server and the
+//! mask is globbed against the local server name. Dispatched from the channel ban
+//! matcher.
 
 use crate::channels::glob_match;
 use crate::server::Server;

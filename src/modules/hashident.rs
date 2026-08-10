@@ -1,11 +1,9 @@
-//! hashident — replace a user's ident with a stable, opaque 12-character token
-//! derived from their IP, so the username field leaks nothing (no `~guest`, no
-//! probed identd name) yet stays constant per address. reverse's own module.
+//! Replaces a user's ident with a stable, opaque 12-character token derived from
+//! their IP, so the username field leaks nothing yet stays constant per address.
 //!
 //! The token is the first 6 bytes of `HMAC-SHA256(hashident_key, ip)`, hex-encoded
-//! (12 chars). Off unless `hashident = yes` and a `hashident_key` secret is set —
-//! without the key it does nothing (the key is what makes the mapping unforgeable).
-//! Applied once, right after the user finishes connecting; all config-driven.
+//! (12 chars). Off unless `hashident = yes` and a `hashident_key` secret is set;
+//! the key is what makes the mapping unforgeable. Applied once, right after connect.
 
 use openssl::hash::MessageDigest;
 use openssl::pkey::PKey;

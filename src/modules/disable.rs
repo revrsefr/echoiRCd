@@ -1,8 +1,6 @@
-//! disable — refuse a configured set of commands to ordinary users (opers bypass).
+//! disable: refuse a configured set of commands to ordinary users (opers bypass).
 //! `disabled_commands = LIST WHO KNOCK` (space-separated; repeatable). A disabled
 //! command replies with `421` as if it didn't exist. Off unless configured.
-//!
-//! Behaviour reference: InspIRCd's `m_disable`. Original native Rust.
 
 use crate::module::{ModResult, Module};
 use crate::numeric::ERR_UNKNOWNCOMMAND;

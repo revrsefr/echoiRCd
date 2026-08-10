@@ -1,8 +1,7 @@
-//! The RPC HTTP server: a blocking listener thread that accepts a connection,
-//! reads one HTTP request, authenticates it, and forwards the JSON-RPC body to the
-//! core as `Event::RpcRequest` — then writes back whatever the core replies. Low
-//! volume (admin tooling), so thread-per-connection is fine. Native `TcpStream`
-//! only; no `unsafe`, no new crate.
+//! RPC HTTP server: a blocking listener thread that accepts a connection, reads
+//! one HTTP request, authenticates it, forwards the JSON-RPC body to the core as
+//! `Event::RpcRequest`, and writes back the core's reply. Low volume (admin
+//! tooling), so thread-per-connection is fine.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -68,9 +67,9 @@ fn handle(
     stream.set_read_timeout(Some(IO_TIMEOUT))?;
     stream.set_write_timeout(Some(IO_TIMEOUT))?;
 
-    // read until we have the full header block, then the declared body — whether
-    // it's Content-Length-framed or Transfer-Encoding: chunked (like InspIRCd's
-    // http_parser handles). Body starts 4 bytes past the header terminator.
+    // Read until the full header block, then the declared body — whether
+    // Content-Length-framed or Transfer-Encoding: chunked. Body starts 4 bytes
+    // past the header terminator.
     let mut buf = Vec::new();
     let mut chunk = [0u8; 8192];
     let mut head_end = None;

@@ -1,7 +1,7 @@
-//! Optional, pluggable modules — echoIRCd's answer to InspIRCd's `src/modules/`.
-//! Most hook lifecycle events via the [`crate::module::Module`] trait; [`dnsbl`]
-//! is the exception — it's driven straight from the connection lifecycle rather
-//! than the hook bus, but lives here as its own self-contained unit.
+//! Optional, pluggable modules. Most hook lifecycle events via the
+//! [`crate::module::Module`] trait; [`dnsbl`] is the exception — it's driven from
+//! the connection lifecycle rather than the hook bus, but lives here as its own
+//! self-contained unit.
 
 pub mod account_registration;
 pub mod antimixedutf8;
@@ -44,6 +44,8 @@ pub mod markread;
 pub mod metadata;
 pub mod multiline;
 pub mod network_icon;
+pub mod ojoin;
+pub mod operprefix;
 pub mod password_hash;
 pub mod profilelink;
 pub mod randquote;
@@ -99,6 +101,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(solvemsg::SolveMsg),
         Box::new(autoop::AutoOp),
         Box::new(autodrop::AutoDrop),
+        Box::new(operprefix::OperPrefix),
     ]
 }
 
@@ -111,7 +114,7 @@ pub fn module_names() -> Vec<String> {
 }
 
 /// Commands contributed by modules (chained into the core command table), so a
-/// module that adds a command keeps it in its own file, InspIRCd-style.
+/// module that adds a command keeps it in its own file.
 pub fn module_commands() -> Vec<Box<dyn Command>> {
     filter::commands()
         .into_iter()
@@ -135,5 +138,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(geoip::commands())
         .chain(globops::commands())
         .chain(relaymsg::commands())
+        .chain(ojoin::commands())
         .collect()
 }

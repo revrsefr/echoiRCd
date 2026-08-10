@@ -1,27 +1,19 @@
-//! cloak — echoIRCd's host-masking module (InspIRCd's `m_cloak_*`, our way).
+//! cloak: keyed host masking under user mode +x, auto-set on connect (only opers
+//! may drop it). Config key `cloak_key`; with no key set, cloaking is off and +x
+//! is a no-op.
 //!
-//! Every user gets a deterministic, keyed **cloak** of their host that hides the
-//! real IP while *preserving subnet structure*, so a channel ban on a whole /24
-//! or /16 still bites. The cloak is shown under user mode **+x**, which this
-//! module auto-sets on connect; only opers may drop it (see [`crate::mode`]),
-//! which stops +x from becoming a ban-evasion switch.
-//!
-//! Format follows InspIRCd's `SegmentIP`: one hashed segment per cumulative IP
-//! octet-prefix, most-specific on the left, ending in the literal `.IP` suffix
-//! that marks a cloaked address (as opposed to a cloaked hostname, which keeps
-//! its domain). For `a.b.c.d`:
+//! A cloak hides the real IP while preserving subnet structure, so a channel ban
+//! on a /24 or /16 still matches. IPv4 `a.b.c.d` becomes one keyed segment per
+//! octet-prefix tier, most-specific first, with a literal `.IP` suffix marking a
+//! cloaked address (a cloaked hostname keeps its domain instead):
 //!
 //! ```text
 //!   HASH(a.b.c.d) . HASH(a.b.c) . HASH(a.b) . HASH(a) . IP
 //!      (/32)          (/24)        (/16)       (/8)
 //! ```
 //!
-//! so two IPs in the same /24 share the `…​/24./16./8.IP` tail (same /16 shares
-//! `…​/16./8.IP`), and the exact address never leaks. Where this improves on the
-//! C++ original: the hash is **SHA-256** (via the `openssl` we already link for
-//! TLS) instead of MD5, it needs no separate hashing module, and the whole path
-//! stays `#![forbid(unsafe_code)]`. The key lives in the config (`cloak_key = …`);
-//! with no key set, cloaking is simply off and +x is a no-op.
+//! Two IPs in the same /24 share the `…/24./16./8.IP` tail; the exact address
+//! never appears. The hash is SHA-256 (via the openssl already linked for TLS).
 
 use openssl::sha::sha256;
 
@@ -29,7 +21,7 @@ use crate::module::Module;
 use crate::server::Server;
 use crate::Uid;
 
-/// The suffix marking a cloaked IP address (InspIRCd's default is `.IP` too).
+/// The suffix marking a cloaked IP address.
 const IP_SUFFIX: &str = ".IP";
 
 pub struct Cloak;
@@ -42,7 +34,7 @@ impl Module for Cloak {
     /// Compute the cloak once, at connect, and cloak the user by default (+x).
     fn on_user_connect(&mut self, srv: &mut Server, uid: Uid) {
         let Some(key) = srv.cloak_key.clone() else {
-            return; // no cloak key configured -> cloaking disabled
+            return; // no key configured: cloaking disabled
         };
         let Some(host) = srv.users.get(&uid).map(|u| u.host.clone()) else {
             return;
@@ -87,7 +79,7 @@ fn parse_v4(host: &str) -> Option<(u8, u8, u8, u8)> {
 /// - IPv4 `a.b.c.d` → `H(a.b.c.d).H(a.b.c).H(a.b).H(a).IP` — one keyed segment per
 ///   octet-prefix tier (/32 · /24 · /16 · /8), so subnet bans keep working while
 ///   the exact address never appears.
-/// - IPv6 → `ALPHA.BETA.GAMMA.IP` (mirrors InspIRCd), coarsened by hextet groups.
+/// - IPv6 → `ALPHA.BETA.GAMMA.IP`, coarsened by hextet groups.
 /// - hostname → keep the last two labels (the domain), mask everything to the left
 ///   (no `.IP` — a resolved name isn't a raw address).
 pub fn cloak_host(key: &str, host: &str) -> String {
@@ -125,7 +117,7 @@ mod tests {
         let c = cloak_host("secret", "203.0.113.7");
         assert_eq!(c, cloak_host("secret", "203.0.113.7")); // stable
         assert!(!c.contains("203.0.113")); // the dotted IP never appears
-        assert!(c.ends_with(".IP")); // InspIRCd-style IP suffix
+        assert!(c.ends_with(".IP")); // IP suffix
         assert_eq!(c.split('.').count(), 5); // H32.H24.H16.H8.IP
     }
 

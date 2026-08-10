@@ -1,18 +1,12 @@
 //! antimixedutf8 — blocks spam that mixes Unicode scripts within words (Latin
-//! letters swapped for Cyrillic/Greek look-alikes: "ＦᏒｅe Ⅴ1аgrа"), a very common
-//! obfuscation. This is reverse's own detection model — the scoring rules and the
-//! confusable / fancy-Latin / zero-width tables — implemented from scratch in
-//! native Rust. (The *tables and weights* are the detector's spec: they define
-//! what counts as spam. Everything around them is original echoIRCd code.)
+//! letters swapped for Cyrillic/Greek look-alikes: "ＦᏒｅe Ⅴ1аgrа"). The scoring
+//! rules and the confusable / fancy-Latin / zero-width tables define what counts as
+//! spam.
 //!
 //! Per word: letters from more than one script score; so do words that are ASCII
 //! mixed with Latin-confusable letters, words built almost entirely of confusables,
 //! and "fancy" styled-Latin words. Zero-width chars score too. At/above the
 //! configured threshold the action fires (block | kill | gline | kline | zline).
-//!
-//! Rust strings are valid UTF-8, so we walk codepoints straight from `chars()` and
-//! fold the per-word state through a `Scorer` — idiomatic Rust, no manual UTF-8
-//! decoding and no ref-capturing lambdas.
 
 use crate::module::{ModResult, Module};
 use crate::server::Server;
@@ -47,9 +41,9 @@ fn classify_script(cp: u32) -> Script {
     }
 }
 
-/// A non-Latin letter that LOOKS like an ASCII Latin letter (the homoglyphs
-/// spammers swap in). Catches pure-homoglyph words that script-mixing misses,
-/// without tripping on genuine monolingual text.
+/// A non-Latin letter that looks like an ASCII Latin letter (a homoglyph). Catches
+/// pure-homoglyph words that script-mixing misses, without tripping on genuine
+/// monolingual text.
 fn is_latin_confusable(cp: u32) -> bool {
     matches!(
         cp,
@@ -86,7 +80,7 @@ fn is_invisible(cp: u32) -> bool {
     )
 }
 
-/// Per-message tally, folded word by word: the per-word scoring state as a struct.
+/// Per-message tally, folded word by word.
 #[derive(Default)]
 struct Scorer {
     mixedwords: u32,     // words mixing >1 real script
@@ -119,9 +113,8 @@ impl Scorer {
     }
 
     fn end_word(&mut self) {
-        // Confusable mixed WITH real ASCII in one word = the classic "swap a few
-        // letters" attack (already script-mixing) — count it ONCE here so a single
-        // stray homoglyph doesn't double-score.
+        // Confusable mixed with real ASCII in one word: count once here so a single
+        // stray homoglyph doesn't also score as script-mixing.
         if self.word_has_confusable && self.word_has_ascii {
             self.homoglyphwords += 1;
         } else if self.word_scripts() >= 2 {
@@ -283,17 +276,15 @@ impl Module for AntiMixedUtf8 {
                 u.addr.ip().to_string(),
             )
         };
-        // Show opers WHAT was blocked (a sanitized snippet) so they can judge the
-        // catch and spot false positives — the whole point of an antispam log.
+        // Snotice a sanitized snippet so opers can judge the catch / spot false positives.
         srv.snotice(&format!(
             "ANTIMIXEDUTF8: blocked spam from {mask} to {target} (score {score} >= {}): {}",
             srv.amu.threshold,
             snippet(body)
         ));
 
-        // Always tell the sender their message was blocked and that opers were
-        // told — even for punitive actions, since the writer flushes queued lines
-        // before a disconnect.
+        // Notify the sender even for punitive actions: the writer flushes queued
+        // lines before a disconnect.
         srv.send(
             uid,
             format!(

@@ -3,8 +3,6 @@
 //! control codes or fancy Unicode an admin doesn't want in channel names). Existing
 //! channels are unaffected. Off unless `channames_deny` is set. Dispatched from
 //! `Server::join`.
-//!
-//! Behaviour reference: InspIRCd's `m_channames`. Original native Rust.
 
 use crate::numeric::ERR_BADCHANNEL;
 use crate::server::Server;

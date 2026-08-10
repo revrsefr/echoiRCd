@@ -1,7 +1,6 @@
-//! metadata — InspIRCd's `m_ircv3_metadata` (draft/metadata-2). Client METADATA
-//! GET/LIST/SET/CLEAR on users and channels, op-gated, with change notices in a
-//! `metadata` batch. Self-contained: the store lives in `Server.ext`, cleaned up
-//! by the on_user_quit hook; the command and its logic are all here.
+//! metadata — IRCv3 draft/metadata-2. Client METADATA GET/LIST/SET/CLEAR on users
+//! and channels, op-gated, with change notices in a `metadata` batch. The store
+//! lives in `Server.ext`, cleaned up by the on_user_quit hook.
 
 use std::collections::HashMap;
 
@@ -161,7 +160,7 @@ impl Command for MetadataCmd {
                     }
                 }
                 if key.starts_with('#') {
-                    save(s); // persist channel metadata (m_ircv3_metadata_db)
+                    save(s); // persist channel metadata
                 }
                 let setter = s.users.get(&uid).map(|u| u.prefix()).unwrap_or_default();
                 let note = match &value {
@@ -214,9 +213,9 @@ fn db_path(s: &Server) -> String {
     format!("{}.metadata", s.conf_path)
 }
 
-/// Persist channel metadata (the `#`-keyed entries) so it survives a restart —
-/// InspIRCd `m_ircv3_metadata_db`. Per-user metadata (`u<uid>`) is intentionally
-/// not saved: uids don't persist across restarts.
+/// Persist channel metadata (the `#`-keyed entries) so it survives a restart.
+/// Per-user metadata (`u<uid>`) is intentionally not saved: uids don't persist
+/// across restarts.
 pub fn save(s: &Server) {
     let mut out = String::new();
     if let Some(st) = s.ext.get::<MetaStore>() {

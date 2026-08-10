@@ -1,6 +1,5 @@
-//! restrictcommands — hold back chosen commands from brand-new / unregistered
-//! users (UnrealIRCd's `set::restrict-commands`), with exemptions. reverse's own
-//! module. Each restriction is one config line:
+//! Hold back chosen commands from brand-new / unregistered users, with exemptions.
+//! Each restriction is one config line:
 //!
 //! ```text
 //! restrictcommand = LIST connectdelay=60 exemptidentified=yes exemptwebirc=yes \

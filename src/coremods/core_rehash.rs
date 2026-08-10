@@ -1,11 +1,8 @@
-//! core_rehash — the REHASH command. Re-reads the config file and applies every
-//! setting that can change at runtime, the way InspIRCd's rehash does:
-//!
-//!   * opers only; replies with RPL_REHASHING (382) and a server-notice to +s opers;
-//!   * takes an optional `<servermask>` (we only rehash if it matches this server —
-//!     there's no remote-rehash over S2S yet);
-//!   * **keeps the running config if the file can't be read** (via `Config::try_load`),
-//!     so a REHASH of a deleted/renamed config never resets opers/cloak-key to defaults.
+//! REHASH: re-read the config file and apply every setting that can change at
+//! runtime (opers only; replies RPL_REHASHING 382). Takes an optional
+//! `<servermask>`, matched against this server's name (no remote rehash over S2S).
+//! A missing/unreadable config file leaves the running config intact (via
+//! `Config::try_load`), so opers/cloak-key are never reset to defaults.
 //!
 //! Reloadable live: MOTD, oper blocks, cloak key, +G censor words, antimixedutf8,
 //! and the reverse-DNS options. Listener/bind/SID changes still need a restart.
@@ -50,8 +47,7 @@ impl Command for Rehash {
         let path = s.conf_path.clone();
         match Config::try_load(&path) {
             Some(fresh) => {
-                // echoIRCd's own announcement (not InspIRCd's) — broadcast to
-                // everyone connected, not just opers.
+                // announce to everyone connected, not just opers
                 s.announce(&format!(
                     "admin {who} has changed the configuration of the server."
                 ));

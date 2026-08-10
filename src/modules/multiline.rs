@@ -1,10 +1,9 @@
-//! multiline — the server side of IRCv3 draft/multiline. A client wraps one long
-//! message in a `BATCH +<ref> draft/multiline <target>`; the `@batch=<ref>`-tagged
-//! PRIVMSG/NOTICE lines are buffered here (see `Ircd::dispatch`) and, when
-//! `BATCH -<ref>` closes, reassembled (honouring `draft/multiline-concat`) and
-//! delivered as normal messages. Self-contained: the in-flight batches live in
-//! `Server.ext`, cleaned up by the on_user_quit hook; the BATCH command and the
-//! accumulate/close logic are all here.
+//! multiline — server side of IRCv3 draft/multiline. A client wraps one long message
+//! in a `BATCH +<ref> draft/multiline <target>`; the `@batch=<ref>`-tagged
+//! PRIVMSG/NOTICE lines are buffered (see `Ircd::dispatch`) and, when `BATCH -<ref>`
+//! closes, reassembled (honouring `draft/multiline-concat`) and delivered as normal
+//! messages. Limits: multiline_maxbytes / multiline_maxlines. In-flight batches live
+//! in `Server.ext`, cleaned up by the on_user_quit hook.
 
 use std::collections::HashMap;
 

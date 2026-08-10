@@ -1,9 +1,8 @@
-//! reputation — InspIRCd `m_reputation` (© reverse). Per-network-address reputation
-//! scoring. Every `bumpinterval` (default 5m) each connected user's masked address
-//! gains +1 (+2 if logged into services), provided they're in a channel with at
-//! least `minchanmembers` members. Scores decay per the `reputationexpire` rules
-//! and persist to disk. Exposes the `y:` score extban, WHOIS visibility, and the
-//! `REPUTATION` oper command. Everything is config-driven (see `[reputation_*]`).
+//! Per-network-address reputation scoring. Every `bumpinterval` (default 5m) each
+//! connected user's masked address gains +1 (+2 if logged into services), provided
+//! they're in a channel with at least `minchanmembers` members. Scores decay per the
+//! `reputationexpire` rules and persist to disk. Exposes the `y:` score extban, WHOIS
+//! visibility, and the `REPUTATION` oper command. Config-driven (see `[reputation_*]`).
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -49,7 +48,7 @@ fn mask_ip(ip: IpAddr, v4: u8, v6: u8) -> IpAddr {
     }
 }
 
-// --- config, read straight from the config file (no fields on Server) ----------
+// --- config accessors ----------------------------------------------------------
 fn v4prefix(s: &Server) -> u8 {
     s.conf_num::<u8>("reputation_ipv4prefix", 32).clamp(1, 32)
 }
@@ -82,7 +81,7 @@ fn expire_rules(s: &Server) -> Vec<(i32, u64)> {
         })
         .collect();
     if rules.is_empty() {
-        // Unreal defaults: score<=2 after 1h, <=6 after 7d, <=12 after 30d, any after 90d
+        // defaults: score<=2 after 1h, <=6 after 7d, <=12 after 30d, any after 90d
         vec![(2, 3600), (6, 604800), (12, 2592000), (-1, 7776000)]
     } else {
         rules

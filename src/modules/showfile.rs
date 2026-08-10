@@ -1,5 +1,4 @@
-//! showfile — serve a text file as its own command (InspIRCd's `m_showfile`).
-//! Config, one line per file:
+//! Serve a text file as its own command. Config, one line per file:
 //!
 //! ```text
 //! showfile = <COMMAND> <path>      # e.g.  showfile = RULES /etc/echoircd/rules.txt
@@ -8,7 +7,6 @@
 //! makes `/RULES` stream the file to the client. Dispatched from the same place as
 //! command aliases (an unknown, config-named command), so no static registration is
 //! needed. The file is read fresh on each use, so edits show without a REHASH.
-//! Original native Rust.
 
 use crate::server::Server;
 use crate::Uid;

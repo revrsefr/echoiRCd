@@ -1,13 +1,9 @@
-//! geoip — native MaxMind DB (`.mmdb`) country lookup, with the `G:<cc>` geoban
-//! extban, the `GEOIP` command and a WHOIS country line. The `maxminddb` crate is
-//! off-limits (openssl+mio only), so the binary format is parsed by hand in pure
-//! std: the metadata section, the record-size-aware search tree, and the typed data
-//! decoder — no crate, no `unsafe`, no C FFI.
+//! MaxMind DB (`.mmdb`) country lookup, with the `G:<cc>` geoban extban, the
+//! `GEOIP` command and a WHOIS country line. The binary format is parsed by hand:
+//! the metadata section, the record-size-aware search tree, and the typed data
+//! decoder.
 //!
 //! Config: `geoip_database = /path/to/GeoLite2-Country.mmdb` (loaded once at boot).
-//!
-//! Behaviour reference: InspIRCd's `m_geo_maxmind` + `m_geoban` + `m_geocmd`.
-//! Original native Rust.
 
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -375,15 +371,18 @@ mod tests {
     use super::*;
     use std::net::Ipv4Addr;
 
-    // A real GeoLite2-Country.mmdb if one is present; otherwise the test no-ops so
-    // CI (which has no database) stays green.
+    // Use a database from the env var if set, else common locations; the test
+    // no-ops when none is present so CI stays green.
     const DB_CANDIDATES: &[&str] = &[
-        "/home/debian/irc/ircd/inspircd/run/conf/geodata/GeoLite2-Country.mmdb",
         "/usr/share/GeoIP/GeoLite2-Country.mmdb",
+        "/etc/echoircd/GeoLite2-Country.mmdb",
     ];
 
     fn load() -> Option<Mmdb> {
-        DB_CANDIDATES.iter().find_map(|p| Mmdb::open(p))
+        std::env::var("ECHOIRCD_TEST_MMDB")
+            .ok()
+            .and_then(|p| Mmdb::open(&p))
+            .or_else(|| DB_CANDIDATES.iter().find_map(|p| Mmdb::open(p)))
     }
 
     #[test]

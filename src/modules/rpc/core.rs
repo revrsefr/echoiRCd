@@ -1,6 +1,5 @@
-//! rpc core provider — introspection: `rpc.methods` (list the interface),
-//! `rpc.info` (identity + methods), and `server.info` / `stats.get` (identity +
-//! network counts). InspIRCd's `m_rpc_core` + the legacy `stats.get`.
+//! Core RPC introspection: `rpc.methods` (list the interface), `rpc.info`
+//! (identity + methods), and `server.info` / `stats.get` (identity + network counts).
 
 use super::json::{obj, qstr};
 use super::{RpcError, ALL_METHODS};

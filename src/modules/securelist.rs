@@ -1,13 +1,9 @@
-//! securelist — hold back the `/LIST` command until a user has been connected for
-//! a while, which defeats spambots that connect, `LIST`, spam every channel and
-//! leave. Non-exempt users who `LIST` too early get an optional notice and a
-//! throwaway *fake* channel list (so a bot waiting on the reply is satisfied and
-//! wastes its time), then the real `LIST` is denied. Exempt: opers, logged-in
-//! accounts (when `securelist_exemptregistered`), and hosts matching a
-//! `securelist_exception` glob. Off unless `securelist = yes`; all config-driven.
-//!
-//! Behaviour reference: InspIRCd's `m_securelist`. Original native Rust; the fake
-//! names use OpenSSL's CSPRNG (already a dependency) rather than any new crate.
+//! Hold back the `/LIST` command until a user has been connected for a while, which
+//! defeats spambots that connect, `LIST`, spam every channel and leave. Non-exempt
+//! users who `LIST` too early get an optional notice and a throwaway *fake* channel
+//! list (so a bot waiting on the reply is satisfied), then the real `LIST` is denied.
+//! Exempt: opers, logged-in accounts (when `securelist_exemptregistered`), and hosts
+//! matching a `securelist_exception` glob. Off unless `securelist = yes`.
 
 use openssl::rand::rand_bytes;
 

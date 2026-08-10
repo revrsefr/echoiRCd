@@ -1,8 +1,6 @@
-//! filter — InspIRCd's `m_filter`: oper-configured spam/word filters. A glob is
-//! matched against PRIVMSG/NOTICE text and, on a hit, an action is taken. Fully
-//! self-contained: the rule set lives in `Server.ext` (the module-owned typemap),
-//! the `FILTER` command manages it, and the `on_pre_message` hook enforces it —
-//! nothing leaks into server.rs or config.rs.
+//! Oper-configured spam/word filters: a glob is matched against PRIVMSG/NOTICE text
+//! and, on a hit, an action is taken. The rule set lives in `Server.ext`, the
+//! `FILTER` command manages it, and the `on_pre_message` hook enforces it.
 
 use crate::channels::glob_match;
 use crate::command::{CmdResult, Command};
@@ -21,7 +19,7 @@ pub struct SpamFilter {
     pub reason: String,
 }
 
-/// The rule set — stored in `Server.ext`, so it never touches the core struct.
+/// The rule set, stored in `Server.ext`.
 #[derive(Default)]
 pub struct Filters(pub Vec<SpamFilter>);
 

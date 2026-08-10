@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # native-rust-guard — echoIRCd's standing invariant.
 #
-# echoIRCd is ORIGINAL Rust. InspIRCd (and any other ircd) is a reference for
-# BEHAVIOUR / protocol / API shape ONLY — never copied, never translated. Every
-# module, command and core function is written natively in Rust. This guard fails
-# if that slips. Run it any time:  bash scripts/native-rust-guard.sh
-# It is also wired into a Claude Code hook so it runs automatically on edits.
+# echoIRCd is ORIGINAL Rust — no code copied or translated from any other project.
+# Every module, command and core function is written natively in Rust. This guard
+# fails if that slips. Run it any time:  bash scripts/native-rust-guard.sh
+# It is also wired into an editor hook so it runs automatically on edits.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2

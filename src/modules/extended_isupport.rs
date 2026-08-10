@@ -1,11 +1,7 @@
-//! extended_isupport — the `draft/extended-isupport` capability. reverse's own
-//! module. Normally ISUPPORT (005) is a one-shot at registration; with this cap a
-//! client can send the `ISUPPORT` command any time to re-request the current tokens
-//! (handy after a rehash changes them). If the client also has `batch`, the reply
-//! is wrapped in a `draft/isupport` BATCH so the multi-line set arrives atomically —
-//! the emission itself lives in `Server::send_isupport`, shared with the welcome burst.
-//!
-//! Behaviour reference: reverse's InspIRCd `m_ircv3_extended_isupport`. Original native Rust.
+//! `draft/extended-isupport` capability: lets a client re-request the current
+//! ISUPPORT (005) tokens at any time via the `ISUPPORT` command. With the `batch`
+//! cap the reply is wrapped in a `draft/isupport` BATCH so the set arrives atomically.
+//! Emission lives in `Server::send_isupport`, shared with the welcome burst.
 
 use crate::command::{CmdResult, Command};
 use crate::numeric::ERR_UNKNOWNCOMMAND;

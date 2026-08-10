@@ -1,13 +1,13 @@
-//! rpc ban provider — `xline.list`, `xline.add`, `xline.del`. InspIRCd's
-//! `m_rpc_ban`. Covers every echoIRCd x-line kind (K/G/Z/E/SHUN/Q/CBAN) through the
-//! same `add_xline`/`remove_xline` primitives the oper commands use.
+//! X-line RPC provider: `xline.list`, `xline.add`, `xline.del`. Covers every
+//! x-line kind (K/G/Z/E/SHUN/Q/CBAN) via the same `add_xline`/`remove_xline`
+//! primitives the oper commands use.
 
 use super::json::{self, obj, qstr};
 use super::RpcError;
 use crate::server::Server;
 use crate::xline::{parse_duration, XKind};
 
-/// Map a request `type` (letter or unreal-ish name) to an `XKind`.
+/// Map a request `type` (letter tag or full name like `KLINE`) to an `XKind`.
 fn kind_of(t: &str) -> Option<XKind> {
     let up = t.to_ascii_uppercase();
     XKind::from_tag(&up).or_else(|| {

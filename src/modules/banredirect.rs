@@ -1,8 +1,7 @@
 //! banredirect — a ban of the form `+b <mask>$<#channel>` bounces a matching,
 //! banned user into `#channel` instead of refusing them outright. The redirect
 //! fires at most once, guarded by `Server.in_redirect` (shared with the `+L`
-//! full-channel redirect), so it can never loop. Reference: InspIRCd's
-//! `m_banredirect`. Original native Rust.
+//! full-channel redirect), so it can never loop.
 
 use crate::channels::glob_match;
 use crate::server::Server;

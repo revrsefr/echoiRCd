@@ -6,9 +6,8 @@
 //! conn_waitpong_killonbadreply = yes   # disconnect on a wrong pong (default: keep waiting)
 //! ```
 //!
-//! The gate itself is the core `User.waitpong` field (checked in `try_register`,
-//! like `dns_pending`); this module just arms it at connect and clears it on the
-//! matching PONG. Behaviour reference: InspIRCd's `m_conn_waitpong`. Native Rust.
+//! The gate is the core `User.waitpong` field (checked in `try_register`); this
+//! module arms it at connect and clears it on the matching PONG.
 
 use crate::server::Server;
 use crate::Uid;
@@ -37,7 +36,7 @@ pub fn arm(s: &mut Server, uid: Uid) {
 /// the client (else keep waiting — a real client will retry on the next PING).
 pub fn on_pong(s: &mut Server, uid: Uid, params: &[String]) {
     let Some(want) = s.users.get(&uid).and_then(|u| u.waitpong.clone()) else {
-        return; // not waiting (already satisfied, or feature off)
+        return; // not waiting: already satisfied, or feature off
     };
     let got = params.last().map(String::as_str).unwrap_or("");
     if got == want {

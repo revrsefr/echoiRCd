@@ -1,8 +1,6 @@
-//! ircv3_extjwt — the `EXTJWT` command: hand a client a short-lived, server-signed
-//! JWT it can present to an *external* service (a web app, file host, …) to prove
-//! "this IRC user, with these modes, in this channel, right now". The service
-//! trusts the token because it shares the HS256 secret. Uses the native
-//! [`crate::modules::jwt`] signer.
+//! `EXTJWT` command: issues a short-lived, server-signed HS256 JWT a client can
+//! present to an external service to prove its IRC identity, modes and channel
+//! membership. Uses the [`crate::modules::jwt`] signer.
 //!
 //! `EXTJWT *|<channel> [<service>]` → one or more
 //! `:<server> EXTJWT <target> <service> [*] <chunk>` lines (a `*` param before the
@@ -11,8 +9,6 @@
 //!
 //! Config: `extjwt_secret` (+ `extjwt_duration`, default 30s); optional named
 //! services via `extjwt_service = <name> <secret> [duration]`. Off with no secret.
-//!
-//! Behaviour reference: InspIRCd's `m_ircv3_extjwt`. Original native Rust.
 
 use crate::command::{CmdResult, Command};
 use crate::modules::jwt;

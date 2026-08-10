@@ -1,6 +1,6 @@
-//! dccallow — block unwanted DCC file transfers (and optionally DCC CHAT) unless
-//! the recipient has explicitly allowed the sender with `/DCCALLOW +<nick>`.
-//! Mirrors InspIRCd's `m_dccallow`. Config (all optional, all runtime-read):
+//! dccallow: block DCC SEND matching configured filename globs (and, with
+//! `dccallow_blockchat`, DCC CHAT) unless the recipient has allowed the sender
+//! with `/DCCALLOW +<nick>`. Config (all optional, all runtime-read):
 //!
 //! ```text
 //! dccallow_blockfile = *.exe        # repeatable: filename globs to block on DCC SEND
@@ -9,8 +9,7 @@
 //! dccallow_maxentries = 20          # per-user allow-list cap (default 20)
 //! ```
 //!
-//! A user's allow-list ("nicks I permit to DCC me") lives on their `User.ext`, so
-//! it vanishes cleanly when they quit. Original native Rust.
+//! A user's allow-list lives on their `User.ext`, so it vanishes when they quit.
 
 use crate::channels::glob_match;
 use crate::command::{CmdResult, Command};

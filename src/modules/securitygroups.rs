@@ -1,8 +1,7 @@
-//! securitygroups — UnrealIRCd-style security groups (InspIRCd `m_securitygroups`).
-//! A `securitygroup` config line defines a named set of users by AND-ed criteria
-//! (host masks, TLS, account, oper, bot, webirc, reputation score range). Groups
-//! drive the `g:` matching extban, the `SECURITYGROUPS` command, and a WHOIS line.
-//! Self-contained: the group defs live in `Server.sec_groups`; evaluation is here.
+//! Named security groups. A `securitygroup` config line defines a named set of users
+//! by AND-ed criteria (host masks, TLS, account, oper, bot, webirc, reputation score
+//! range). Groups drive the `g:` matching extban, the `SECURITYGROUPS` command, and a
+//! WHOIS line.
 
 use crate::channels::glob_match;
 use crate::command::{CmdResult, Command};
@@ -19,7 +18,7 @@ enum Tri {
     No,
 }
 
-/// A UnrealIRCd-style security group — all criteria AND-ed.
+/// A security group — all criteria AND-ed.
 #[derive(Clone, Default)]
 struct SecGroup {
     name: String,

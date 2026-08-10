@@ -1,11 +1,10 @@
-//! extbanbanlist — the matching extban `b:<#channel>`: a user is caught if they are
-//! on `#channel`'s ban list. Lets one channel share (borrow) another's bans, e.g.
-//! `+b b:#staff` bans everyone banned in #staff. Reference: InspIRCd's
-//! `m_extbanbanlist`. Original native Rust.
+//! extbanbanlist: matching extban `b:<#channel>` catches a user if they are on
+//! `#channel`'s ban list, letting one channel borrow another's bans (e.g.
+//! `+b b:#staff` bans everyone banned in #staff).
 //!
-//! The match is deliberately *non-recursive* — it only tests the referenced
-//! channel's plain host-mask bans (and its plain excepts), never that channel's own
-//! extbans, so two channels referencing each other can't loop.
+//! The match is deliberately non-recursive: it tests only the referenced channel's
+//! plain host-mask bans (and its plain excepts), never that channel's own extbans,
+//! so two channels referencing each other can't loop.
 
 use crate::channels::glob_match;
 use crate::server::Server;

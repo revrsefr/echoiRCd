@@ -1,7 +1,5 @@
-//! The built-in commands, grouped the way InspIRCd groups its `coremods/`:
-//! `core_user`, `core_channel`, `core_message`, `core_mode`, `core_oper`,
-//! `core_info`. Each module exposes `commands()`; [`command_table`] assembles the
-//! registry the core dispatches through.
+//! Built-in commands. Each module exposes `commands()`; [`command_table`]
+//! assembles the registry the core dispatches through.
 
 pub mod core_channel;
 pub mod core_extra;

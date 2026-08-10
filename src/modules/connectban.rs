@@ -1,16 +1,12 @@
-//! connectban — z-line an IP range that opens an excessive number of connections
-//! to the server. Each connection bumps a per-range counter; when it reaches
-//! `connectban_threshold` the range is z-lined for `connectban_duration` and the
-//! counter cleared. The whole tally is periodically wiped (`connectban_gcinterval`)
-//! so long-lived counts don't accumulate — mirroring InspIRCd's garbage-collect.
-//! A `connectban_bootwait` grace after start avoids banning the reconnect storm
-//! when the server (re)starts. Off unless `connectban = yes`; all state in
-//! `Server.ext`, nothing on `Server`.
+//! connectban: z-line an IP range that opens too many connections. Each connection
+//! bumps a per-range counter; at `connectban_threshold` the range is z-lined for
+//! `connectban_duration` and the counter cleared. The tally is periodically wiped
+//! (`connectban_gcinterval`) so long-lived counts don't accumulate. A
+//! `connectban_bootwait` grace after start avoids banning the restart reconnect
+//! storm. Off unless `connectban = yes`; all state in `Server.ext`.
 //!
-//! Because echoIRCd z-lines match by glob (not CIDR), the banned range is emitted
-//! as a wildcard mask (`1.2.3.*` for an IPv4 /24, the exact IP for a /32).
-//!
-//! Behaviour reference: InspIRCd's `m_connectban`. Original native Rust.
+//! z-lines match by glob, not CIDR, so the banned range is emitted as a wildcard
+//! mask (`1.2.3.*` for an IPv4 /24, the exact IP for a /32).
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -116,7 +112,7 @@ pub fn on_connect(s: &mut Server, ip: IpAddr) {
     ));
 }
 
-/// Periodically clears the whole tally, like InspIRCd's garbage collector.
+/// Periodically clears the whole tally.
 pub struct ConnectBan;
 impl Module for ConnectBan {
     fn name(&self) -> &'static str {

@@ -1,15 +1,13 @@
-//! DNSBL — DNS blocklist checks on connect, InspIRCd `m_dnsbl` style. On connect
-//! the resolver thread reverses the client's IP under each configured blocklist
-//! zone and A-looks it up (see [`crate::resolver`]); a listing triggers the
-//! configured action. Works for IPv4 **and** IPv6 (v4 reversed octets or v6
-//! reversed nibbles under the zone) — a v4-only blocklist simply NXDOMAINs a v6
-//! query, which reads as "not listed".
+//! DNSBL: DNS blocklist checks on connect. The resolver thread reverses the
+//! client's IP under each configured blocklist zone and A-looks it up (see
+//! [`crate::resolver`]); a listing triggers the configured action. Works for IPv4
+//! (reversed octets) and IPv6 (reversed nibbles); a v4-only blocklist NXDOMAINs a
+//! v6 query, which reads as "not listed".
 //!
-//! Actions (`dnsbl_action`): `mark` just shows the notice and lets them in
-//! (default, safe), `kill` disconnects, `kline`/`gline`/`zline` add a 1-day ban
-//! and disconnect. This isn't a hook `Module` — it's driven from the connection
-//! lifecycle (`Server::add_conn` → `on_resolved`) — but it lives here as its own
-//! self-contained unit.
+//! Actions (`dnsbl_action`): `mark` shows the notice and lets them in (default),
+//! `kill` disconnects, `kline`/`gline`/`zline` add a 1-day ban and disconnect.
+//! Driven from the connection lifecycle (`Server::add_conn` → `on_resolved`)
+//! rather than as a hook `Module`.
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;

@@ -1,6 +1,5 @@
-//! ircv3_network_icon — InspIRCd `m_ircv3_network_icon`. Advertises a network icon
-//! via the `draft/ICON` ISUPPORT token from `network_icon = <url>`. Config-driven;
-//! nothing lives on `Server`.
+//! network_icon — advertise a network icon via the `ICON` ISUPPORT token from
+//! `network_icon = <url>`.
 
 use crate::server::Server;
 

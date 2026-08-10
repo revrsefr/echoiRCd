@@ -649,7 +649,7 @@ impl Command for Notice {
 
 /// TAGMSG — an IRCv3 message that carries only client tags (typing, reactions, …)
 /// and no text. Relayed to targets whose clients enabled `message-tags`; clients
-/// without it never see it. Mirrors PRIVMSG's target / membership / +m rules.
+/// without it never see it. Applies PRIVMSG's target / membership / +m rules.
 struct TagMsg;
 impl Command for TagMsg {
     fn name(&self) -> &'static str {

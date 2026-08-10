@@ -1,24 +1,19 @@
-//! filehost — the DRAFT `reverse.im/filehost` IRCv3 extension. reverse's own
-//! module: it advertises an external file-hosting service to clients and hands a
-//! logged-in user a short-lived, server-signed JWT upload link (so the web uploader
-//! trusts them without a second login — pairs with reverse's rubot upload service).
+//! `reverse.im/filehost` (draft) IRCv3 extension: advertises an external
+//! file-hosting service and hands a logged-in user a short-lived, server-signed JWT
+//! upload link so the web uploader trusts them without a second login.
 //!
 //! Surfaces:
-//!   * ISUPPORT `reverse.im/FILEHOST=<website>` + the `reverse.im/filehost` cap
-//!     (so a client knows the service exists and can show an upload button).
+//!   * ISUPPORT `reverse.im/FILEHOST=<website>` + the `reverse.im/filehost` cap.
 //!   * `FILEHOST [info]` — login-gated; replies with `<website>/upload?token=<jwt>`
 //!     and usage info.
 //!   * a `reverse.im/filehost` message tag carrying JSON metadata (url/filename/
-//!     type) attached to any message that contains a `<website>/files/…` link, so
-//!     clients render the file inline. Scoped to the message's recipients (not the
-//!     whole network — cleaner than the reference's broadcast).
+//!     type) attached to any message containing a `<website>/files/…` link, so
+//!     clients render the file inline. Scoped to the message's recipients.
 //!   * `filehost_requiressl`: refuse to relay a filehost link from a plaintext user.
 //!
 //! Config: `filehost_website` (enables it) `filehost_jwt_secret` `filehost_jwt_issuer`
 //! (default FILEHOST) `filehost_token_expiry` (secs, default 3600) `filehost_requiressl`
 //! (default yes) `filehost_auth_message`.
-//!
-//! Behaviour reference: reverse's InspIRCd `m_ircv3_FILEHOST`. Original native Rust.
 
 use crate::command::{CmdResult, Command};
 use crate::module::{ModResult, Module};
@@ -38,7 +33,7 @@ pub fn isupport(s: &Server) -> Option<String> {
     website(s).map(|w| format!("reverse.im/FILEHOST={w}"))
 }
 
-/// File category from a filename extension (mirrors the reference's set).
+/// File category from a filename extension.
 fn file_type(filename: &str) -> &'static str {
     let ext = filename
         .rsplit_once('.')

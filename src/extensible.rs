@@ -1,15 +1,7 @@
-//! Typed per-object metadata — echoIRCd's answer to InspIRCd's `Extensible` /
-//! `ExtensionItem`.
-//!
-//! In C++ InspIRCd, a module attaches data to a user/channel through a `void*`
-//! `ExtensionItem`: it registers the item, casts on every access, and must supply
-//! a `free()` callback — a well-worn source of leaks, type-confusion and
-//! use-after-free (the reason the core carries a whole "cull list").
-//!
-//! Here it's a `TypeId`-keyed typemap. A module stores its own concrete type and
-//! gets it back type-checked; the value is owned by the object it hangs off, so
-//! it's dropped automatically when that object is — no registry, no `unsafe`, no
-//! manual free, no dangling data.
+//! Typed per-object metadata: a `TypeId`-keyed typemap. A module stores its own
+//! concrete type and gets it back type-checked; the value is owned by the object
+//! it hangs off, so it's dropped automatically when that object is — no registry,
+//! no manual free, no dangling data.
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;

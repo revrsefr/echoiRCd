@@ -1,6 +1,5 @@
-//! rpc server provider — `server.list`, `server.rehash`, `server.disconnect`.
-//! InspIRCd's `m_rpc_server`. (`server.connect` needs the socketengine's dialer,
-//! which isn't reachable from the core thread — use the `CONNECT` command instead.)
+//! Server RPC provider: `server.list`, `server.rehash`, `server.connect`,
+//! `server.disconnect`.
 
 use super::json::{obj, qstr};
 use super::RpcError;

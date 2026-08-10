@@ -1,14 +1,11 @@
-//! account_registration — IRCv3 `draft/account-registration` (the `REGISTER` /
-//! `VERIFY` commands and the cap that advertises them), bridged to a configurable
-//! HTTP accounts API. reverse's own module: the old Swaygo Django backend is gone,
-//! so this talks to whatever `acctregister_registerurl` / `_verifyurl` you point it
-//! at, POSTing form-encoded fields with an `X-API-Key` header.
+//! account_registration — IRCv3 `draft/account-registration` (`REGISTER` / `VERIFY`
+//! commands and the cap advertising them), bridged to a configurable HTTP accounts
+//! API. POSTs form-encoded fields with an `X-API-Key` header.
 //!
 //! The API call runs on a worker thread (`Server::spawn_http`) and its result comes
 //! back as `Event::HttpResult` → [`on_http_result`], so a slow endpoint never blocks
 //! the core. On success (and when `acctregister_autologin`) the user is logged into
-//! the new account. Everything is config-driven; the only per-IP state (rate limit)
-//! lives in `Server.ext`.
+//! the new account. Per-IP rate-limit state lives in `Server.ext`.
 //!
 //! Config (all under flat keys):
 //!   account_registration = yes        enable

@@ -1,7 +1,7 @@
-//! X-lines — server bans (InspIRCd's `m_xline`): KLINE/GLINE on `user@host`,
-//! ZLINE on an IP. Matched at registration (a banned client is refused) and when
-//! the line is added (matching clients are killed); expired lines are reaped on
-//! the tick. Kept in `Server.xlines`.
+//! X-lines — server bans: KLINE/GLINE on `user@host`, ZLINE on an IP. Matched at
+//! registration (a banned client is refused) and when the line is added (matching
+//! clients are killed); expired lines are reaped on the tick. Kept in
+//! `Server.xlines`.
 
 use crate::channels::glob_match;
 use crate::server::{now, Server};
@@ -247,7 +247,7 @@ impl Server {
         format!("{}.xlines", self.conf_path)
     }
 
-    /// Persist all current x-lines so they survive a restart (InspIRCd `m_xline_db`).
+    /// Persist all current x-lines so they survive a restart.
     pub fn save_xlines(&self) {
         let mut out = String::new();
         for x in &self.xlines {

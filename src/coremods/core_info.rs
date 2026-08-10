@@ -18,8 +18,8 @@ pub fn commands() -> Vec<Box<dyn Command>> {
     ]
 }
 
-/// SSLINFO — report a user's TLS status and client-cert fingerprint (InspIRCd
-/// `m_sslinfo`). You may query yourself; querying another user requires oper.
+/// SSLINFO — report a user's TLS status and client-cert fingerprint. You may
+/// query yourself; querying another user requires oper.
 struct SslInfo;
 impl Command for SslInfo {
     fn name(&self) -> &'static str {

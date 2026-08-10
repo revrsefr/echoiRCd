@@ -1,12 +1,9 @@
-//! WebSocket transport (RFC 6455) — lets browser IRC clients (KiwiIRC, gamja,
-//! The Lounge, reverse's Orbit, …) connect straight to echoIRCd, no Node bridge.
-//! It's a transport, not a pluggable module, so it lives beside `tls.rs`/`http.rs`
-//! at the I/O edge: a thread-per-connection listener that does the HTTP Upgrade
-//! handshake, then frames the IRC byte stream in and out of WebSocket frames. One
-//! thread owns each socket (like the TLS path) so frames never interleave.
-//!
-//! Native only: SHA-1 + base64 for the accept key come from OpenSSL; the framing
-//! is hand-rolled; no new crate, no `unsafe`.
+//! WebSocket transport (RFC 6455) — lets browser IRC clients connect straight to
+//! echoIRCd, no bridge. It's a transport, not a pluggable module, so it lives
+//! beside `tls.rs`/`http.rs` at the I/O edge: a thread-per-connection listener
+//! that does the HTTP Upgrade handshake, then frames the IRC byte stream in and
+//! out of WebSocket frames. One thread owns each socket (like the TLS path) so
+//! frames never interleave. SHA-1 + base64 for the accept key come from OpenSSL.
 //!
 //! Config (flat keys):
 //!   bind_ws              = 127.0.0.1:8097   plaintext ws:// listener

@@ -1,6 +1,6 @@
-//! connflood — InspIRCd `m_connflood`. Refuse connections from an IP opening too
-//! many too fast. Config: `connflood = <max> <secs>`. Per-IP recent-connect times
-//! live in `Server.ext`, pruned on the tick — nothing lives on `Server`.
+//! connflood: refuse connections from an IP opening too many too fast. Config:
+//! `connflood = <max> <secs>`. Per-IP recent-connect times live in `Server.ext`,
+//! pruned on the tick.
 
 use std::collections::HashMap;
 use std::net::IpAddr;

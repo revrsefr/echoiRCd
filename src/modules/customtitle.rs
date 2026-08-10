@@ -1,15 +1,13 @@
-//! customtitle — `TITLE <name> <password>` lets a user claim a configured vanity
-//! title (shown in their WHOIS) and, optionally, a matching vhost — a lightweight
-//! "mini-oper" identity without operator privileges. Config, one block per title:
+//! customtitle: `TITLE <name> <password>` lets a user claim a configured title
+//! (shown in their WHOIS) and, optionally, a matching vhost. Config, one block per
+//! title:
 //!
 //! ```text
 //! customtitle = <name> <password> <vhost|*> <title text…>
 //! ```
 //!
-//! The password is checked via [`crate::modules::password_hash`] so it may be
+//! The password is checked via [`crate::modules::password_hash`], so it may be
 //! plaintext or a hash. The claimed title lives in the user's `ext`.
-//!
-//! Behaviour reference: InspIRCd's `m_customtitle`. Original native Rust.
 
 use crate::command::{CmdResult, Command};
 use crate::modules::password_hash;

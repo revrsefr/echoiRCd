@@ -1,8 +1,5 @@
-//! tline — `TLINE <mask>`, an oper command that reports how many currently-connected
-//! local users a would-be K/G/Z-line mask matches, so you can gauge the blast radius
-//! before actually setting the ban.
-//!
-//! Behaviour reference: InspIRCd's `m_tline`. Original native Rust.
+//! `TLINE <mask>` — oper command reporting how many currently-connected local users
+//! a would-be K/G/Z-line mask matches, to gauge the blast radius before setting the ban.
 
 use crate::channels::glob_match;
 use crate::command::{CmdResult, Command};

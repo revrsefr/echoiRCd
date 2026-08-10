@@ -1,11 +1,9 @@
-//! DNS lookups — echoIRCd's answer to InspIRCd's async resolver + `m_dnsbl`, done
-//! from scratch with std UDP (no DNS crate, no `unsafe`). Two things:
+//! DNS lookups over std UDP (no DNS crate). Two things:
 //!
 //!   * **reverse-DNS**: PTR-resolve a client IP and **forward-confirm** it (the name
-//!     must resolve back to the same IP, so a client can't fake a hostname — the
-//!     anti-spoofing InspIRCd does);
+//!     must resolve back to the same IP, so a client can't fake a hostname);
 //!   * **DNSBL**: reverse the client's v4 octets under a blocklist zone and A-lookup
-//!     it (`m_dnsbl` style), reporting the listing reply.
+//!     it, reporting the listing reply.
 //!
 //! Best-effort: any failure returns "not found / clean" and the caller keeps the
 //! IP. Runs off the core thread (never blocks the daemon), bounded in time (the UDP

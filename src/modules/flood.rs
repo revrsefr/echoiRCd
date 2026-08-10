@@ -1,10 +1,6 @@
-//! Flood protection — a module that rate-limits messages.
-//!
-//! It keeps each user's recent message times in that user's typed
-//! [`crate::extensible::Extensible`] slot. Because the state is *owned by the
-//! `User`*, it vanishes the moment the user quits — no cleanup callback, no cull
-//! list, no chance of a dangling reference (the C++ InspIRCd failure mode this
-//! design rules out at compile time).
+//! Per-user message-rate limit (`flood_messages` within `flood_seconds`); opers
+//! exempt. Recent message times live in the user's typed
+//! [`crate::extensible::Extensible`] slot, so the state is freed when the user quits.
 
 use crate::module::{ModResult, Module};
 use crate::server::{now, Server};

@@ -1,6 +1,5 @@
-//! globops — `GLOBOPS <message>` lets an oper send a message to all opers (the
-//! server-notice stream, echoIRCd's equivalent of InspIRCd's `+g` snomask).
-//! Reference: InspIRCd's `m_globops`. Original native Rust.
+//! `GLOBOPS <message>`: lets an oper send a message to all opers via the
+//! server-notice stream.
 
 use crate::command::{CmdResult, Command};
 use crate::numeric::ERR_NOPRIVILEGES;

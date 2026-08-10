@@ -1,6 +1,6 @@
-//! rpc log provider — `log.tail` and `log.events`. InspIRCd's `m_rpc_log` /
-//! `m_jsonrpclog`. echoIRCd has no log *file* (it logs to journald), so both read
-//! the in-memory server-log ring that `Server::snotice` feeds (`Server.log`).
+//! Log RPC provider: `log.tail` and `log.events`. There is no log file (logging
+//! goes to journald), so both read the in-memory server-log ring that
+//! `Server::snotice` feeds (`Server.log`).
 
 use super::json::{self, obj, qstr};
 use super::RpcError;

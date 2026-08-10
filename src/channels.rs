@@ -1,6 +1,5 @@
 //! Channels: the `Channel` record, membership, channel modes, bans, invites and
-//! JOIN/NAMES — the same job InspIRCd splits across channels/channelmanager, but
-//! written from scratch in Rust (InspIRCd is a behaviour reference, not a source).
+//! JOIN/NAMES.
 
 use std::collections::{HashMap, HashSet};
 
@@ -13,6 +12,7 @@ use crate::Uid;
 /// Per-member prefix modes (+q/+a/+o/+h/+v). Flag modes live in [`ChanModes`].
 #[derive(Default)]
 pub struct Member {
+    pub oprefix: bool,            // operprefix/ojoin: server oper prefix (!), highest rank
     pub owner: bool,              // +q (~)
     pub admin: bool,              // +a (&)
     pub op: bool,                 // +o (@)
@@ -24,6 +24,7 @@ pub struct Member {
 }
 
 /// Prefix ranks, high→low — gate who may grant a prefix / kick whom.
+pub const RANK_OPER: u8 = 6; // operprefix/ojoin — above channel owner (network staff)
 pub const RANK_OWNER: u8 = 5;
 pub const RANK_ADMIN: u8 = 4;
 pub const RANK_OP: u8 = 3;
@@ -33,7 +34,9 @@ pub const RANK_VOICE: u8 = 1;
 impl Member {
     /// This member's numeric rank (0 = plain member).
     pub fn rank(&self) -> u8 {
-        if self.owner {
+        if self.oprefix {
+            RANK_OPER
+        } else if self.owner {
             RANK_OWNER
         } else if self.admin {
             RANK_ADMIN
@@ -50,7 +53,9 @@ impl Member {
 
     /// Highest prefix char for NAMES (`""` for a plain member).
     pub fn prefix_char(&self) -> &'static str {
-        if self.owner {
+        if self.oprefix {
+            "!"
+        } else if self.owner {
             "~"
         } else if self.admin {
             "&"
@@ -68,6 +73,7 @@ impl Member {
     /// Set/clear a prefix mode by its letter (used by the S2S mode applier).
     pub fn set_prefix(&mut self, letter: char, on: bool) {
         match letter {
+            'y' => self.oprefix = on,
             'q' => self.owner = on,
             'a' => self.admin = on,
             'o' => self.op = on,
@@ -81,6 +87,7 @@ impl Member {
     pub fn all_prefixes(&self) -> String {
         let mut s = String::new();
         for (on, c) in [
+            (self.oprefix, '!'),
             (self.owner, '~'),
             (self.admin, '&'),
             (self.op, '@'),
@@ -329,8 +336,7 @@ impl Channel {
         self.members.is_empty() && self.rmembers.is_empty()
     }
 
-    /// Whether to keep this channel in the table: it has members, or it's +P
-    /// (permanent). The predicate every `channels.retain` prune uses.
+    /// Keep this channel in the table: it has members, or it's +P (permanent).
     pub fn keep_alive(&self) -> bool {
         !self.is_empty() || self.modes.permanent
     }
@@ -339,8 +345,7 @@ impl Channel {
 impl Server {
     /// A member's channel rank (0 if not a member).
     pub fn rank(&self, uid: Uid, key: &str) -> u8 {
-        // SAMODE/SAKICK run as the server: every access check keys off rank(),
-        // so a transient sudo makes them bypass the ladder cleanly.
+        // SAMODE/SAKICK: mode_sudo makes every rank() check pass, bypassing the ladder.
         if self.mode_sudo {
             return RANK_OWNER;
         }
@@ -516,8 +521,8 @@ impl Server {
         {
             return; // unknown user, or already joined
         }
-        // IRC operators override the join restrictions below (m_override); each
-        // bypass sets `overrode`, snoticed once the join succeeds (accountability).
+        // IRC operators override the join restrictions below; each bypass sets
+        // `overrode`, snoticed once the join succeeds.
         let is_oper = self.users.get(&uid).map(|u| u.flags.oper).unwrap_or(false);
         let mut overrode = false;
         // CBAN — a forbidden channel name (opers bypass)
@@ -920,12 +925,10 @@ impl Server {
         );
     }
 
-    /// True if `uid` is caught by an acting extban of type `kind` (`m`/`c`/`n`) on
-    /// `key` with no matching `kind:` exception in +e. The stored mask is
-    /// `kind:<hostmask>`; we glob the hostmask part against the user's prefix.
-    /// Whether any entry in `list` catches `uid`: a plain `nick!user@host` glob,
-    /// or the `g:<group>` security-group matching extban. Acting extbans (`m:`/`c:`/
-    /// `n:`) never match here — they restrict actions, not join/ban membership.
+    /// Whether any entry in `list` catches `uid`: a plain `nick!user@host` glob, or
+    /// a matching extban (`g:` group, `y:` reputation, `r:` realname, `j:` channel,
+    /// `s:` server, `G:` geoip, `b:` banlist). Acting extbans (`m:`/`c:`/`n:`) never
+    /// match here — they restrict actions, not join/ban membership.
     pub fn ban_list_hit(&self, uid: Uid, list: &[Ban]) -> bool {
         let who = self.users.get(&uid).map(|u| u.prefix()).unwrap_or_default();
         list.iter().any(|b| {

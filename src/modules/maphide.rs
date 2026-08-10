@@ -1,7 +1,5 @@
-//! maphide — hide the server map (`LINKS` / `MAP`) from ordinary users, so the
-//! network topology isn't exposed to non-operators. Off unless `maphide = yes`.
-//!
-//! Behaviour reference: InspIRCd's `m_maphide`. Original native Rust.
+//! maphide — hide the server map (`LINKS` / `MAP`) from non-opers, so network
+//! topology isn't exposed. Off unless `maphide = yes`.
 
 use crate::module::{ModResult, Module};
 use crate::server::Server;

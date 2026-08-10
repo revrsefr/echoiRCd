@@ -1,6 +1,6 @@
 //! The core: owns the [`Server`] state, the command table and the module list,
-//! and turns a stream of [`Event`]s into IRC. Everything here runs on one
-//! thread, so no state is ever locked.
+//! and turns a stream of [`Event`]s into IRC. Runs on one thread, so no state is
+//! ever locked.
 
 use std::collections::HashMap;
 use std::net::{SocketAddr, TcpStream};
@@ -92,10 +92,10 @@ impl Ircd {
         conn_counter: std::sync::Arc<std::sync::atomic::AtomicU64>,
     ) -> Ircd {
         let mut server = Server::new(cfg, event_tx, conn_counter);
-        server.load_xlines(); // restore persisted bans (m_xline_db)
-        crate::modules::metadata::load(&mut server); // restore channel metadata (m_metadata_db)
+        server.load_xlines(); // restore persisted bans
+        crate::modules::metadata::load(&mut server); // restore channel metadata
         crate::modules::reputation::load(&mut server); // restore per-IP reputation
-        crate::modules::geoip::init(&mut server); // load the GeoIP database (m_geo_maxmind)
+        crate::modules::geoip::init(&mut server); // load the GeoIP database
         Ircd {
             server,
             commands: command_table(),
@@ -283,13 +283,13 @@ impl Ircd {
 
         let Some(handler) = self.commands.get(cmd) else {
             if registered {
-                // showfile (m_showfile): config `showfile = <CMD> <path>` streams a
-                // text file as its own command (e.g. /RULES), like a config-named alias.
+                // config `showfile = <CMD> <path>` streams a text file as its own
+                // command (e.g. /RULES).
                 if crate::modules::showfile::maybe_show(&mut self.server, uid, cmd) {
                     return;
                 }
-                // command aliases (m_alias): config `alias = <CMD> <target-nick>`
-                // e.g. `alias = NS NickServ` makes `/NS help` -> PRIVMSG NickServ :help
+                // config `alias = <CMD> <target-nick>`: `alias = NS NickServ` makes
+                // `/NS help` -> PRIVMSG NickServ :help
                 if let Some(target) = self.server.conf_all("alias").iter().find_map(|line| {
                     let mut it = line.split_whitespace();
                     match (it.next(), it.next()) {

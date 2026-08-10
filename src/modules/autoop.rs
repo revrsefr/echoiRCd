@@ -1,8 +1,7 @@
 //! autoop — the channel list mode `+w <prefix>:<hostmask>` grants a status prefix
 //! to matching users the moment they join, e.g. `+w o:*!*@trusted.host` auto-ops
 //! them, `+w v:*!*@*.friend` auto-voices. The list lives on the channel (like +b,
-//! stored verbatim); this module applies it on join via the server-authority mode
-//! path. Reference: InspIRCd's `m_autoop`. Original native Rust.
+//! stored verbatim) and is applied on join via the server-authority mode path.
 
 use crate::channels::glob_match;
 use crate::module::Module;

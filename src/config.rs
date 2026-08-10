@@ -1,4 +1,4 @@
-//! Tiny `key = value` config, same spirit as rubot.conf (no XML, no deps).
+//! Tiny `key = value` config (no XML, no deps).
 //!
 //! ```text
 //! servername = echo.devtronic.pro
@@ -137,8 +137,7 @@ impl Config {
     }
 
     /// Like [`load`](Config::load) but returns `None` if the file can't be read,
-    /// so REHASH can keep the running config instead of resetting to defaults —
-    /// the way InspIRCd keeps the old config when a reload fails.
+    /// so REHASH can keep the running config instead of resetting to defaults.
     pub fn try_load(path: &str) -> Option<Config> {
         let text = std::fs::read_to_string(path).ok()?;
         let mut c = Config {

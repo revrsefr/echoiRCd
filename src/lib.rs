@@ -1,9 +1,9 @@
-//! echoIRCd — a small, dependency-light IRC daemon, laid out like InspIRCd:
+//! echoIRCd — a small, dependency-light IRC daemon.
 //!
 //! - **engine** — `server` (the core + state), `users`, `channels`, `message`,
 //!   `numeric`, `config`.
-//! - **`coremods`** — the built-in commands, grouped the way InspIRCd groups its
-//!   `coremods/` (core_user, core_channel, core_message, core_mode, core_info).
+//! - **`coremods`** — the built-in commands (core_user, core_channel,
+//!   core_message, core_mode, core_info).
 //! - **`modules`** — optional, pluggable behaviour via lifecycle hooks.
 //! - **`socketengine`** — the I/O edge (accept + per-connection threads).
 //! - **`ircd`** — the single-threaded core loop that ties it together.

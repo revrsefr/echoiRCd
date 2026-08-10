@@ -1,18 +1,16 @@
-//! Account layer — the ircd's *services-ready* account support, modelled on
-//! InspIRCd's `m_services_account`. **This is NOT a services daemon.**
+//! Account layer — *services-ready* account support. **This is NOT a services
+//! daemon.**
 //!
 //! echoIRCd stores no passwords and runs no NickServ — registering nicks/channels
-//! is a **services package**'s job (Anope/Atheme), linked in over S2S. What the
-//! ircd owns is only the plumbing a service plugs into:
-//!   * a per-user **account name** (`User.account`) — the extension a service sets
-//!     or clears (InspIRCd's `accountname` metadata), which flips user mode `+r`;
+//! is a services package's job, linked in over S2S. The ircd owns only the
+//! plumbing a service plugs into:
+//!   * a per-user **account name** (`User.account`) — the `accountname` a service
+//!     sets or clears, which flips user mode `+r`;
 //!   * the account-gated **modes** (chan `+R`/`+M`, user `+r`/`+R`) that key off it
 //!     and live in [`crate::mode`];
 //!   * the **interface** a service drives it through: [`Server::set_login`] /
-//!     [`Server::logout`], reached today via the oper/`SVSLOGIN` command and, once
-//!     S2S + SASL land, by a linked services pseudoserver.
-//!
-//! So a real network runs Anope *beside* echoIRCd; the ircd just has to be ready.
+//!     [`Server::logout`], reached via the oper/`SVSLOGIN` command and, over S2S +
+//!     SASL, by a linked services pseudoserver.
 
 use crate::server::Server;
 use crate::Uid;

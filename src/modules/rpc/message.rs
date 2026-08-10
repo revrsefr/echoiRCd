@@ -1,6 +1,5 @@
-//! rpc message provider — `message.send_notice`. InspIRCd's `m_rpc_message`.
-//! Sends a server NOTICE to a channel (`#…`), a single user (nick), or every
-//! local user (`*` / `$*`).
+//! Message RPC provider: `message.send_notice`. Sends a server NOTICE to a
+//! channel (`#…`), a single user (nick), or every local user (`*` / `$*`).
 
 use super::json::{self, obj};
 use super::RpcError;

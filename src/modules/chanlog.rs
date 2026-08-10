@@ -1,7 +1,6 @@
 //! chanlog — mirror server notices (the `snotice` stream opers see with +s) into a
 //! channel, so staff can watch the log in a normal channel window. Off unless
-//! `chanlog = #channel` is configured. Reference: InspIRCd's `m_chanlog`.
-//! Original native Rust.
+//! `chanlog = #channel` is configured.
 
 use crate::server::Server;
 use crate::Uid;

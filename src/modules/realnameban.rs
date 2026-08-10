@@ -1,9 +1,6 @@
-//! realnameban — the `r:` matching extban: match a user by their real name
-//! (GECOS) instead of their host. `+b r:*some spammer*` bans everyone whose
-//! realname matches the glob. Dispatched from the channel ban matcher; the logic
-//! lives here in its own file.
-//!
-//! Behaviour reference: InspIRCd's `m_realnameban`. Original native Rust.
+//! The `r:` matching extban: match a user by real name (GECOS) instead of host.
+//! `+b r:*some spammer*` bans everyone whose realname matches the glob.
+//! Dispatched from the channel ban matcher.
 
 use crate::channels::glob_match;
 use crate::server::Server;

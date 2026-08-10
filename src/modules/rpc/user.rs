@@ -1,7 +1,7 @@
-//! rpc user provider — `user.list`, `user.get`, and the mutators `user.kill`,
-//! `user.set_mode`, `user.set_vhost`, `user.set_nick`, `user.set_oper`. InspIRCd's
-//! `m_rpc_user`. Mutators route through the same `Server` primitives the commands
-//! use, so behaviour and side-effects (QUIT/CHGHOST/MODE broadcasts) stay identical.
+//! User RPC provider: `user.list`, `user.get`, and the mutators `user.kill`,
+//! `user.set_mode`, `user.set_vhost`, `user.set_nick`, `user.set_oper`. Mutators
+//! route through the same `Server` primitives the commands use, so behaviour and
+//! side-effects (QUIT/CHGHOST/MODE broadcasts) stay identical.
 
 use super::json::{self, obj, qstr};
 use super::RpcError;

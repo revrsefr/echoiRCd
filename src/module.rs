@@ -1,12 +1,9 @@
-//! The module API — echoIRCd's answer to InspIRCd's `Module` class.
-//!
-//! Modules hook lifecycle events. "Pre" hooks return a [`ModResult`] and can
-//! **deny** an action; "notify" hooks are informational. The core fires pre-hooks
-//! inline (so a `Deny` actually blocks) and notify-hooks from a queue after the
-//! triggering command finishes — so a handler can emit an event without ever
-//! touching the module list. All hooks get `&mut Server`, so a module can act
-//! (send lines, force a join, …), exactly like an InspIRCd module gets the
-//! `ServerInstance`.
+//! Module API: modules hook lifecycle events. "Pre" hooks return a [`ModResult`]
+//! and can **deny** an action; "notify" hooks are informational. The core fires
+//! pre-hooks inline (so a `Deny` actually blocks) and notify-hooks from a queue
+//! after the triggering command finishes — so a handler can emit an event without
+//! ever touching the module list. All hooks get `&mut Server`, so a module can act
+//! (send lines, force a join, …).
 
 use crate::server::Server;
 use crate::Uid;

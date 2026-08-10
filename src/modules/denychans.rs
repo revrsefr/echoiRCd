@@ -1,5 +1,5 @@
-//! denychans — forbid joining channels whose name matches a `badchan` glob, with
-//! an optional redirect to a safe channel and an `allowopers` bypass. A `goodchan`
+//! denychans: forbid joining channels whose name matches a `badchan` glob, with an
+//! optional redirect to a safe channel and an `allowopers` bypass. A `goodchan`
 //! glob whitelists names back out of a broad `badchan` pattern. Config:
 //!
 //! ```text
@@ -7,11 +7,8 @@
 //! goodchan = #evilgenius
 //! ```
 //!
-//! Dispatched straight from `Server::join` (like the CBAN check), so it works
-//! per-channel even when several are joined at once. All config-driven; nothing
-//! lives on `Server`.
-//!
-//! Behaviour reference: InspIRCd's `m_denychans`. Original native Rust.
+//! Dispatched from `Server::join`, so it applies per-channel even when several are
+//! joined at once.
 
 use crate::channels::glob_match;
 use crate::numeric::{ERR_BADCHANNEL, ERR_LINKCHANNEL};
@@ -26,8 +23,7 @@ struct BadChan {
     allowopers: bool,
 }
 
-/// Reuse the quoted-attribute tokenizer shape: split on whitespace but keep
-/// `key="quoted value"` together.
+/// Split on whitespace but keep `key="quoted value"` together.
 fn tokenize(line: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
@@ -98,8 +94,8 @@ fn is_good(s: &Server, name: &str) -> bool {
 }
 
 /// Called from `Server::join`. Returns `true` when the join to `name` should be
-/// blocked (the caller returns without joining); emits the numeric and performs a
-/// redirect join if configured. `is_oper` lets an `allowopers` badchan through.
+/// blocked; emits the numeric and performs a redirect join if configured.
+/// `is_oper` lets an `allowopers` badchan through.
 pub fn intercept(s: &mut Server, uid: Uid, name: &str, is_oper: bool) -> bool {
     if s.conf_all("badchan").is_empty() {
         return false;

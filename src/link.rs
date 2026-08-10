@@ -1,4 +1,4 @@
-//! Server-to-server linking — echoIRCd's answer to InspIRCd's `m_spanningtree`.
+//! Server-to-server linking (spanning tree).
 //!
 //! A link connection is a first-class peer, *not* a client `User`: it lives in
 //! `Server.links` and is driven by [`Server::on_link`] instead of the client
@@ -15,9 +15,6 @@
 //!   * **collisions** — a nick already on the network is refused; an incoming `UID`
 //!     that clashes with a local user kills the local (both sides ⇒ both vanish).
 //!   * **netsplit** — dropping a link QUITs every user behind it.
-//!
-//! Toward full InspIRCd interop still: TS6 tie-breaking and the exact
-//! CAPAB/FJOIN/metadata wire format. Also: SASL relays here once a services links in.
 
 use std::net::{SocketAddr, TcpStream};
 
@@ -68,7 +65,7 @@ impl RemoteUser {
     }
 }
 
-/// A valid 3-char SID: digit, then two upper-case alphanumerics (InspIRCd's rule).
+/// A valid 3-char SID: digit, then two upper-case alphanumerics.
 pub fn valid_sid(s: &str) -> bool {
     let b = s.as_bytes();
     b.len() == 3
@@ -79,7 +76,7 @@ pub fn valid_sid(s: &str) -> bool {
 
 impl Server {
     /// Mint the next network-wide UID for a local user: our SID + 6 base-26 chars
-    /// (InspIRCd-style, e.g. `0AAAAAAAB`).
+    /// (e.g. `0AAAAAAAB`).
     pub fn next_uuid(&mut self) -> String {
         let mut x = self.uuid_counter;
         self.uuid_counter += 1;

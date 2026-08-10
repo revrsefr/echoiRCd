@@ -1,7 +1,6 @@
-//! core_watch — WATCH, MONITOR (IRCv3) and SILENCE. The per-user lists live on
-//! the `User`; the online/offline notifications are driven from the lifecycle
-//! code via [`crate::server::Server::watch_notify_online`] / `_offline`. Mirrors
-//! InspIRCd's `m_watch` / `m_monitor` / `m_silence`.
+//! WATCH, MONITOR (IRCv3), SILENCE and ACCEPT. The per-user lists live on the
+//! `User`; online/offline notifications are driven from the lifecycle code via
+//! [`crate::server::Server::watch_notify_online`] / `_offline`.
 
 use crate::channels::normalize_mask;
 use crate::command::{CmdResult, Command};

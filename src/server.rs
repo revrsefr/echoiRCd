@@ -1,8 +1,7 @@
 //! The engine core: the `Server` struct that owns all state, the output
 //! primitives (send / numeric / to_channel) and the connection lifecycle.
 //! Per-subsystem behaviour lives beside its data — [`crate::users`] and
-//! [`crate::channels`] add their own `impl Server` blocks, the way InspIRCd
-//! keeps usermanager / channelmanager separate from the core. No locks: only the
+//! [`crate::channels`] add their own `impl Server` blocks. No locks: only the
 //! single core thread ever holds a `Server`.
 
 use std::cell::RefCell;
@@ -47,7 +46,7 @@ pub fn now() -> u64 {
 pub fn iso_time(secs: u64) -> String {
     let days = (secs / 86400) as i64;
     let (h, mi, s) = ((secs % 86400) / 3600, (secs % 3600) / 60, secs % 60);
-    // civil date from days since 1970-01-01 (Howard Hinnant's algorithm)
+    // civil date from days since 1970-01-01
     let z = days + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
     let doe = z - era * 146097;
@@ -74,7 +73,7 @@ pub fn parse_iso(s: &str) -> Option<u64> {
     let h: i64 = t.next()?.parse().ok()?;
     let mi: i64 = t.next()?.parse().ok()?;
     let se: i64 = t.next().unwrap_or("0").parse().ok()?;
-    // civil date -> days since 1970-01-01 (inverse Howard Hinnant)
+    // civil date -> days since 1970-01-01
     let yy = y - i64::from(mo <= 2);
     let era = if yy >= 0 { yy } else { yy - 399 } / 400;
     let yoe = yy - era * 400;
@@ -96,7 +95,7 @@ pub struct WhowasEntry {
 }
 
 /// One captured server log line (fed by `snotice`), for the RPC `log.tail` /
-/// `log.events` methods — echoIRCd's in-memory answer to InspIRCd's log file.
+/// `log.events` methods. In-memory ring, not a log file.
 pub struct LogLine {
     pub id: u64,
     pub ts: u64,
@@ -123,14 +122,14 @@ pub struct Server {
     pub cloak_key: Option<String>,    // host-cloaking key (see modules::cloak)
     pub line_ctags: String,           // client-only tags of the line being handled
     // --- server-to-server (see crate::link) ---
-    pub sid: String,                               // our 3-char server id
-    pub server_desc: String,                       // our description
-    pub link_blocks: Vec<LinkBlock>,               // peers we accept / dial
+    pub sid: String,                               // this server's 3-char id
+    pub server_desc: String,                       // this server's description
+    pub link_blocks: Vec<LinkBlock>,               // peers to accept / dial
     pub links: HashMap<Uid, Link>,                 // local link connections
     pub servers: HashMap<String, RemoteServer>,    // sid -> linked server
     pub uuid_counter: u64,                         // mints local user UIDs
     pub msgid_counter: u64,                        // mints IRCv3 `msgid` message tags
-    pub uuid_local: HashMap<String, Uid>,          // our users, by network uuid
+    pub uuid_local: HashMap<String, Uid>,          // local users, by network uuid
     pub remote_users: HashMap<String, RemoteUser>, // users on other servers
     pub remote_nick: HashMap<String, String>,      // lower nick -> remote uuid
     pub whowas: VecDeque<WhowasEntry>,             // recent nick history (WHOWAS)
@@ -160,9 +159,8 @@ pub struct Server {
     pub log: RefCell<LogState>,
     pub event_tx: Sender<Event>,      // self-inject events (DNS results)
     pub conn_counter: Arc<AtomicU64>, // mints connection uids (for CONNECT dials)
-    /// Module-owned server state, keyed by type — the InspIRCd `ExtensionItem`
-    /// equivalent. Each `modules/*.rs` stores its own struct here so features live
-    /// in their own file instead of bloating this one.
+    /// Module-owned server state, keyed by type. Each `modules/*.rs` stores its
+    /// own struct here so features live in their own file instead of this one.
     pub ext: Extensible,
 }
 
@@ -352,9 +350,9 @@ impl Server {
         // connectban — z-line an IP range that opens too many connections (see modules::connectban)
         crate::modules::connectban::on_connect(self, ip);
 
-        // Pre-registration connection notices, InspIRCd / solanum style. Ident-113
-        // is archaic and firewalled, so those two are cosmetic; the hostname lookup
-        // is real (see `resolver`) — its result arrives later as an Event.
+        // Pre-registration connection notices. The ident-113 notices are cosmetic
+        // (ident is archaic and firewalled); the hostname lookup is real (see
+        // `resolver`) and its result arrives later as an Event.
         self.notice_star(uid, "Checking Ident");
         self.notice_star(uid, "No Ident response");
         let do_rdns = self.resolve_hosts;
@@ -437,8 +435,8 @@ impl Server {
     /// While a client's connect-time DNS/DNSBL lookups are still running, hold its
     /// handshake lines instead of processing them, so the "*** ..." notices print
     /// as one contiguous block rather than interleaving with the CAP/NICK replies.
-    /// Returns true if `line` was buffered. Bounded — past the cap we let lines
-    /// through (degrading to interleaved output rather than dropping input).
+    /// Returns true if `line` was buffered. Bounded — past the cap, lines pass
+    /// through (interleaved output rather than dropped input).
     pub fn defer_if_resolving(&mut self, uid: Uid, line: &str) -> bool {
         const MAX_DEFERRED: usize = 32;
         match self.users.get_mut(&uid) {
@@ -463,7 +461,7 @@ impl Server {
     /// bans and cloaking use the hostname, not the IP), tell the client, and clear
     /// the flag that was holding their registration.
     pub fn on_resolved(&mut self, uid: Uid, host: Option<String>, outcome: dnsbl::Outcome) {
-        // hostname result (only announced if we actually attempted the lookup)
+        // hostname result (only announced if the lookup was attempted)
         match &host {
             Some(h) => self.notice_star(uid, &format!("Found your hostname ({h})")),
             None if self.resolve_hosts => self.notice_star(
@@ -474,16 +472,16 @@ impl Server {
         }
         let apply = self.use_resolved_host;
         if let Some(u) = self.users.get_mut(&uid) {
-            // `use_resolved_host = off` keeps the IP in the hostmask even though we
-            // resolved and reported the name above.
+            // `use_resolved_host = off` keeps the IP in the hostmask even though the
+            // name was resolved and reported above.
             if apply {
                 if let Some(h) = host {
                     u.host = h;
                 }
             }
         }
-        // DNSBL notices + action (InspIRCd m_dnsbl style) — see `modules::dnsbl`.
-        // May close the connection if the zone is listed and the action bans.
+        // DNSBL notices + action (see `modules::dnsbl`). May close the connection
+        // if the zone is listed and the action bans.
         dnsbl::report(self, uid, outcome);
         // release the registration hold (no-op if a DNSBL ban already removed them)
         if let Some(u) = self.users.get_mut(&uid) {
@@ -520,10 +518,10 @@ impl Server {
             );
             self.propagate(&format!(":{} QUIT :{reason}", user.uuid), None); // tell links
         }
-        // NB: we do *not* force-shutdown the socket here. When `user` drops at
-        // the end of this function its `out` Sender drops with it, so the writer
-        // thread drains any still-queued lines — e.g. a KILL / x-line ERROR —
-        // and then closes the socket itself once the channel is empty.
+        // The socket is not force-shut here. When `user` drops at the end of this
+        // function its `out` Sender drops with it, so the writer thread drains any
+        // still-queued lines — e.g. a KILL / x-line ERROR — and then closes the
+        // socket itself once the channel is empty.
         if !user.nick.is_empty() {
             self.nick_index.remove(&user.nick.to_ascii_lowercase());
         }
@@ -595,8 +593,14 @@ impl Server {
         let chathist = crate::modules::chathistory::limit(self);
         let maxnick = self.conf_num("maxnick", 30usize);
         let maxchan = self.conf_num("maxchannel", 50usize);
+        // operprefix/ojoin add the server oper prefix `y` (sigil `!`) above owner
+        let prefix = if self.conf_bool("operprefix", false) || self.conf_bool("ojoin", false) {
+            "(yqaohv)!~&@%+"
+        } else {
+            "(qaohv)~&@%+"
+        };
         let mut lines = vec![format!(
-            "CHANTYPES=# PREFIX=(qaohv)~&@%+ CHANMODES=beIgXw,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnpstuz EXTBAN=,Gbcgjmnrsy WATCH={maxwatch} MONITOR={maxmon} SILENCE={maxsil} CALLERID=g WHOX CHATHISTORY={chathist} MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN={maxnick} CHANNELLEN={maxchan} NETWORK={}",
+            "CHANTYPES=# PREFIX={prefix} CHANMODES=beIgXw,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnpstuz EXTBAN=,Gbcgjmnrsy WATCH={maxwatch} MONITOR={maxmon} SILENCE={maxsil} CALLERID=g WHOX CHATHISTORY={chathist} MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN={maxnick} CHANNELLEN={maxchan} NETWORK={}",
             self.network
         )];
         if let Some(tok) = crate::modules::network_icon::isupport(self) {
@@ -610,7 +614,7 @@ impl Server {
 
     /// Emit the ISUPPORT numerics to `uid`. When `batched` (the client negotiated
     /// `draft/extended-isupport` + `batch`), wrap them in a `draft/isupport` BATCH so
-    /// the multi-line set arrives atomically (InspIRCd's m_ircv3_extended_isupport).
+    /// the multi-line set arrives atomically.
     pub fn send_isupport(&mut self, uid: Uid, batched: bool) {
         let lines = self.isupport_lines();
         if batched {
@@ -704,7 +708,7 @@ impl Server {
     }
 
     /// The escaped json-log value for `msg`, or `""` if none of `targets` want it
-    /// (so we skip building the JSON when no recipient has the cap).
+    /// (so the JSON isn't built when no recipient has the cap).
     fn json_log_value(&self, msg: &str, targets: &[Uid]) -> String {
         let wanted = targets
             .iter()
@@ -883,8 +887,8 @@ impl Server {
 
     /// Change a user's displayed host and/or ident (CHGHOST/CHGIDENT/SETHOST/
     /// SETIDENT). Announces it via the `chghost` cap to peers that speak it and
-    /// to the user, and sends RPL_HOSTHIDDEN (396) when the host changed. Mirrors
-    /// InspIRCd's ChangeDisplayedHost / ChangeIdent (local scope for now).
+    /// to the user, and sends RPL_HOSTHIDDEN (396) when the host changed. Local
+    /// scope for now.
     pub fn change_host_ident(&mut self, uid: Uid, new_ident: Option<&str>, new_host: Option<&str>) {
         let Some(u) = self.users.get(&uid) else {
             return;
@@ -917,7 +921,7 @@ impl Server {
         // hostcycle — clients WITHOUT the chghost cap only learn the new host via a
         // PART+JOIN, so cycle them through each shared channel (chghost peers already
         // got the CHGHOST line above). Prefix modes are re-sent so they don't appear
-        // de-opped. InspIRCd `m_hostcycle`.
+        // de-opped.
         if new_host.is_some() || new_ident.is_some() {
             let (nick, new_prefix, acct, realname) = {
                 let u = &self.users[&uid];
@@ -1005,7 +1009,7 @@ impl Server {
                 }
             } else if u.ping_sent {
                 if idle >= ping_after + ping_timeout {
-                    quit.push(uid); // no reply to our PING
+                    quit.push(uid); // no reply to the server PING
                 }
             } else if idle >= ping_after {
                 ping.push(uid); // idle — poke it
@@ -1022,7 +1026,7 @@ mod tests {
     use crate::users::{valid_nick, User, UserFlags};
     use std::sync::mpsc::{self, Receiver};
 
-    /// Insert a registered user with an output channel we can read in the test.
+    /// Insert a registered user with an output channel readable in the test.
     fn add_user(s: &mut Server, uid: Uid, nick: &str) -> Receiver<String> {
         let (tx, rx) = mpsc::channel();
         s.users.insert(

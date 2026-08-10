@@ -1,11 +1,10 @@
 # echoIRCd
 
-A from-scratch IRC daemon written in **native Rust**. The architecture is
-*inspired by* InspIRCd's shape — commands as objects, modes as handler objects,
-modules with lifecycle hooks — but every line is original Rust, not a port or a
-translation. Design goals: `#![forbid(unsafe_code)]`, dependency-light (just two
-small crates — `openssl` for TLS and `mio` for the epoll socket engine), and
-lock-free (a single core thread owns all state).
+A from-scratch IRC daemon written in Rust. Commands are objects, modes are
+handler objects, and modules hook lifecycle events. Design goals:
+`#![forbid(unsafe_code)]`, dependency-light (just two small crates — `openssl`
+for TLS and `mio` for the epoll socket engine), and lock-free (a single core
+thread owns all state).
 
 > Status: early but capable. It boots, registers clients, speaks a large chunk of
 > the IRC + IRCv3 protocol (see **What works**), and one reactor thread has served
@@ -33,19 +32,19 @@ anywhere. The I/O edge feeds it events over mpsc channels:
 - **Client connections run on one `mio` epoll reactor thread.** The daemon drives
   tens of thousands of sockets without a thread per connection — measured at 5,000
   concurrent clients on **4 threads total**, and it scales toward ~50k (use a
-  release build and a high `LimitNOFILE`). This is the readiness layer Tokio is
-  built on, but without pulling in an async runtime, so the single-threaded core
-  is untouched.
+  release build and a high `LimitNOFILE`). It's a bare epoll/kqueue readiness
+  reactor — no async runtime is pulled in, so the single-threaded core is
+  untouched.
 - **TLS and server links** keep a thread per connection — there are few of them,
   and a TLS session can't be split across reader/writer threads.
 
 Both models hand the core the same `OutSink`, so it never knows or cares which one
 a connection uses.
 
-Where this improves on the C++ original it's inspired by: `Uid` handles instead
-of raw `User*` (no use-after-free, no cull list), an `Extensible` typemap instead
-of `void*` module data (freed automatically on drop), `&str` slices instead of
-`char*`, and compiled-in trait objects instead of a fragile `.so` ABI.
+Memory-safety by design: `Uid` handles instead of raw pointers (no use-after-free,
+no cull list), an `Extensible` typemap instead of `void*` module data (freed
+automatically on drop), `&str` slices, and compiled-in trait objects instead of a
+fragile `.so` ABI.
 
 ### The two extension points
 
@@ -89,12 +88,11 @@ of `void*` module data (freed automatically on drop), `&str` slices instead of
   users and channels, nick-collision handling, netsplit.
 - An **antimixedutf8** anti-spam module (blocks mixed-script look-alike spam).
 
-## Provenance
+## Originality
 
-echoIRCd is original Rust. InspIRCd is a reference for *behaviour and API shape*
-only — no code is copied or translated. `scripts/native-rust-guard.sh` enforces
-this (no `unsafe`, no C/FFI, dependencies limited to `openssl` + `mio`, and no
-copy/translation wording in comments); it runs on every edit.
+echoIRCd is original Rust — no code is copied or translated from any other
+project. `scripts/native-rust-guard.sh` enforces this (no `unsafe`, no C/FFI, and
+dependencies limited to `openssl` + `mio`); it runs on every edit.
 
 ## License
 

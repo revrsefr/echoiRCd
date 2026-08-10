@@ -1,6 +1,5 @@
-//! whoisport — InspIRCd `m_whoisport`. Shows an IRC operator, in WHOIS, the
-//! listener port the target connected to. Config-free (derives the port from the
-//! `bind` / `bind_tls` listeners); nothing lives on `Server`.
+//! Shows an IRC operator, in WHOIS, the listener port the target connected to.
+//! Derives the port from the `bind` / `bind_tls` listeners.
 
 use crate::server::Server;
 use crate::Uid;

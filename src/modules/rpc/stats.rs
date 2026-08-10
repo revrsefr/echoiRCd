@@ -1,5 +1,5 @@
-//! rpc stats provider — read-only introspection: `module.list`, `oper.list`,
-//! `security_group.list`. InspIRCd's `m_rpc_stats`.
+//! Stats RPC provider: read-only introspection via `module.list`, `oper.list`,
+//! `security_group.list`.
 
 use super::json::{obj, qstr};
 use super::RpcError;

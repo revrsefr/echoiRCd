@@ -1,5 +1,5 @@
-//! core_oper — IRC operator commands: OPER, KILL, WALLOPS. Mirrors InspIRCd's
-//! `coremods/core_oper/`. Oper blocks are configured with `oper = name pass`.
+//! IRC operator commands: OPER, KILL, WALLOPS, the SA*/SVS* set, X-lines, and
+//! the oper CHG*/SET* tools. Oper blocks are configured with `oper = name pass`.
 
 use crate::channels::Topic;
 use crate::command::{CmdResult, Command};
@@ -56,8 +56,8 @@ pub fn commands() -> Vec<Box<dyn Command>> {
     ]
 }
 
-/// OPERMOTD — show the IRC-operators' message of the day (InspIRCd `m_opermotd`),
-/// configured with repeated `opermotd = <line>` entries.
+/// OPERMOTD — show the IRC-operators' message of the day, configured with
+/// repeated `opermotd = <line>` entries.
 struct OperMotd;
 impl Command for OperMotd {
     fn name(&self) -> &'static str {
@@ -95,7 +95,7 @@ impl Command for OperMotd {
 }
 
 /// An oper-set WHOIS line, stored per-user in `User.ext` and rendered by WHOIS
-/// (RPL_WHOISSPECIAL 320). InspIRCd `m_swhois`.
+/// (RPL_WHOISSPECIAL 320).
 pub struct Swhois(pub String);
 
 /// Reject non-opers with 481; returns whether the caller is an oper.
@@ -178,11 +178,11 @@ impl Command for Kill {
     }
 }
 
-/// SVSLOGIN / SVSLOGOUT — the **services interface** to the account layer
-/// ([`crate::accounts`]). Over S2S these arrive from a services pseudoserver
-/// (Anope/Atheme); until S2S exists an oper may invoke them to drive `+r` and the
-/// account-gated channel modes. `SVSLOGIN <nick> <account>` logs a user in
-/// (`account` of `*`/`0` logs out); `SVSLOGOUT <nick>` logs them out.
+/// SVSLOGIN / SVSLOGOUT — the services interface to the account layer
+/// ([`crate::accounts`]). Over S2S these arrive from a services pseudoserver;
+/// until S2S exists an oper may invoke them to drive `+r` and the account-gated
+/// channel modes. `SVSLOGIN <nick> <account>` logs a user in (`account` of `*`/`0`
+/// logs out); `SVSLOGOUT <nick>` logs them out.
 struct SvsLogin;
 impl Command for SvsLogin {
     fn name(&self) -> &'static str {
@@ -415,8 +415,8 @@ impl Command for SaNick {
 }
 
 // --- SVS* : the services interface. Same enforcement as the SA* oper commands,
-// under the names a services package speaks (like SVSLOGIN). Gated to opers/
-// services; a linked services pseudoserver drives these once S2S routes them.
+// under the names a services package speaks. Gated to opers/services; a linked
+// services pseudoserver drives these once S2S routes them.
 
 /// SVSNICK — force a nick change (nick-registration enforcement). An optional
 /// third param is the new-nick TS, accepted and ignored (single-TS model).
@@ -729,7 +729,7 @@ impl Command for Qline {
 }
 
 /// CBAN — forbid a channel-name glob (opers bypass it). Mask alone removes; a
-/// mask + duration adds. InspIRCd `m_cban`.
+/// mask + duration adds.
 struct Cban;
 impl Command for Cban {
     fn name(&self) -> &'static str {
@@ -743,8 +743,8 @@ impl Command for Cban {
     }
 }
 
-/// NICKLOCK — force a user's nick and lock it so they can't change it (InspIRCd
-/// `m_nicklock`). `NICKLOCK <nick> <newnick>`; opers/services still can.
+/// NICKLOCK — force a user's nick and lock it so they can't change it.
+/// `NICKLOCK <nick> <newnick>`; opers/services still can.
 struct NickLock;
 impl Command for NickLock {
     fn name(&self) -> &'static str {
@@ -1122,8 +1122,8 @@ impl Command for SaKick {
     }
 }
 
-/// SAQUIT — force a user to quit the network (InspIRCd `m_saquit`). Looks to
-/// everyone like a normal client QUIT.
+/// SAQUIT — force a user to quit the network. Looks to everyone like a normal
+/// client QUIT.
 struct SaQuit;
 impl Command for SaQuit {
     fn name(&self) -> &'static str {
@@ -1151,8 +1151,8 @@ impl Command for SaQuit {
     }
 }
 
-/// CHGNAME — change another user's real name (InspIRCd `m_chgname`). The oper-driven
-/// counterpart to SETNAME; broadcast to `setname`-capable peers so clients update live.
+/// CHGNAME — change another user's real name (the oper-driven counterpart to
+/// SETNAME); broadcast to `setname`-capable peers so clients update live.
 struct ChgName;
 impl Command for ChgName {
     fn name(&self) -> &'static str {
@@ -1187,8 +1187,8 @@ impl Command for ChgName {
     }
 }
 
-/// CLEARCHAN — kick every user out of a channel (InspIRCd `m_clearchan`). Each
-/// removal is a normal KICK, propagated like SAKICK.
+/// CLEARCHAN — kick every user out of a channel. Each removal is a normal KICK,
+/// propagated like SAKICK.
 struct ClearChan;
 impl Command for ClearChan {
     fn name(&self) -> &'static str {
@@ -1244,7 +1244,7 @@ impl Command for ClearChan {
     }
 }
 
-/// CHECK — oper diagnostic dump for a nick or channel (InspIRCd `m_check`).
+/// CHECK — oper diagnostic dump for a nick or channel.
 struct Check;
 impl Command for Check {
     fn name(&self) -> &'static str {
@@ -1329,8 +1329,8 @@ impl Command for Check {
     }
 }
 
-/// SWHOIS — attach (or clear) an extra WHOIS line on a user (InspIRCd `m_swhois`).
-/// `SWHOIS <nick> :<text>`; an empty text removes it. Shown as RPL_WHOISSPECIAL.
+/// SWHOIS — attach (or clear) an extra WHOIS line on a user. `SWHOIS <nick>
+/// :<text>`; an empty text removes it. Shown as RPL_WHOISSPECIAL.
 struct SwhoisCmd;
 impl Command for SwhoisCmd {
     fn name(&self) -> &'static str {
@@ -1361,8 +1361,8 @@ impl Command for SwhoisCmd {
     }
 }
 
-/// SETIDLE — reset your own idle time (InspIRCd `m_setidle`). `SETIDLE <seconds>`
-/// backdates the last-activity clock so WHOIS shows that idle time.
+/// SETIDLE — reset your own idle time. `SETIDLE <seconds>` backdates the
+/// last-activity clock so WHOIS shows that idle time.
 struct SetIdle;
 impl Command for SetIdle {
     fn name(&self) -> &'static str {
@@ -1384,8 +1384,8 @@ impl Command for SetIdle {
     }
 }
 
-/// ALLTIME — show the current server time to the requesting oper (InspIRCd
-/// `m_alltime`; on a single server there's just the one time to report).
+/// ALLTIME — show the current server time to the requesting oper (on a single
+/// server there's just the one time to report).
 struct AllTime;
 impl Command for AllTime {
     fn name(&self) -> &'static str {

@@ -1,10 +1,9 @@
-//! solvemsg — a lightweight anti-spam gate: before an un-vouched user's *private*
-//! messages are delivered, they must answer one small arithmetic question. Opers
-//! and users logged into an account are exempt. Off unless `solvemsg = yes`.
+//! A lightweight anti-spam gate: before an un-vouched user's *private* messages are
+//! delivered, they must answer one small arithmetic question. Opers and users logged
+//! into an account are exempt. Off unless `solvemsg = yes`.
 //!
 //! Flow: the first PM is held and a question is posed; the user replies with the
 //! number (that reply is consumed), and once correct every later message passes.
-//! Reference: InspIRCd's `m_solvemsg`. Original native Rust.
 
 use crate::module::{ModResult, Module};
 use crate::server::Server;
@@ -17,7 +16,7 @@ struct SolveState {
     answer: Option<i64>,
 }
 
-/// A uniform-ish random byte in `0..max` via openssl (no `rand` crate).
+/// A uniform-ish random byte in `0..max` via the OpenSSL CSPRNG.
 fn rnd(max: u8) -> u8 {
     let mut b = [0u8; 1];
     let _ = openssl::rand::rand_bytes(&mut b);

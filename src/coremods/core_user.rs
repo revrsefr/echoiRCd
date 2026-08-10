@@ -27,7 +27,7 @@ pub fn commands() -> Vec<Box<dyn Command>> {
 }
 
 /// VHOST — claim a self-service virtual host with `VHOST <user> <pass>` matching a
-/// configured `vhost = <user> <pass> <host>` block (InspIRCd `m_vhost`).
+/// configured `vhost = <user> <pass> <host>` block.
 struct Vhost;
 impl Command for Vhost {
     fn name(&self) -> &'static str {
@@ -247,10 +247,10 @@ fn cap_target(s: &Server, uid: Uid) -> String {
         .unwrap_or_else(|| "*".to_string())
 }
 
-/// AUTHENTICATE — the SASL handshake. echoIRCd verifies nothing itself (it has no
+/// AUTHENTICATE — the SASL handshake. The ircd verifies nothing itself (it has no
 /// accounts); once a services server is linked over S2S the payload is relayed to
-/// it and `set_login` applied on success. Until then — exactly like InspIRCd with
-/// no services — SASL fails cleanly.
+/// it and `set_login` applied on success. With no services linked, SASL fails
+/// cleanly.
 struct Authenticate;
 impl Command for Authenticate {
     fn name(&self) -> &'static str {
@@ -274,7 +274,7 @@ impl Command for Authenticate {
         let arg = &params[0];
         let mech = s.users.get(&uid).and_then(|u| u.sasl_mech.clone());
         // SASL is relayed to a linked services server (see `Server::sasl_relay`);
-        // with none configured/linked it fails cleanly, exactly like InspIRCd.
+        // with none configured/linked it fails cleanly.
         let have_services = s.sasl_link().is_some();
         match mech {
             // step 1 — the client picks a mechanism

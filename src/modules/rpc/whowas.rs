@@ -1,5 +1,5 @@
-//! rpc whowas provider — `whowas.get`. InspIRCd's `m_rpc_whowas`. Returns the
-//! recent-nick-history entries the ircd keeps for `WHOWAS`.
+//! Whowas RPC provider: `whowas.get`. Returns the recent-nick-history entries
+//! the ircd keeps for `WHOWAS`.
 
 use super::json::{self, obj, qstr};
 use super::RpcError;

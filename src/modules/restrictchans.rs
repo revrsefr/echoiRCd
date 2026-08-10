@@ -1,9 +1,7 @@
-//! restrictchans — only opers may *create* new channels; everyone can still join
-//! existing ones. A `restrictchan = <glob>` whitelist lets ordinary users create
-//! channels whose name matches (e.g. `restrictchan = #public-*`). Off unless
-//! `restrictchans = yes`. Dispatched from `Server::join` (like denychans).
-//!
-//! Behaviour reference: InspIRCd's `m_restrictchans`. Original native Rust.
+//! Only opers may *create* new channels; everyone can still join existing ones.
+//! A `restrictchan = <glob>` whitelist lets ordinary users create channels whose
+//! name matches (e.g. `restrictchan = #public-*`). Off unless `restrictchans = yes`.
+//! Dispatched from `Server::join`.
 
 use crate::channels::glob_match;
 use crate::numeric::ERR_BADCHANNEL;

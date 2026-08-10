@@ -1,7 +1,6 @@
-//! recaptcha — gate registration behind a human-verification step. An unverified
-//! user is handed a one-time, IP-bound HS256 JWT and a URL to solve a reCAPTCHA at;
-//! once solved they present the signed token back with `CAPTCHA <token>` and the
-//! connection is allowed. reverse's own module.
+//! Gate registration behind a human-verification step. An unverified user is handed
+//! a one-time, IP-bound HS256 JWT and a URL to solve a reCAPTCHA at; once solved they
+//! present the signed token back with `CAPTCHA <token>` and the connection is allowed.
 //!
 //! Modes:
 //!   * JWT-only (default): a validly-signed, unexpired, IP-matching token is proof

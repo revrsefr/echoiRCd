@@ -1,6 +1,4 @@
-//! profileLink — InspIRCd `m_profileLink`. Adds a profile URL to WHOIS for
-//! logged-in users from `profilelink_baseurl = <url>`. Config-driven; nothing
-//! lives on `Server`.
+//! Adds a profile URL to WHOIS for logged-in users, from `profilelink_baseurl = <url>`.
 
 use crate::server::Server;
 

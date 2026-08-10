@@ -1,15 +1,10 @@
-//! Mode handlers — echoIRCd's answer to InspIRCd's C++ `ModeHandler`.
+//! Mode handlers.
 //!
 //! Channel modes implement [`ChanMode`] and user modes implement [`UserMode`];
 //! the MODE command parses the modestring and dispatches to the handler for each
 //! letter, so adding a mode is a new handler + one line in a table — never an
-//! edit to the parser.
-//!
-//! Where this improves on the C++ original: the mode set is an ordinary slice,
-//! so there's no fixed cap (InspIRCd's `ModeParser` packs modes into a bitmask);
-//! every handler is a zero-sized `&'static`, so there's no per-mode allocation,
-//! no global mutable registry to lock, and no `unsafe` — the borrow checker
-//! rules out the dangling-handler bugs a C++ ircd has to guard against by hand.
+//! edit to the parser. The handler set is an ordinary slice of zero-sized
+//! `&'static` values: no fixed cap, no per-mode allocation, no mutable registry.
 
 use crate::channels::{
     normalize_ban_mask, Ban, ChanModes, Channel, MsgFlood, Rate, RANK_ADMIN, RANK_HALFOP, RANK_OP,
@@ -661,7 +656,7 @@ impl ChanMode for ListMode {
     }
 }
 
-// --- +z secure-only (InspIRCd m_sslmodes) -----------------------------------
+// --- +z secure-only ---------------------------------------------------------
 
 /// `+z` — only TLS-connected users may join. It can only be *set* when every
 /// current member is already on TLS (else `ERR_ALLMUSTSSL`); the join-time block
@@ -884,8 +879,8 @@ impl ChanMode for RedirectMode {
     }
 }
 
-/// +B `<percent>` — reject channel messages that are at least `<percent>` uppercase
-/// (InspIRCd `m_anticaps`). Enforced in the message path; ops are exempt.
+/// +B `<percent>` — reject channel messages that are at least `<percent>` uppercase.
+/// Enforced in the message path; ops are exempt.
 struct AntiCapsMode;
 static ANTICAPS: AntiCapsMode = AntiCapsMode;
 impl ChanMode for AntiCapsMode {
@@ -922,8 +917,8 @@ impl ChanMode for AntiCapsMode {
     }
 }
 
-/// +J `<secs>` — after being kicked, a user can't rejoin for `<secs>` seconds
-/// (InspIRCd `m_kicknorejoin`). Enforced in `Server::join`.
+/// +J `<secs>` — after being kicked, a user can't rejoin for `<secs>` seconds.
+/// Enforced in `Server::join`.
 struct KickNoRejoinMode;
 static KICKNOREJOIN: KickNoRejoinMode = KickNoRejoinMode;
 impl ChanMode for KickNoRejoinMode {
@@ -963,8 +958,8 @@ impl ChanMode for KickNoRejoinMode {
     }
 }
 
-/// +d `<secs>` — a newly-joined member can't speak for `<secs>` seconds (InspIRCd
-/// `m_delaymsg`). Enforced in the message path; voiced-or-above are exempt.
+/// +d `<secs>` — a newly-joined member can't speak for `<secs>` seconds.
+/// Enforced in the message path; voiced-or-above are exempt.
 struct DelayMsgMode;
 static DELAYMSG: DelayMsgMode = DelayMsgMode;
 impl ChanMode for DelayMsgMode {
@@ -1005,7 +1000,7 @@ impl ChanMode for DelayMsgMode {
 }
 
 /// +K `<n>` — block a message identical to one of the sender's previous `<n>`
-/// lines in this channel (InspIRCd `m_repeat`, simplified). Ops are exempt.
+/// lines in this channel. Ops are exempt.
 struct RepeatMode;
 static REPEAT: RepeatMode = RepeatMode;
 impl ChanMode for RepeatMode {
@@ -1047,9 +1042,8 @@ impl ChanMode for RepeatMode {
 
 // === user modes ============================================================
 
-/// A user mode (+i/+w/+o) — same handler-object shape as [`ChanMode`], and the
-/// same win over the C++ mode system: an unbounded slice of zero-sized
-/// `&'static` handlers, no bitmask cap, no allocation, no `unsafe`.
+/// A user mode (+i/+w/+o) — same handler-object shape as [`ChanMode`]: an
+/// unbounded slice of zero-sized `&'static` handlers.
 pub trait UserMode: Sync {
     fn letter(&self) -> char;
     /// Apply `+`/`-` to the user; return `true` if it took effect (echo it).
@@ -1188,12 +1182,15 @@ impl UserMode for OperMode {
         if adding {
             return false; // never self-granted
         }
+        if s.users.get(&uid).is_none() {
+            return false;
+        }
         if let Some(u) = s.users.get_mut(&uid) {
             u.flags.oper = false;
-            true
-        } else {
-            false
         }
+        // operprefix: drop the ! prefix in every channel now that they're not staff
+        crate::modules::operprefix::clear_all(s, uid);
+        true
     }
 }
 

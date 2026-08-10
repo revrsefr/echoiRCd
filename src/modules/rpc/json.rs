@@ -1,8 +1,7 @@
-//! Minimal JSON for the RPC subsystem — no serde (openssl+mio-only crate policy).
-//! Two jobs: pull a named field out of a flat-ish request object (`get_*`), and
-//! escape strings when *building* result JSON with `format!`. The scanners respect
-//! nesting and string escapes, so `get_raw` only ever matches a **top-level** key
-//! (a `"nick"` buried inside a nested value or another string won't false-match).
+//! Minimal JSON for the RPC subsystem. Two jobs: pull a named field out of a
+//! request object (`get_*`), and escape strings when building result JSON. The
+//! scanners respect nesting and string escapes, so `get_raw` only matches a
+//! top-level key (a `"nick"` buried in a nested value or a string won't false-match).
 
 /// Given `b[i] == b'"'`, return the index just past the closing quote.
 fn scan_string(b: &[u8], mut i: usize) -> Option<usize> {

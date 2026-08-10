@@ -1,8 +1,8 @@
 //! Minimal blocking HTTP/HTTPS client — `std::net::TcpStream` + openssl for TLS.
-//! No new crate, no `unsafe`. Modules that talk to external APIs (account
-//! registration, captcha verification, …) use this from a **worker thread** and
-//! deliver the result back to the core as an [`crate::ircd::Event`], exactly like
-//! the DNS/DNSBL lookups — so a slow or hung endpoint never blocks the main loop.
+//! Modules that talk to external APIs (account registration, captcha
+//! verification, …) use this from a **worker thread** and deliver the result back
+//! to the core as an [`crate::ircd::Event`], so a slow or hung endpoint never
+//! blocks the main loop.
 
 use std::io::{Read, Write};
 use std::net::TcpStream;

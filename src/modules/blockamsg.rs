@@ -1,12 +1,10 @@
-//! blockamsg — block the mass "/amsg" and "/ame" commands that mIRC/HexChat send
-//! (one message fanned out to every channel you're on), a classic advertise/flood
-//! vector. A PRIVMSG/NOTICE whose target list is two-or-more channels is blocked
-//! when either: the same text was just sent to a *different* target list within
-//! `blockamsg_delay` seconds, or the number of channel targets equals the number
-//! of channels the sender is on (>1). Off unless `blockamsg = yes`. Per-user
-//! last-message bookkeeping lives in `Server.ext`; nothing on `Server`.
-//!
-//! Behaviour reference: InspIRCd's `m_blockamsg`. Original native Rust.
+//! blockamsg — block the mass "/amsg" and "/ame" commands (one message fanned out
+//! to every channel the sender is on), a classic advertise/flood vector. A
+//! PRIVMSG/NOTICE whose target list is two-or-more channels is blocked when either:
+//! the same text was just sent to a *different* target list within `blockamsg_delay`
+//! seconds, or the number of channel targets equals the number of channels the
+//! sender is on (>1). Off unless `blockamsg = yes`. Per-user last-message state
+//! lives in `Server.ext`.
 
 use std::collections::HashMap;
 
@@ -64,7 +62,7 @@ impl Module for BlockAmsg {
 
         let store = srv.ext.get_or_insert_with::<LastMsg>(LastMsg::default);
         let prev = store.0.get(&uid).cloned();
-        // record this message for next time (identical to InspIRCd: always update)
+        // record this message for next time (always update)
         store.0.insert(uid, (text.clone(), list.clone(), n));
 
         let repeat_hit = prev

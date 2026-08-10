@@ -5,8 +5,8 @@
 //! must contain a configured separator and must not collide with a real nick.
 //!
 //! Config: `relaymsg_separators` (default `/`), `relaymsg_ident` (default `relay`),
-//! `relaymsg_host` (default = server name). Reference: InspIRCd's `m_relaymsg`.
-//! (Local delivery; cross-server ENCAP relay is not propagated.) Original native Rust.
+//! `relaymsg_host` (default = server name). Local delivery only; cross-server ENCAP
+//! relay is not propagated.
 
 use crate::command::{CmdResult, Command};
 use crate::numeric::{ERR_BADRELAYNICK, ERR_CANNOTSENDTOCHAN, ERR_NOPRIVILEGES, ERR_NOSUCHCHANNEL};

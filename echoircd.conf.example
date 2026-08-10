@@ -49,7 +49,7 @@ resolve_hosts = on
 # and reports "Found your hostname". Only matters when resolve_hosts = on.
 use_resolved_host = on
 
-# DNS blocklist (DNSBL) checks on connect, like InspIRCd's m_dnsbl. Repeat `dnsbl`
+# DNS blocklist (DNSBL) checks on connect. Repeat `dnsbl`
 # for multiple zones. On a listing, `dnsbl_action` decides what happens:
 #   mark  = just show the "*** ... LISTED" notice, let them in (default, safe)
 #   kill  = disconnect them (no persistent ban)
@@ -84,14 +84,14 @@ amu_target    = both
 # --- connflood: refuse >max connections per <secs> from a single IP ---
 # connflood = 5 10
 
-# --- security groups (UnrealIRCd-style): securitygroup = <name> [criteria...]
+# --- security groups: securitygroup = <name> [criteria...]
 #     criteria: public tls insecure account unregistered oper exclude-oper
 #     bot exclude-bot webirc exclude-webirc mask=<glob> exclude=<glob>
 #     scoremin=<n> scoremax=<n>   — use as an extban: MODE #c +b g:<name>
 # securitygroup = trusted account tls public
 # securitygroup = newbies scoremax=10 public
 
-# --- reputation (m_reputation): per-address scoring + y: score extban ---
+# --- reputation: per-address scoring + y: score extban ---
 # reputation_database = reputation.db      # default: <conf>.reputation
 # reputation_ipv4prefix = 32               # CIDR bits used to key IPv4 scores
 # reputation_ipv6prefix = 64               # CIDR bits used to key IPv6 scores
@@ -117,64 +117,72 @@ amu_target    = both
 # hidewhois_hide_server = yes  # hide 312
 # hidewhois_hide_idle = yes    # hide 317
 # hidewhois_hide_secure = yes  # hide 671
-# --- chanlog (m_chanlog): mirror the oper server-notice stream into a channel so
+# --- chanlog: mirror the oper server-notice stream into a channel so
 #     staff can watch it in a normal window. Set the channel (create/keep it opped):
 # chanlog = #snotices
-# --- extbanbanlist (m_extbanbanlist): no config — adds the matching extban
+# --- extbanbanlist: no config — adds the matching extban
 #     `b:<#channel>`, so `+b b:#staff` catches everyone banned in #staff (shares a
 #     ban list between channels).
-# --- relaymsg (m_relaymsg / draft/relaymsg): a member whose client negotiated the
+# --- relaymsg (draft/relaymsg): a member whose client negotiated the
 #     capability can /RELAYMSG <#chan> <nick> <text> to speak under a spoofed relay
 #     nick (for bridges). The nick must contain a separator and not collide.
 # relaymsg_separators = /
 # relaymsg_ident = relay
 # relaymsg_host = relay.example.com     # default: the server name
-# --- helpmode (m_helpmode): no config — adds oper-settable user mode +h (helpop),
+# --- operprefix: give every oper a `!` prefix (mode y, above owner)
+#     in all their channels — visible staff, and ops can't kick/deop them. Applied
+#     on oper-up/join, removed on de-oper.
+# operprefix = yes
+# --- ojoin: the /OJOIN <#chan> oper command — join as network staff with
+#     the `!` prefix (and channel op unless ojoin_op = no).
+# ojoin = yes
+# ojoin_op = yes
+# --- helpmode: no config — adds oper-settable user mode +h (helpop),
 #     which shows "is available for help" in the user's WHOIS.
-# --- globops (m_globops): no config — adds the oper command /GLOBOPS <message>,
+# --- globops: no config — adds the oper command /GLOBOPS <message>,
 #     broadcasting to all opers (like the server-notice stream).
-# --- autodrop (m_autodrop): silently drop a not-yet-registered client that sends
+# --- autodrop: silently drop a not-yet-registered client that sends
 #     any of these commands (HTTP scanners blurt GET/POST before NICK/USER):
 # autodrop_commands = GET POST HEAD CONNECT PUT DELETE OPTIONS TRACE PATCH
-# --- hidemode (m_hidemode): hide changes to a mode from members below a rank
+# --- hidemode: hide changes to a mode from members below a rank
 #     (the setter, opers and links always see it). Repeatable,
 #     `hidemode = <modechar> <rank>` (owner|admin|op|halfop|voice). e.g. hide bans:
 # hidemode = b op
-# --- hidelist (m_hidelist): list modes (+b/+e/+I/…) are viewable by members by
+# --- hidelist: list modes (+b/+e/+I/…) are viewable by members by
 #     default; this restricts a given list to a minimum rank. Repeatable,
 #     `hidelist = <modechar> <rank>` (rank: owner|admin|op|halfop|voice). Opers see
 #     everything. e.g. only ops may view the ban list:
 # hidelist = b op
-# --- autoop (m_autoop): no config needed — it's the channel list mode +w. Grant a
+# --- autoop: no config needed — it's the channel list mode +w. Grant a
 #     status prefix to matching users on join, `+w <prefix>:<hostmask>`, e.g.
 #       /MODE #chan +w o:*!*@trusted.host   (auto-op)
 #       /MODE #chan +w v:*!*@*.friend.net   (auto-voice)
 #     /MODE #chan +w  lists the entries.
-# --- banredirect (m_banredirect): no config needed — it extends ban syntax. A
+# --- banredirect: no config needed — it extends ban syntax. A
 #     ban `+b <mask>$<#channel>` bounces a matching user into #channel instead of
 #     refusing them, e.g.  /MODE #main +b *!*@*.spammer.net$#quarantine
 #     The redirect fires at most once (never loops).
-# --- solvemsg (m_solvemsg): an un-vouched user must answer one arithmetic
+# --- solvemsg: an un-vouched user must answer one arithmetic
 #     question before their private messages are delivered (opers & logged-in
 #     accounts are exempt). Cheap anti-spam-bot gate.
 # solvemsg = yes
-# --- dccallow (m_dccallow): block unwanted DCC transfers unless the recipient
+# --- dccallow: block unwanted DCC transfers unless the recipient
 #     ran /DCCALLOW +<nick>. Blocked file globs are repeatable; blockchat also
 #     gates DCC CHAT. Recipients manage their allow-list with DCCALLOW +/-/LIST.
 # dccallow_blockfile = *.exe
 # dccallow_blockfile = *.scr
 # dccallow_blockchat = yes
 # dccallow_maxentries = 20
-# --- conn_waitpong (m_conn_waitpong): hold registration until the client answers
+# --- conn_waitpong: hold registration until the client answers
 #     a server PING with the exact cookie — filters bots that never PONG. Real
 #     clients auto-reply, so it's transparent to them.
 # conn_waitpong = yes
 # conn_waitpong_killonbadreply = yes   # drop on a wrong pong (default: keep waiting)
-# --- showfile (m_showfile): serve a text file as its own command. One line per
+# --- showfile: serve a text file as its own command. One line per
 #     file: `showfile = <COMMAND> <path>`. The file is read fresh each use, so
 #     edits show without a rehash. e.g. make /RULES stream a rules file:
 # showfile = RULES /etc/echoircd/rules.txt
-# --- geoip (m_geo_maxmind): native MaxMind .mmdb country lookup. Enables the
+# --- geoip: native MaxMind .mmdb country lookup. Enables the
 #     G:<cc> ban extban (e.g. +b G:CN,RU), the oper GEOIP <nick|ip> command and
 #     a country line in WHOIS (opers). Point at a GeoLite2-Country.mmdb file:
 # geoip_database = /etc/echoircd/GeoLite2-Country.mmdb

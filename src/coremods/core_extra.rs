@@ -193,7 +193,7 @@ impl Command for Info {
     fn handle(&self, s: &mut Server, uid: Uid, _params: &[String]) -> CmdResult {
         for line in [
             format!("echoircd-{VERSION} — a from-scratch IRC daemon in Rust"),
-            "Modeled on InspIRCd's API; #![forbid(unsafe_code)]".to_string(),
+            "Memory-safe by construction; no unsafe code".to_string(),
             format!("Running the {} network", s.network),
         ] {
             s.numeric(uid, RPL_INFO, &format!(":{line}"));
