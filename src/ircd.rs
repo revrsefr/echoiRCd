@@ -435,6 +435,24 @@ impl Ircd {
             self.server.remove_user(uid, &reason);
             return;
         }
+        // R-line: refuse a user whose nick!user@host realname matches a banned regex
+        // (checked after ident is finalised so the matchtext is the real username).
+        let rl = {
+            let u = &self.server.users[&uid];
+            self.server.matched_rline(
+                &u.nick,
+                &u.ident,
+                &u.host,
+                &u.addr.ip().to_string(),
+                &u.realname,
+            )
+        };
+        if let Some(reason) = rl {
+            self.server
+                .send(uid, format!("ERROR :Closing link: ({reason})"));
+            self.server.remove_user(uid, &reason);
+            return;
+        }
         // connectclass: verify the class password and apply its on-connect modes
         if let Some(reason) = crate::modules::connclass::on_register(&mut self.server, uid) {
             self.server

@@ -501,6 +501,24 @@ impl Command for Nick {
             }
         }
         s.set_nick(uid, newnick);
+        // RLINE matchonnickchange: re-test the R-lines against the new identity
+        if s.conf_bool("rline_matchonnickchange", false) {
+            let info = s.users.get(&uid).map(|u| {
+                (
+                    u.nick.clone(),
+                    u.ident.clone(),
+                    u.host.clone(),
+                    u.addr.ip().to_string(),
+                    u.realname.clone(),
+                )
+            });
+            if let Some((nk, id, ho, ip, rn)) = info {
+                if let Some(reason) = s.matched_rline(&nk, &id, &ho, &ip, &rn) {
+                    s.send(uid, format!("ERROR :Closing link: ({reason})"));
+                    s.remove_user(uid, &reason);
+                }
+            }
+        }
         CmdResult::Ok
     }
 }

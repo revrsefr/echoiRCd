@@ -35,6 +35,7 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(Shun),
         Box::new(Qline),
         Box::new(Cban),
+        Box::new(Rline),
         Box::new(Connect),
         Box::new(ChgHost),
         Box::new(ChgIdent),
@@ -740,6 +741,56 @@ impl Command for Cban {
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         do_xline(s, uid, params, XKind::Cban)
+    }
+}
+
+/// RLINE — ban users whose `nick!user@host realname` matches a regular expression.
+/// `RLINE <regex> [<duration>] :<reason>` adds; `RLINE <regex>` removes.
+struct Rline;
+impl Command for Rline {
+    fn name(&self) -> &'static str {
+        "RLINE"
+    }
+    fn min_params(&self) -> usize {
+        1
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        if !require_oper(s, uid) {
+            return CmdResult::Fail;
+        }
+        let pattern = params[0].clone();
+        let nick = s
+            .users
+            .get(&uid)
+            .map(|u| u.nick.clone())
+            .unwrap_or_default();
+        if params.len() < 2 {
+            let word = if s.remove_xline(XKind::Rline, &pattern) {
+                "removed"
+            } else {
+                "not found"
+            };
+            s.send(
+                uid,
+                format!(":{} NOTICE {nick} :R-line {word}: {pattern}", s.name),
+            );
+            return CmdResult::Ok;
+        }
+        if let Err(e) = crate::regex::Regex::new(&pattern) {
+            s.send(
+                uid,
+                format!(":{} NOTICE {nick} :Invalid RLINE regex: {e}", s.name),
+            );
+            return CmdResult::Fail;
+        }
+        let dur = parse_duration(&params[1]).unwrap_or(0);
+        let reason = params
+            .get(2)
+            .cloned()
+            .unwrap_or_else(|| "No reason given".to_string());
+        s.add_xline(XKind::Rline, &pattern, dur, &nick, &reason);
+        s.enforce_rline(&pattern, &reason);
+        CmdResult::Ok
     }
 }
 

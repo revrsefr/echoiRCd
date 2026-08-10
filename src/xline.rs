@@ -17,6 +17,7 @@ pub enum XKind {
     Qline,   // a reserved/forbidden nick glob
     Cban,    // a forbidden channel-name glob
     Svshold, // a services-reserved nick glob (like Qline, but services-owned)
+    Rline,   // a regex over "nick!user@host realname"
 }
 
 impl XKind {
@@ -30,6 +31,7 @@ impl XKind {
             XKind::Qline => "Q",
             XKind::Cban => "CBAN",
             XKind::Svshold => "SVSHOLD",
+            XKind::Rline => "R",
         }
     }
 
@@ -44,6 +46,7 @@ impl XKind {
             "Q" => XKind::Qline,
             "CBAN" => XKind::Cban,
             "SVSHOLD" => XKind::Svshold,
+            "R" => XKind::Rline,
             _ => return None,
         })
     }
@@ -187,6 +190,55 @@ impl Server {
             }
         }
         None
+    }
+
+    /// The reason an R-line's regex matches this user, if any. RLINE tests the
+    /// pattern against both `nick!user@host realname` and the ip form. A stored
+    /// pattern that no longer compiles is skipped.
+    pub fn matched_rline(
+        &self,
+        nick: &str,
+        ident: &str,
+        host: &str,
+        ip: &str,
+        real: &str,
+    ) -> Option<String> {
+        let n = now();
+        let hostform = format!("{nick}!{ident}@{host} {real}");
+        let ipform = format!("{nick}!{ident}@{ip} {real}");
+        self.xlines
+            .iter()
+            .find(|x| {
+                x.kind == XKind::Rline
+                    && (x.expires == 0 || x.expires > n)
+                    && crate::regex::Regex::new(&x.mask)
+                        .map(|re| re.is_match(&hostform) || re.is_match(&ipform))
+                        .unwrap_or(false)
+            })
+            .map(|x| format!("R-lined: {}", x.reason))
+    }
+
+    /// Kill every registered local user matched by R-line `pattern` (called after an
+    /// RLINE is added, since the generic enforce sweep is glob- not regex-based).
+    pub fn enforce_rline(&mut self, pattern: &str, reason: &str) {
+        let Ok(re) = crate::regex::Regex::new(pattern) else {
+            return;
+        };
+        let victims: Vec<Uid> = self
+            .users
+            .iter()
+            .filter(|(_, u)| u.registered)
+            .filter(|(_, u)| {
+                let host = format!("{}!{}@{} {}", u.nick, u.ident, u.host, u.realname);
+                let ip = format!("{}!{}@{} {}", u.nick, u.ident, u.addr.ip(), u.realname);
+                re.is_match(&host) || re.is_match(&ip)
+            })
+            .map(|(&uid, _)| uid)
+            .collect();
+        for uid in victims {
+            self.send(uid, format!("ERROR :Closing link: (R-lined: {reason})"));
+            self.remove_user(uid, &format!("R-lined: {reason}"));
+        }
     }
 
     /// Add (or replace) an x-line, then kill every connected user it matches.
