@@ -243,13 +243,14 @@ impl Command for Stats {
                     s.numeric(uid, RPL_STATSOLINE, &format!("O * * {n} :oper"));
                 }
             }
-            'k' | 'g' | 'z' | 'e' | 'q' | 's' => {
+            'k' | 'g' | 'z' | 'e' | 'q' | 's' | 'S' => {
                 let kind = match letter {
                     'k' => XKind::Kline,
                     'g' => XKind::Gline,
                     'z' => XKind::Zline,
                     'e' => XKind::Eline,
                     'q' => XKind::Qline,
+                    'S' => XKind::Svshold,
                     _ => XKind::Shun,
                 };
                 let rows: Vec<String> = s

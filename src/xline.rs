@@ -13,9 +13,10 @@ pub enum XKind {
     Gline, // user@host, "global" (locally the same until services span it)
     Zline, // an IP address
     Eline, // user@host / ip EXEMPT from K/G/Z-lines
-    Shun,  // user@host allowed to connect but whose commands are dropped
-    Qline, // a reserved/forbidden nick glob
-    Cban,  // a forbidden channel-name glob
+    Shun,    // user@host allowed to connect but whose commands are dropped
+    Qline,   // a reserved/forbidden nick glob
+    Cban,    // a forbidden channel-name glob
+    Svshold, // a services-reserved nick glob (like Qline, but services-owned)
 }
 
 impl XKind {
@@ -28,6 +29,7 @@ impl XKind {
             XKind::Shun => "SHUN",
             XKind::Qline => "Q",
             XKind::Cban => "CBAN",
+            XKind::Svshold => "SVSHOLD",
         }
     }
 
@@ -41,6 +43,7 @@ impl XKind {
             "SHUN" => XKind::Shun,
             "Q" => XKind::Qline,
             "CBAN" => XKind::Cban,
+            "SVSHOLD" => XKind::Svshold,
             _ => return None,
         })
     }
@@ -123,6 +126,24 @@ impl Server {
                     && glob_match(&x.mask, nick)
             })
             .map(|x| x.reason.clone())
+    }
+
+    /// The reason nick `nick` is held by services (SVSHOLD), if any.
+    pub fn matched_svshold(&self, nick: &str) -> Option<String> {
+        let n = now();
+        self.xlines
+            .iter()
+            .find(|x| {
+                x.kind == XKind::Svshold
+                    && (x.expires == 0 || x.expires > n)
+                    && glob_match(&x.mask, nick)
+            })
+            .map(|x| x.reason.clone())
+    }
+
+    /// The reason nick `nick` may not be used — a Q-line or a services SVSHOLD.
+    pub fn nick_reserved(&self, nick: &str) -> Option<String> {
+        self.matched_qline(nick).or_else(|| self.matched_svshold(nick))
     }
 
     /// The reason channel `chan` is CBAN'd (forbidden), if any. Case-insensitive.

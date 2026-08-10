@@ -167,6 +167,10 @@ impl Server {
             "SVSMODE" if registered => self.link_svsmode(uid, msg),
             "SVSLOGIN" if registered => self.link_svslogin(uid, msg),
             "SVSLOGOUT" if registered => self.link_svslogout(uid, msg),
+            "SVSHOLD" if registered => self.link_svshold(uid, msg),
+            "SVSTOPIC" if registered => self.link_svstopic(uid, msg),
+            "SVSOPER" if registered => self.link_svsoper(uid, msg),
+            "SVSCMODE" if registered => self.link_svscmode(uid, msg),
             "ENCAP" if registered => self.link_encap(uid, msg),
             "METADATA" if registered => self.link_metadata(uid, msg),
             "SASL" if registered => self.link_sasl(uid, msg),
@@ -520,6 +524,140 @@ impl Server {
                     self.forward_to_target(t, msg, from);
                 }
             }
+        }
+    }
+
+    /// A display name for whoever sourced a services command: the source uuid's
+    /// nick if we know it, else the raw source, else "services".
+    fn link_setter(&self, msg: &Message) -> String {
+        let Some(src) = &msg.source else {
+            return "services".to_string();
+        };
+        if let Some(ru) = self.remote_users.get(src) {
+            return ru.nick.clone();
+        }
+        if let Some(&uid) = self.uuid_local.get(src) {
+            if let Some(u) = self.users.get(&uid) {
+                return u.nick.clone();
+            }
+        }
+        src.clone()
+    }
+
+    /// `:src SVSHOLD <nick> [<duration> :<reason>]` — services reserve a nick (added
+    /// as an SVSHOLD x-line, so NICK to it is refused) or, with just the nick,
+    /// release it. Broadcast across the network.
+    fn link_svshold(&mut self, from: Uid, msg: &Message) {
+        let Some(nick) = msg.params.first().cloned() else {
+            return;
+        };
+        if msg.params.len() == 1 {
+            self.remove_xline(crate::xline::XKind::Svshold, &nick);
+        } else if msg.params.len() >= 3 {
+            let Some(dur) = crate::xline::parse_duration(&msg.params[1]) else {
+                return;
+            };
+            let setter = self.link_setter(msg);
+            self.add_xline(
+                crate::xline::XKind::Svshold,
+                &nick,
+                dur,
+                &setter,
+                &msg.params[2],
+            );
+        } else {
+            return;
+        }
+        self.propagate(&msg.to_wire(), Some(from)); // spanning-tree broadcast
+    }
+
+    /// `:src SVSTOPIC <chan> [<topicts> <setter> :<topic>]` — services set (4-param)
+    /// or clear (1-param) a channel's topic, overriding +t and op checks.
+    fn link_svstopic(&mut self, from: Uid, msg: &Message) {
+        let Some(chan) = msg.params.first().cloned() else {
+            return;
+        };
+        let key = chan.to_ascii_lowercase();
+        if !self.channels.contains_key(&key) {
+            return;
+        }
+        let (text, setter, ts) = if msg.params.len() >= 4 {
+            let ts = msg.params[1].parse::<u64>().unwrap_or_else(|_| now());
+            (msg.params[3].clone(), msg.params[2].clone(), ts)
+        } else {
+            (String::new(), String::new(), 0) // clear
+        };
+        if let Some(ch) = self.channels.get_mut(&key) {
+            ch.topic = if text.is_empty() {
+                None
+            } else {
+                Some(Topic {
+                    text: text.clone(),
+                    setter,
+                    ts,
+                })
+            };
+        }
+        let src = self.link_setter(msg);
+        self.to_channel(&key, &format!(":{src} TOPIC {chan} :{text}"), None);
+        self.propagate(&msg.to_wire(), Some(from));
+    }
+
+    /// `:src SVSOPER <target> <opertype>` — services grant IRC-operator status to a
+    /// local user (echo's opers are flat, so the type is accepted but not stored).
+    fn link_svsoper(&mut self, from: Uid, msg: &Message) {
+        if msg.params.len() < 2 {
+            return;
+        }
+        match self.link_local_target(&msg.params[0]) {
+            Some(tuid) => {
+                if !self.is_oper(tuid) {
+                    self.oper_up(tuid);
+                }
+            }
+            None => {
+                self.forward_to_target(&msg.params[0], msg, from);
+            }
+        }
+    }
+
+    /// `:src SVSCMODE <target> <chan> <listmodes>` — services clear the target user's
+    /// matching entries from the named channel list modes (e.g. `b` to unban them,
+    /// `be` bans + exceptions).
+    fn link_svscmode(&mut self, from: Uid, msg: &Message) {
+        if msg.params.len() < 3 {
+            return;
+        }
+        let Some(tuid) = self.link_local_target(&msg.params[0]) else {
+            self.forward_to_target(&msg.params[0], msg, from);
+            return;
+        };
+        let key = msg.params[1].to_ascii_lowercase();
+        let mut removals: Vec<(char, String)> = Vec::new();
+        if let Some(ch) = self.channels.get(&key) {
+            for mc in msg.params[2].chars() {
+                let list = match mc {
+                    'b' => &ch.bans,
+                    'e' => &ch.excepts,
+                    'I' => &ch.invex,
+                    _ => continue,
+                };
+                for ban in list {
+                    if self.ban_list_hit(tuid, std::slice::from_ref(ban)) {
+                        removals.push((mc, ban.mask.clone()));
+                    }
+                }
+            }
+        } else {
+            return;
+        }
+        for (mc, mask) in removals {
+            crate::coremods::core_mode::svs_set_chan_modes(
+                self,
+                &msg.params[1],
+                &format!("-{mc}"),
+                std::slice::from_ref(&mask),
+            );
         }
     }
 

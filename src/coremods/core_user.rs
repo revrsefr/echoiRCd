@@ -422,9 +422,9 @@ impl Command for Nick {
             );
             return CmdResult::Fail;
         }
-        // Q-line: a reserved nick is refused (opers and services bypass)
+        // Q-line / SVSHOLD: a reserved nick is refused (opers and services bypass)
         if !s.is_oper(uid) {
-            if let Some(reason) = s.matched_qline(newnick) {
+            if let Some(reason) = s.nick_reserved(newnick) {
                 s.numeric(
                     uid,
                     ERR_ERRONEUSNICKNAME,
