@@ -120,6 +120,11 @@ amu_target    = both
 # --- chanlog (m_chanlog): mirror the oper server-notice stream into a channel so
 #     staff can watch it in a normal window. Set the channel (create/keep it opped):
 # chanlog = #snotices
+# --- globops (m_globops): no config — adds the oper command /GLOBOPS <message>,
+#     broadcasting to all opers (like the server-notice stream).
+# --- autodrop (m_autodrop): silently drop a not-yet-registered client that sends
+#     any of these commands (HTTP scanners blurt GET/POST before NICK/USER):
+# autodrop_commands = GET POST HEAD CONNECT PUT DELETE OPTIONS TRACE PATCH
 # --- hidelist (m_hidelist): list modes (+b/+e/+I/…) are viewable by members by
 #     default; this restricts a given list to a minimum rank. Repeatable,
 #     `hidelist = <modechar> <rank>` (rank: owner|admin|op|halfop|voice). Opers see

@@ -6,6 +6,7 @@
 pub mod account_registration;
 pub mod antimixedutf8;
 pub mod antirandom;
+pub mod autodrop;
 pub mod autoop;
 pub mod banredirect;
 pub mod blockamsg;
@@ -29,6 +30,7 @@ pub mod filehost;
 pub mod filter;
 pub mod flood;
 pub mod geoip;
+pub mod globops;
 pub mod hashident;
 pub mod hidelist;
 pub mod hidewhois;
@@ -93,6 +95,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(dccallow::DccAllow),
         Box::new(solvemsg::SolveMsg),
         Box::new(autoop::AutoOp),
+        Box::new(autodrop::AutoDrop),
     ]
 }
 
@@ -127,5 +130,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(customtitle::commands())
         .chain(dccallow::commands())
         .chain(geoip::commands())
+        .chain(globops::commands())
         .collect()
 }
