@@ -49,6 +49,16 @@ resolve_hosts = on
 # and reports "Found your hostname". Only matters when resolve_hosts = on.
 use_resolved_host = on
 
+# allow a unique command prefix to resolve to its full command (e.g. WHOI -> WHOIS)
+# abbreviation = yes
+
+# reconfigure channel-prefix tiers (oper founder admin op halfop voice):
+#   a bare token = the displayed sigil; ranktoset / ranktounset = min rank to grant /
+#   revoke it (a number 1-6 or a tier name); depriv=no forbids removing it from
+#   yourself. (Symbols/policy only — adding brand-new tiers isn't supported.)
+# customprefix = op * ranktoset=admin ranktounset=admin depriv=no
+# customprefix = voice -
+
 # DNS blocklist (DNSBL) checks on connect. Repeat `dnsbl`
 # for multiple zones. On a listing, `dnsbl_action` decides what happens:
 #   mark  = just show the "*** ... LISTED" notice, let them in (default, safe)
