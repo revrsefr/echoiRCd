@@ -18,22 +18,25 @@ pub struct Member {
     pub op: bool,                 // +o (@)
     pub halfop: bool,             // +h (%)
     pub voice: bool,              // +v (+)
+    pub custom_prefixes: Vec<char>, // config-defined prefix mode letters held (customprefix)
     pub joined: u64,              // unix ts this member joined (for +d delaymsg; 0 = unknown)
     pub recent_msgs: Vec<String>, // +K repeat: this member's last few lines here
     pub hidden: bool,             // +D delayjoin: JOIN withheld until they reveal themselves
 }
 
-/// Prefix ranks, high→low — gate who may grant a prefix / kick whom.
-pub const RANK_OPER: u8 = 6; // operprefix/ojoin — above channel owner (network staff)
-pub const RANK_OWNER: u8 = 5;
-pub const RANK_ADMIN: u8 = 4;
-pub const RANK_OP: u8 = 3;
-pub const RANK_HALFOP: u8 = 2;
-pub const RANK_VOICE: u8 = 1;
+/// Prefix ranks, high→low — gate who may grant a prefix / kick whom. Spaced ×10 so
+/// config-defined custom prefixes (modules::customprefix) can slot in between.
+pub const RANK_OPER: u8 = 60; // operprefix/ojoin — above channel owner (network staff)
+pub const RANK_OWNER: u8 = 50;
+pub const RANK_ADMIN: u8 = 40;
+pub const RANK_OP: u8 = 30;
+pub const RANK_HALFOP: u8 = 20;
+pub const RANK_VOICE: u8 = 10;
 
 impl Member {
     /// This member's numeric rank (0 = plain member).
-    pub fn rank(&self) -> u8 {
+    /// Built-in tier rank from the fixed booleans (0 = none), ignoring custom prefixes.
+    fn builtin_rank(&self) -> u8 {
         if self.oprefix {
             RANK_OPER
         } else if self.owner {
@@ -51,28 +54,70 @@ impl Member {
         }
     }
 
-    /// Highest prefix char for NAMES (`""` for a plain member). The sigil per tier is
+    pub fn rank(&self) -> u8 {
+        let mut r = self.builtin_rank();
+        for &c in &self.custom_prefixes {
+            if let Some(d) = crate::modules::customprefix::def_for_letter(c) {
+                r = r.max(d.rank);
+            }
+        }
+        r
+    }
+
+    /// Every (rank, sigil) prefix this member holds, high→low. Only allocates when
+    /// custom prefixes are actually present.
+    fn held(&self) -> Vec<(u8, &'static str)> {
+        use crate::modules::customprefix::{def_for_letter, sigil};
+        let mut v: Vec<(u8, &'static str)> = Vec::new();
+        for (on, r, i) in [
+            (self.oprefix, RANK_OPER, 0),
+            (self.owner, RANK_OWNER, 1),
+            (self.admin, RANK_ADMIN, 2),
+            (self.op, RANK_OP, 3),
+            (self.halfop, RANK_HALFOP, 4),
+            (self.voice, RANK_VOICE, 5),
+        ] {
+            if on {
+                v.push((r, sigil(i)));
+            }
+        }
+        for &c in &self.custom_prefixes {
+            if let Some(d) = def_for_letter(c) {
+                v.push((d.rank, d.sigil.as_str()));
+            }
+        }
+        v.sort_by(|a, b| b.0.cmp(&a.0));
+        v
+    }
+
+    /// Highest prefix char for NAMES (`""` for a plain member). Sigils are
     /// config-overridable via [`crate::modules::customprefix`].
     pub fn prefix_char(&self) -> &'static str {
         use crate::modules::customprefix::sigil;
-        if self.oprefix {
-            sigil(0)
-        } else if self.owner {
-            sigil(1)
-        } else if self.admin {
-            sigil(2)
-        } else if self.op {
-            sigil(3)
-        } else if self.halfop {
-            sigil(4)
-        } else if self.voice {
-            sigil(5)
+        if self.custom_prefixes.is_empty() {
+            // fast path: built-in tiers only
+            if self.oprefix {
+                sigil(0)
+            } else if self.owner {
+                sigil(1)
+            } else if self.admin {
+                sigil(2)
+            } else if self.op {
+                sigil(3)
+            } else if self.halfop {
+                sigil(4)
+            } else if self.voice {
+                sigil(5)
+            } else {
+                ""
+            }
         } else {
-            ""
+            self.held().first().map(|(_, s)| *s).unwrap_or("")
         }
     }
 
-    /// Set/clear a prefix mode by its letter (used by the S2S mode applier).
+    /// Set/clear a prefix mode by its letter — built-in booleans or, for a
+    /// config-defined letter, the custom-prefix set (used by the S2S mode applier).
     pub fn set_prefix(&mut self, letter: char, on: bool) {
         match letter {
             'y' => self.oprefix = on,
@@ -81,27 +126,38 @@ impl Member {
             'o' => self.op = on,
             'h' => self.halfop = on,
             'v' => self.voice = on,
-            _ => {}
+            _ => {
+                if crate::modules::customprefix::def_for_letter(letter).is_some() {
+                    self.custom_prefixes.retain(|&c| c != letter);
+                    if on {
+                        self.custom_prefixes.push(letter);
+                    }
+                }
+            }
         }
     }
 
     /// Every prefix char this member holds, high→low (for the `multi-prefix` cap).
     pub fn all_prefixes(&self) -> String {
         use crate::modules::customprefix::sigil;
-        let mut s = String::new();
-        for (on, i) in [
-            (self.oprefix, 0),
-            (self.owner, 1),
-            (self.admin, 2),
-            (self.op, 3),
-            (self.halfop, 4),
-            (self.voice, 5),
-        ] {
-            if on {
-                s.push_str(sigil(i));
+        if self.custom_prefixes.is_empty() {
+            let mut s = String::new();
+            for (on, i) in [
+                (self.oprefix, 0),
+                (self.owner, 1),
+                (self.admin, 2),
+                (self.op, 3),
+                (self.halfop, 4),
+                (self.voice, 5),
+            ] {
+                if on {
+                    s.push_str(sigil(i));
+                }
             }
+            s
+        } else {
+            self.held().iter().map(|(_, s)| *s).collect()
         }
-        s
     }
 }
 

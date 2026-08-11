@@ -6,9 +6,11 @@
 //! edit to the parser. The handler set is an ordinary slice of zero-sized
 //! `&'static` values: no fixed cap, no per-mode allocation, no mutable registry.
 
+use std::sync::OnceLock;
+
 use crate::channels::{
     normalize_ban_mask, Ban, ChanModes, Channel, MsgFlood, Rate, RANK_ADMIN, RANK_HALFOP, RANK_OP,
-    RANK_OWNER,
+    RANK_OWNER, RANK_VOICE,
 };
 use crate::numeric::*;
 use crate::server::{now, Server};
@@ -44,9 +46,31 @@ pub trait ChanMode: Sync {
     ) -> Applied;
 }
 
-/// Look up the handler for a channel-mode letter.
+/// Dynamic handlers for config-defined custom prefix modes (see modules::customprefix).
+static CUSTOM_PREFIX_HANDLERS: OnceLock<Vec<Prefix>> = OnceLock::new();
+
+/// Build the custom-prefix handlers once, at boot, after `customprefix::init`.
+pub fn init_custom_prefixes() {
+    let v: Vec<Prefix> = crate::modules::customprefix::custom_defs()
+        .iter()
+        .map(|d| Prefix {
+            ch: d.letter,
+            rank: d.rank,
+        })
+        .collect();
+    let _ = CUSTOM_PREFIX_HANDLERS.set(v);
+}
+
+/// Look up the handler for a channel-mode letter (built-in, then custom prefixes).
 pub fn chan_mode(c: char) -> Option<&'static (dyn ChanMode + Sync)> {
-    CHAN_MODES.iter().copied().find(|m| m.letter() == c)
+    if let Some(m) = CHAN_MODES.iter().copied().find(|m| m.letter() == c) {
+        return Some(m);
+    }
+    CUSTOM_PREFIX_HANDLERS
+        .get()?
+        .iter()
+        .find(|p| p.ch == c)
+        .map(|p| p as &(dyn ChanMode + Sync))
 }
 
 /// The registered channel modes. Add a mode by adding its handler here.
@@ -121,7 +145,7 @@ static HALFOP: Prefix = Prefix {
 };
 static VOICE: Prefix = Prefix {
     ch: 'v',
-    rank: 1, // RANK_VOICE
+    rank: RANK_VOICE,
 };
 
 impl ChanMode for Prefix {
@@ -189,13 +213,7 @@ impl ChanMode for Prefix {
             .get_mut(key)
             .and_then(|c| c.members.get_mut(&tuid))
         {
-            match self.rank {
-                RANK_OWNER => m.owner = adding,
-                RANK_ADMIN => m.admin = adding,
-                RANK_OP => m.op = adding,
-                RANK_HALFOP => m.halfop = adding,
-                _ => m.voice = adding,
-            }
+            m.set_prefix(self.ch, adding); // routes built-in booleans + custom prefixes
         }
         // +D delayjoin: gaining a prefix reveals a hidden member
         if adding {
