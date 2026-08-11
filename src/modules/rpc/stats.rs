@@ -25,7 +25,7 @@ pub fn handle(s: &mut Server, method: &str, _params: &str) -> Result<String, Rpc
             let opers: Vec<String> = s
                 .opers
                 .iter()
-                .map(|(name, _pass)| {
+                .map(|(name, _pass, _lvl)| {
                     obj(&[
                         ("name", qstr(name)),
                         ("type", qstr("")),

@@ -70,7 +70,7 @@ pub struct Config {
     pub tls_cert: Option<String>, // PEM certificate chain
     pub tls_key: Option<String>,  // PEM private key
     pub motd: Vec<String>,
-    pub opers: Vec<(String, String)>,          // (name, password)
+    pub opers: Vec<(String, String, u32)>,     // (name, password, operlevel)
     pub cloak_key: Option<String>,             // secret key for host cloaking (+x); None = off
     pub sid: String,                           // this server's 3-char server id (S2S)
     pub serverdesc: String,                    // this server's description
@@ -197,7 +197,8 @@ impl Config {
                 "oper" => {
                     let mut it = v.split_whitespace();
                     if let (Some(n), Some(p)) = (it.next(), it.next()) {
-                        c.opers.push((n.to_string(), p.to_string()));
+                        let level = it.next().and_then(|l| l.parse().ok()).unwrap_or(0);
+                        c.opers.push((n.to_string(), p.to_string(), level));
                     }
                 }
                 // +G censor word: `badword = <find> [replace]` (no replace ⇒ block)

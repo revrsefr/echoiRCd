@@ -122,11 +122,14 @@ impl Command for Oper {
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         let (name, pass) = (&params[0], &params[1]);
-        if s.opers
+        let level = s
+            .opers
             .iter()
-            .any(|(n, p)| n == name && crate::modules::password_hash::verify(p, pass))
-        {
+            .find(|(n, p, _)| n == name && crate::modules::password_hash::verify(p, pass))
+            .map(|(_, _, lvl)| *lvl);
+        if let Some(level) = level {
             s.oper_up(uid);
+            crate::modules::operlevels::set(s, uid, level); // operlevels: KILL protection
             CmdResult::Ok
         } else {
             s.numeric(uid, ERR_PASSWDMISMATCH, ":Password incorrect");
@@ -165,6 +168,11 @@ impl Command for Kill {
             );
             return CmdResult::Fail;
         };
+        // operlevels: a lower-level oper can't KILL a higher-level oper
+        if let Some(reason) = crate::modules::operlevels::deny_kill(s, uid, tuid) {
+            s.numeric(uid, ERR_NOPRIVILEGES, &format!(":{reason}"));
+            return CmdResult::Fail;
+        }
         let killer = s
             .users
             .get(&uid)
