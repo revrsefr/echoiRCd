@@ -255,7 +255,20 @@ impl Ircd {
     /// registration/quit follow-ups. Output goes through `Server::send`, so it's
     /// transparently captured when a labeled command wraps this call.
     fn dispatch(&mut self, uid: Uid, msg: &message::Message, registered: bool) {
-        let cmd = msg.command.as_str();
+        // abbreviation: with `abbreviation = yes`, an unknown verb that is a unique
+        // prefix of exactly one command resolves to it (e.g. WHOI -> WHOIS).
+        let typed = msg.command.as_str();
+        let cmd: &str = if self.commands.contains_key(typed)
+            || !(registered && self.server.conf_bool("abbreviation", false))
+        {
+            typed
+        } else {
+            let mut it = self.commands.keys().filter(|k| k.starts_with(typed));
+            match (it.next(), it.next()) {
+                (Some(full), None) => full, // exactly one match
+                _ => typed,                 // none or ambiguous
+            }
+        };
         // SHUN: a shunned user stays connected but their commands are silently
         // dropped — except keepalive and quit, so they still time out cleanly.
         if registered && !matches!(cmd, "PING" | "PONG" | "QUIT") && self.server.user_shunned(uid) {
