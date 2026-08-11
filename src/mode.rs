@@ -158,10 +158,25 @@ impl ChanMode for Prefix {
                 return Applied::No;
             }
         };
-        // must out-rank (or match) both the prefix being set and the target's
-        // current top rank — no de-opping someone above you.
+        // customprefix depriv=no: a member may not remove this prefix from themselves
+        if !adding && tuid == uid && !crate::modules::customprefix::can_depriv(self.ch) {
+            s.numeric(
+                uid,
+                ERR_CHANOPRIVSNEEDED,
+                &format!("{chan} :You may not remove +{} from yourself", self.ch),
+            );
+            return Applied::No;
+        }
+        // must out-rank (or match) both the rank needed to set/unset this prefix
+        // (customprefix ranktoset/ranktounset, default the prefix's own rank) and the
+        // target's current top rank — no de-opping someone above you.
+        let needed = if adding {
+            crate::modules::customprefix::rank_to_set(self.ch).unwrap_or(self.rank)
+        } else {
+            crate::modules::customprefix::rank_to_unset(self.ch).unwrap_or(self.rank)
+        };
         let src = s.rank(uid, key);
-        if src < self.rank || src < target_rank {
+        if src < needed || src < target_rank {
             s.numeric(
                 uid,
                 ERR_CHANOPRIVSNEEDED,
