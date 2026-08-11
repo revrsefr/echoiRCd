@@ -46,6 +46,7 @@ pub mod maphide;
 pub mod markread;
 pub mod metadata;
 pub mod multiline;
+pub mod namedmodes;
 pub mod network_icon;
 pub mod ojoin;
 pub mod operlevels;
@@ -144,5 +145,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(globops::commands())
         .chain(relaymsg::commands())
         .chain(ojoin::commands())
+        .chain(namedmodes::commands())
         .collect()
 }
