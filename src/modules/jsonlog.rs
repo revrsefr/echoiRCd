@@ -63,27 +63,30 @@ fn escape_tag(v: &str) -> String {
     out
 }
 
-/// The escaped `draft/json-log` tag *value* for a server notice `msg`. Place after
-/// `draft/json-log=` in the tag block. echoIRCd snotices are untyped, so `subsystem`
-/// / `event_id` are derived from the leading word and `snomask` is the generic `s`.
-pub fn tag_value(s: &Server, msg: &str) -> String {
+/// The structured JSON object for a server notice `msg` (unescaped). echoIRCd
+/// snotices are untyped, so `subsystem` / `event_id` are derived from the leading
+/// word and `snomask` is the generic `s`. Shared by the tag value and `log_json`.
+pub fn json_line(s: &Server, msg: &str) -> String {
     let head = msg
         .split_whitespace()
         .next()
         .unwrap_or("general")
         .trim_end_matches(':');
-    let subsystem = head.to_ascii_lowercase();
-    let event_id = head.to_ascii_uppercase();
-    let json = obj(&[
+    obj(&[
         ("timestamp", qstr(&iso_time(now()))),
         ("level", qstr("info")),
-        ("subsystem", qstr(&subsystem)),
-        ("event_id", qstr(&event_id)),
+        ("subsystem", qstr(&head.to_ascii_lowercase())),
+        ("event_id", qstr(&head.to_ascii_uppercase())),
         ("log_source", qstr(&s.name)),
         ("msg", qstr(&strip_formatting(msg))),
         ("snomask", qstr("s")),
-    ]);
-    escape_tag(&json)
+    ])
+}
+
+/// The escaped `draft/json-log` tag *value* for a server notice `msg`. Place after
+/// `draft/json-log=` in the tag block.
+pub fn tag_value(s: &Server, msg: &str) -> String {
+    escape_tag(&json_line(s, msg))
 }
 
 #[cfg(test)]

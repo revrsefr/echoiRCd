@@ -136,6 +136,9 @@ amu_target    = both
 # syslog_facility = daemon          # kern user mail daemon auth ... local0..local7
 # syslog_tag      = echoircd
 
+# --- log_json: append the server-notice / log stream to a file as JSONL ---
+# log_json = /var/log/echoircd/events.jsonl
+
 # --- PROXY protocol: trust the HAProxy/nginx PROXY header (v1 or v2) from these
 #     sources (glob or CIDR, repeatable), so the real client IP is used instead of
 #     the proxy's. A connection from a trusted proxy MUST lead with a PROXY header.

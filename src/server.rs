@@ -758,6 +758,7 @@ impl Server {
         }
         crate::modules::chanlog::tee(self, msg);
         crate::modules::syslog::tee(self, msg);
+        crate::modules::log_json::tee(self, msg);
     }
 
     /// Broadcast a `*** msg` server NOTICE to *every* registered local user — for

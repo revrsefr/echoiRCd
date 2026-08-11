@@ -41,6 +41,7 @@ pub mod ident;
 pub mod irccloudtags;
 pub mod jsonlog;
 pub mod jwt;
+pub mod log_json;
 pub mod maphide;
 pub mod markread;
 pub mod metadata;
