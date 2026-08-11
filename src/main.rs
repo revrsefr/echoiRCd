@@ -20,6 +20,9 @@ fn main() {
         .unwrap_or_else(|| "echoircd.conf".to_string());
     let cfg = Config::load(&path);
 
+    // precompute the bcrypt constants off-thread so the first hash never stalls the core
+    thread::spawn(echoircd::bcrypt::warm);
+
     // Client plaintext connections run on the mio reactor, so bind a mio listener
     // (fail fast if the main port is taken).
     let bind_addr: std::net::SocketAddr = match cfg.bind.parse() {

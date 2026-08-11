@@ -4,6 +4,8 @@
 //! A stored password is either plaintext (no recognised prefix) or `"<algo>:<hex>"`:
 //!   * `md5:` `sha1:` `sha256:` `sha512:` — a plain hex digest of the password
 //!   * `pbkdf2:<iters>:<salthex>:<hashhex>` — PBKDF2-HMAC-SHA256, salted
+//!   * `$2b$<cost>$...` — bcrypt (see [`crate::bcrypt`]); MKPASSWD accepts a
+//!     `bcrypt` or `bcrypt:<cost>` algorithm
 //!
 //! Comparisons are constant-time (`openssl::memcmp`). The OPER handler calls [`verify`].
 
@@ -72,6 +74,10 @@ fn pbkdf2(pass: &str, salt: &[u8], iters: usize, len: usize) -> Option<Vec<u8>> 
 /// Verify `plaintext` against a `stored` credential. Plaintext (no known prefix)
 /// falls back to a constant-time string compare, so existing configs keep working.
 pub fn verify(stored: &str, plaintext: &str) -> bool {
+    // bcrypt: $2a$/$2b$/$2y$<cost>$<salt><hash>
+    if stored.starts_with("$2a$") || stored.starts_with("$2b$") || stored.starts_with("$2y$") {
+        return crate::bcrypt::verify(stored, plaintext);
+    }
     // pbkdf2:<iters>:<salthex>:<hashhex>
     if let Some(rest) = stored.strip_prefix("pbkdf2:") {
         let parts: Vec<&str> = rest.splitn(3, ':').collect();
@@ -102,6 +108,15 @@ pub fn verify(stored: &str, plaintext: &str) -> bool {
 /// Produce a stored-credential string for `algo` over `plaintext`. For pbkdf2 a
 /// fresh 16-byte salt and 60000 iterations are used.
 fn make(algo: &str, plaintext: &str) -> Option<String> {
+    // bcrypt, optionally "bcrypt:<cost>" (default cost 10)
+    let lower = algo.to_ascii_lowercase();
+    if lower == "bcrypt" || lower.starts_with("bcrypt:") {
+        let cost = lower
+            .strip_prefix("bcrypt:")
+            .and_then(|c| c.parse().ok())
+            .unwrap_or(10);
+        return crate::bcrypt::hash(cost, plaintext);
+    }
     if algo.eq_ignore_ascii_case("pbkdf2") {
         let mut salt = [0u8; 16];
         rand_bytes(&mut salt).ok()?;
@@ -158,7 +173,7 @@ impl Command for MkPasswd {
                 s.send(
                     uid,
                     format!(
-                        ":{} NOTICE {nick} :Unknown hash '{algo}' (try md5, sha1, sha256, sha512, pbkdf2)",
+                        ":{} NOTICE {nick} :Unknown hash '{algo}' (try md5, sha1, sha256, sha512, pbkdf2, bcrypt)",
                         s.name
                     ),
                 );

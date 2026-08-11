@@ -13,6 +13,7 @@
 pub type Uid = u64;
 
 pub mod accounts;
+pub mod bcrypt;
 pub mod channels;
 pub mod command;
 pub mod config;
