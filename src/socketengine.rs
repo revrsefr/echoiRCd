@@ -369,7 +369,7 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
     let mut chunk = [0u8; 8192];
     let mut lines: Vec<(Uid, String)> = Vec::new();
     // a deferred Connect (PROXY conn) to emit, before any lines from the same read
-    let mut connect: Option<(Uid, SocketAddr, u16, OutSink)> = None;
+    let mut connect: Option<(Uid, SocketAddr, u16, bool, Option<String>, OutSink)> = None;
     let mut close = false;
     if let Some(c) = conns.get_mut(&t) {
         loop {
@@ -381,6 +381,10 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
                 Ok(n) => {
                     c.rbuf.extend_from_slice(&chunk[..n]);
                     if c.proxy_pending {
+                        // a v2 header from a TLS-terminating proxy can forward the
+                        // client's TLS status + cert fingerprint (see modules::proxy)
+                        let mut psecure = false;
+                        let mut pcertfp: Option<String> = None;
                         match crate::proxy::parse(&c.rbuf) {
                             (crate::proxy::Parsed::Need, _) => {
                                 if c.rbuf.len() > PROXY_MAX {
@@ -393,10 +397,19 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
                                 close = true;
                                 break;
                             }
-                            (crate::proxy::Parsed::Proxy(real), used) => {
-                                c.addr = real; // rewrite to the real client address
+                            (
+                                crate::proxy::Parsed::Proxy {
+                                    addr,
+                                    secure,
+                                    certfp,
+                                },
+                                used,
+                            ) => {
+                                c.addr = addr; // rewrite to the real client address
                                 c.rbuf.drain(..used);
                                 c.proxy_pending = false;
+                                psecure = secure;
+                                pcertfp = certfp;
                             }
                             (crate::proxy::Parsed::Local, used) => {
                                 c.rbuf.drain(..used); // keep the peer addr
@@ -404,10 +417,9 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
                             }
                         }
                         if !c.proxy_pending {
-                            connect = c
-                                .pending_out
-                                .take()
-                                .map(|out| (c.uid, c.addr, c.local_port, out));
+                            connect = c.pending_out.take().map(|out| {
+                                (c.uid, c.addr, c.local_port, psecure, pcertfp, out)
+                            });
                         }
                     }
                     if !c.proxy_pending {
@@ -433,15 +445,15 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
             }
         }
     }
-    if let Some((uid, addr, local_port, out)) = connect {
+    if let Some((uid, addr, local_port, secure, certfp, out)) = connect {
         if core
             .send(Event::Connect {
                 uid,
                 addr,
                 out,
                 sock: None,
-                secure: false,
-                certfp: None,
+                secure,
+                certfp,
                 local_port,
                 link: false,
                 outbound: false,
@@ -690,8 +702,10 @@ fn tls_conn(
         .any(|g| crate::modules::connclass::ip_matches(g, &addr.ip().to_string()))
     {
         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+        // echo terminates TLS on this listener, so only the client address is taken
+        // from the header (its TLS TLVs would be redundant here).
         let real = match crate::proxy::read_header(&mut stream) {
-            crate::proxy::Parsed::Proxy(a) => a,
+            crate::proxy::Parsed::Proxy { addr, .. } => addr,
             crate::proxy::Parsed::Local => addr,
             _ => {
                 let _ = shutdown.shutdown(Shutdown::Both);

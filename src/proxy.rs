@@ -19,8 +19,14 @@ const V1_MAX: usize = 107;
 
 /// The result of trying to parse a PROXY header from a byte prefix.
 pub enum Parsed {
-    /// A full header giving the real client (source) address.
-    Proxy(SocketAddr),
+    /// A full header giving the real client (source) address, plus any TLS metadata
+    /// a v2 header forwarded (a TLS-terminating proxy sets `secure` and, if it
+    /// forwards one, the client cert `certfp`).
+    Proxy {
+        addr: SocketAddr,
+        secure: bool,
+        certfp: Option<String>,
+    },
     /// A full header with no address to apply (LOCAL / unsupported family).
     Local,
     /// Not enough bytes yet — read more and retry.
@@ -91,7 +97,14 @@ fn parse_v1(buf: &[u8]) -> (Parsed, usize) {
                 return (Parsed::Invalid, consumed);
             }
             match (p[2].parse::<IpAddr>(), p[4].parse::<u16>()) {
-                (Ok(ip), Ok(port)) => (Parsed::Proxy(SocketAddr::new(ip, port)), consumed),
+                (Ok(ip), Ok(port)) => (
+                    Parsed::Proxy {
+                        addr: SocketAddr::new(ip, port),
+                        secure: false,
+                        certfp: None,
+                    },
+                    consumed,
+                ),
                 _ => (Parsed::Invalid, consumed),
             }
         }
@@ -122,23 +135,68 @@ fn parse_v2(buf: &[u8]) -> (Parsed, usize) {
         return (Parsed::Invalid, total);
     }
     let a = &buf[16..total];
-    match family {
+    let (addr, fixed) = match family {
         1 if len >= 12 => {
             let src = Ipv4Addr::new(a[0], a[1], a[2], a[3]);
             let sport = u16::from_be_bytes([a[8], a[9]]);
-            (Parsed::Proxy(SocketAddr::new(IpAddr::V4(src), sport)), total)
+            (SocketAddr::new(IpAddr::V4(src), sport), 12)
         }
         2 if len >= 36 => {
             let mut o = [0u8; 16];
             o.copy_from_slice(&a[0..16]);
             let sport = u16::from_be_bytes([a[32], a[33]]);
-            (
-                Parsed::Proxy(SocketAddr::new(IpAddr::V6(Ipv6Addr::from(o)), sport)),
-                total,
-            )
+            (SocketAddr::new(IpAddr::V6(Ipv6Addr::from(o)), sport), 36)
         }
-        _ => (Parsed::Local, total), // AF_UNIX / unspecified: keep peer addr
+        _ => return (Parsed::Local, total), // AF_UNIX / unspecified: keep peer addr
+    };
+    // any bytes after the fixed address are TLVs: a TLS-terminating proxy may
+    // forward the client's TLS status (PP2_TYPE_SSL) and cert fingerprint (CERTFP)
+    let (secure, certfp) = parse_v2_tlvs(&a[fixed..]);
+    (
+        Parsed::Proxy {
+            addr,
+            secure,
+            certfp,
+        },
+        total,
+    )
+}
+
+// PROXY v2 TLV types we care about.
+const PP2_TYPE_SSL: u8 = 0x20;
+const PP2_TYPE_CERTFP: u8 = 0xE0;
+const PP2_CLIENT_SSL: u8 = 0x01;
+
+/// Walk the v2 TLV block: `type(1) len(2, big-endian) value(len)`. Returns whether
+/// the client was on TLS and its forwarded cert fingerprint, if any.
+fn parse_v2_tlvs(mut tlv: &[u8]) -> (bool, Option<String>) {
+    let mut secure = false;
+    let mut certfp = None;
+    while tlv.len() >= 3 {
+        let ttype = tlv[0];
+        let tlen = u16::from_be_bytes([tlv[1], tlv[2]]) as usize;
+        if tlv.len() < 3 + tlen {
+            break; // truncated TLV
+        }
+        let val = &tlv[3..3 + tlen];
+        match ttype {
+            PP2_TYPE_SSL => {
+                if !val.is_empty() && val[0] & PP2_CLIENT_SSL != 0 {
+                    secure = true;
+                }
+            }
+            PP2_TYPE_CERTFP => {
+                if let Ok(s) = std::str::from_utf8(val) {
+                    if !s.is_empty() && s.len() <= 128 && s.bytes().all(|c| c.is_ascii_hexdigit()) {
+                        certfp = Some(s.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+        tlv = &tlv[3 + tlen..];
     }
+    (secure, certfp)
 }
 
 #[cfg(test)]
@@ -147,7 +205,7 @@ mod tests {
 
     fn src(p: &Parsed) -> Option<SocketAddr> {
         match p {
-            Parsed::Proxy(a) => Some(*a),
+            Parsed::Proxy { addr, .. } => Some(*addr),
             _ => None,
         }
     }
@@ -190,6 +248,37 @@ mod tests {
         let (r, n) = parse(&h);
         assert_eq!(src(&r).unwrap().to_string(), "203.0.113.7:49152");
         assert_eq!(n, 28);
+    }
+
+    #[test]
+    fn v2_tls_tlvs() {
+        // a TLS-terminating proxy forwards PP2_TYPE_SSL (client-on-TLS) + CERTFP
+        let mut h = V2_SIG.to_vec();
+        h.push(0x21); // v2, PROXY
+        h.push(0x11); // AF_INET, STREAM
+        h.extend_from_slice(&31u16.to_be_bytes()); // 12 addr + 8 SSL TLV + 11 CERTFP TLV
+        h.extend_from_slice(&[198, 51, 100, 10]); // src
+        h.extend_from_slice(&[10, 0, 0, 1]); // dst
+        h.extend_from_slice(&5000u16.to_be_bytes());
+        h.extend_from_slice(&443u16.to_be_bytes());
+        h.push(0x20); // PP2_TYPE_SSL
+        h.extend_from_slice(&5u16.to_be_bytes());
+        h.extend_from_slice(&[0x01, 0, 0, 0, 0]); // client=PP2_CLIENT_SSL, verify=0
+        h.push(0xE0); // PP2_TYPE_CERTFP
+        h.extend_from_slice(&8u16.to_be_bytes());
+        h.extend_from_slice(b"abcd1234");
+        match parse(&h).0 {
+            Parsed::Proxy {
+                addr,
+                secure,
+                certfp,
+            } => {
+                assert_eq!(addr.to_string(), "198.51.100.10:5000");
+                assert!(secure);
+                assert_eq!(certfp.as_deref(), Some("abcd1234"));
+            }
+            _ => panic!("expected Proxy"),
+        }
     }
 
     #[test]

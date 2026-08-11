@@ -149,7 +149,9 @@ amu_target    = both
 # ws_origin             = https://x.example # (repeatable) allowed Origin globs; empty = any
 # ws_defaultmode        = text              # frame mode with no subprotocol: text|binary|reject
 # ws_proxyranges        = 127.0.0.1         # (repeatable) glob/CIDR of proxies whose
-#                                           # X-Real-IP / X-Forwarded-For we trust
+#                                           # X-Real-IP / X-Forwarded-For we trust (scoped)
+# ws_trust_proxy        = no                # trust those headers from ANY peer (simpler but
+#                                           # allows IP spoofing; prefer ws_proxyranges)
 # ws_allowmissingorigin = yes               # allow clients that send no Origin header
 # ws_nativeping         = yes               # liveness via WebSocket pings (no = IRC PING)
 # ws_handshake_timeout  = 10                # seconds to complete the HTTP Upgrade
