@@ -136,6 +136,13 @@ amu_target    = both
 # syslog_facility = daemon          # kern user mail daemon auth ... local0..local7
 # syslog_tag      = echoircd
 
+# --- PROXY protocol: trust the HAProxy/nginx PROXY header (v1 or v2) from these
+#     source IPs (glob, repeatable), so the real client IP is used instead of the
+#     proxy's. A connection from a trusted proxy MUST lead with a PROXY header.
+#     Applies to the plaintext and TLS client listeners (WebSocket uses XFF instead).
+# proxy = 127.0.0.1
+# proxy = 10.0.0.*
+
 # --- security groups: securitygroup = <name> [criteria...]
 #     criteria: public tls insecure account unregistered oper exclude-oper
 #     bot exclude-bot webirc exclude-webirc mask=<glob> exclude=<glob>

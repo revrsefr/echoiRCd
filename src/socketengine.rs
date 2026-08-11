@@ -124,9 +124,11 @@ const FIRST_CONN: usize = 16; // conn tokens start past the reserved ones
 struct Conn {
     stream: MioStream,
     uid: Uid,
-    rbuf: Vec<u8>, // bytes read, awaiting a newline
-    wbuf: Vec<u8>, // bytes queued to write
-    wpos: usize,   // how far into wbuf we've written
+    addr: SocketAddr, // peer, or the real client once a PROXY header is parsed
+    local_port: u16,  // listener port (for the deferred-Connect case)
+    rbuf: Vec<u8>,    // bytes read, awaiting a newline
+    wbuf: Vec<u8>,    // bytes queued to write
+    wpos: usize,      // how far into wbuf we've written
     want_read: bool,
     want_write: bool,
     closing: bool,     // flush wbuf, then close
@@ -134,6 +136,8 @@ struct Conn {
     recvq: usize,      // max buffered unterminated-line bytes before dropping
     hardsendq: usize,  // max queued output bytes before dropping + closing
     softsendq: usize,  // queued output above this pauses reads until it drains
+    proxy_pending: bool, // hold the Connect event until a PROXY header is consumed
+    pending_out: Option<OutSink>, // the OutSink held for that deferred Connect
 }
 
 impl Conn {
@@ -164,12 +168,16 @@ fn set_interest(poll: &mut Poll, c: &mut Conn, t: usize) {
 
 /// Run the client plaintext reactor on this thread. `listener` is an already-bound
 /// mio listener (bound in `main` so a bind failure is fatal and fails fast).
+/// Largest PROXY header we'll buffer before giving up (v1 ≤ 107, v2 header ≤ ~232).
+const PROXY_MAX: usize = 256;
+
 pub fn run_reactor(
     mut listener: MioListener,
     core: Sender<Event>,
     counter: Arc<AtomicU64>,
     max_line: usize,
     max_sendq: usize,
+    proxy_trust: Vec<String>,
 ) {
     let mut poll = match Poll::new() {
         Ok(p) => p,
@@ -223,11 +231,24 @@ pub fn run_reactor(
                                 .peer_addr()
                                 .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap());
                             let local_port = stream.local_addr().map(|a| a.port()).unwrap_or(0);
+                            // a connection from a trusted proxy leads with a PROXY
+                            // header; hold the Connect event until it's consumed so
+                            // add_conn sees the real client IP.
+                            let via_proxy = proxy_trust
+                                .iter()
+                                .any(|g| crate::channels::glob_match(g, &addr.ip().to_string()));
+                            let out = OutSink::Reactor {
+                                token,
+                                tx: out_tx.clone(),
+                                waker: waker.clone(),
+                            };
                             conns.insert(
                                 token,
                                 Conn {
                                     stream,
                                     uid,
+                                    addr,
+                                    local_port,
                                     rbuf: Vec::new(),
                                     wbuf: Vec::new(),
                                     wpos: 0,
@@ -238,29 +259,33 @@ pub fn run_reactor(
                                     recvq: max_line,
                                     hardsendq: max_sendq,
                                     softsendq: max_sendq,
+                                    proxy_pending: via_proxy,
+                                    pending_out: Some(out),
                                 },
                             );
-                            let out = OutSink::Reactor {
-                                token,
-                                tx: out_tx.clone(),
-                                waker: waker.clone(),
-                            };
-                            if core
-                                .send(Event::Connect {
-                                    uid,
-                                    addr,
-                                    out,
-                                    sock: None,
-                                    secure: false,
-                                    certfp: None,
-                                    local_port,
-                                    link: false,
-                                    outbound: false,
-                                    websocket: false,
-                                })
-                                .is_err()
-                            {
-                                return; // core gone
+                            // non-proxy: announce the connection immediately (a proxy
+                            // one is announced from read_conn once its header lands)
+                            if !via_proxy {
+                                let out = conns.get_mut(&token).and_then(|c| c.pending_out.take());
+                                if let Some(out) = out {
+                                    if core
+                                        .send(Event::Connect {
+                                            uid,
+                                            addr,
+                                            out,
+                                            sock: None,
+                                            secure: false,
+                                            certfp: None,
+                                            local_port,
+                                            link: false,
+                                            outbound: false,
+                                            websocket: false,
+                                        })
+                                        .is_err()
+                                    {
+                                        return; // core gone
+                                    }
+                                }
                             }
                         }
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
@@ -343,6 +368,8 @@ pub fn run_reactor(
 fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: &Sender<Event>) {
     let mut chunk = [0u8; 8192];
     let mut lines: Vec<(Uid, String)> = Vec::new();
+    // a deferred Connect (PROXY conn) to emit, before any lines from the same read
+    let mut connect: Option<(Uid, SocketAddr, u16, OutSink)> = None;
     let mut close = false;
     if let Some(c) = conns.get_mut(&t) {
         loop {
@@ -353,16 +380,48 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
                 }
                 Ok(n) => {
                     c.rbuf.extend_from_slice(&chunk[..n]);
-                    while let Some(pos) = c.rbuf.iter().position(|&b| b == b'\n') {
-                        let raw: Vec<u8> = c.rbuf.drain(..=pos).collect();
-                        let text = String::from_utf8_lossy(&raw);
-                        let l = text.trim_end_matches(['\r', '\n']);
-                        if !l.is_empty() {
-                            lines.push((c.uid, l.to_string()));
+                    if c.proxy_pending {
+                        match crate::proxy::parse(&c.rbuf) {
+                            (crate::proxy::Parsed::Need, _) => {
+                                if c.rbuf.len() > PROXY_MAX {
+                                    close = true;
+                                    break;
+                                }
+                                continue; // header incomplete: read more
+                            }
+                            (crate::proxy::Parsed::Invalid, _) => {
+                                close = true;
+                                break;
+                            }
+                            (crate::proxy::Parsed::Proxy(real), used) => {
+                                c.addr = real; // rewrite to the real client address
+                                c.rbuf.drain(..used);
+                                c.proxy_pending = false;
+                            }
+                            (crate::proxy::Parsed::Local, used) => {
+                                c.rbuf.drain(..used); // keep the peer addr
+                                c.proxy_pending = false;
+                            }
+                        }
+                        if !c.proxy_pending {
+                            connect = c
+                                .pending_out
+                                .take()
+                                .map(|out| (c.uid, c.addr, c.local_port, out));
                         }
                     }
-                    if c.rbuf.len() > c.recvq {
-                        c.rbuf.clear(); // overlong line with no newline: drop it
+                    if !c.proxy_pending {
+                        while let Some(pos) = c.rbuf.iter().position(|&b| b == b'\n') {
+                            let raw: Vec<u8> = c.rbuf.drain(..=pos).collect();
+                            let text = String::from_utf8_lossy(&raw);
+                            let l = text.trim_end_matches(['\r', '\n']);
+                            if !l.is_empty() {
+                                lines.push((c.uid, l.to_string()));
+                            }
+                        }
+                        if c.rbuf.len() > c.recvq {
+                            c.rbuf.clear(); // overlong line with no newline: drop it
+                        }
                     }
                 }
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
@@ -372,6 +431,25 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
                     break;
                 }
             }
+        }
+    }
+    if let Some((uid, addr, local_port, out)) = connect {
+        if core
+            .send(Event::Connect {
+                uid,
+                addr,
+                out,
+                sock: None,
+                secure: false,
+                certfp: None,
+                local_port,
+                link: false,
+                outbound: false,
+                websocket: false,
+            })
+            .is_err()
+        {
+            return;
         }
     }
     for (uid, line) in lines {
@@ -429,8 +507,13 @@ fn close_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core:
     if let Some(mut c) = conns.remove(&t) {
         let _ = poll.registry().deregister(&mut c.stream);
         let uid = c.uid;
+        // a still-pending PROXY conn was never announced to the core, so don't tell
+        // it about a disconnect for a uid it never saw
+        let announced = !c.proxy_pending;
         drop(c); // closes the socket
-        let _ = core.send(Event::Disconnect { uid });
+        if announced {
+            let _ = core.send(Event::Disconnect { uid });
+        }
     }
 }
 
@@ -446,6 +529,7 @@ pub fn accept_loop(
     counter: Arc<AtomicU64>,
     link: bool,
     max_line: usize,
+    proxy_trust: Vec<String>,
 ) {
     for conn in listener.incoming() {
         let Ok(stream) = conn else { continue };
@@ -489,7 +573,10 @@ pub fn accept_loop(
             Some(backend) => {
                 let backend = backend.clone();
                 let core_tx = core.clone();
-                thread::spawn(move || tls_conn(backend, stream, uid, addr, core_tx, link, max_line));
+                let pt = proxy_trust.clone();
+                thread::spawn(move || {
+                    tls_conn(backend, stream, uid, addr, core_tx, link, max_line, pt)
+                });
             }
         }
     }
@@ -583,18 +670,39 @@ fn writer_loop(mut stream: TcpStream, rx: Receiver<String>) {
 
 fn tls_conn(
     backend: Arc<dyn TlsBackend>,
-    stream: TcpStream,
+    mut stream: TcpStream,
     uid: Uid,
     addr: SocketAddr,
     core: Sender<Event>,
     link: bool,
     max_line: usize,
+    proxy_trust: Vec<String>,
 ) {
     // Keep a raw handle so the core can force the socket shut later.
     let Ok(shutdown) = stream.try_clone() else {
         return;
     };
     let local_port = stream.local_addr().map(|a| a.port()).unwrap_or(0);
+    // a TLS client behind a trusted TCP proxy leads with a PROXY header (before the
+    // TLS handshake); consume it and rewrite the client address.
+    let addr = if proxy_trust
+        .iter()
+        .any(|g| crate::channels::glob_match(g, &addr.ip().to_string()))
+    {
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+        let real = match crate::proxy::read_header(&mut stream) {
+            crate::proxy::Parsed::Proxy(a) => a,
+            crate::proxy::Parsed::Local => addr,
+            _ => {
+                let _ = shutdown.shutdown(Shutdown::Both);
+                return;
+            }
+        };
+        let _ = stream.set_read_timeout(None);
+        real
+    } else {
+        addr
+    };
     let mut conn = match backend.accept(stream) {
         Ok(c) => c,
         Err(_) => {

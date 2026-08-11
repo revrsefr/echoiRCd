@@ -27,6 +27,7 @@ pub mod mode;
 pub mod module;
 pub mod modules;
 pub mod numeric;
+pub mod proxy;
 pub mod regex;
 pub mod resolver;
 pub mod server;

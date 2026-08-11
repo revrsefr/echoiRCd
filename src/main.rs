@@ -57,6 +57,8 @@ fn main() {
     };
     let max_line = raw_num("max_line", socketengine::DEFAULT_MAX_LINE);
     let max_sendq = raw_num("max_sendq", socketengine::DEFAULT_MAX_SENDQ);
+    // trusted PROXY-protocol source globs (reactor rewrites the client IP from them)
+    let proxy_trust: Vec<String> = cfg.raw.get("proxy").cloned().unwrap_or_default();
 
     // one uid counter shared by every listener (and by CONNECT) so ids stay unique
     let counter = Arc::new(AtomicU64::new(1));
@@ -86,6 +88,7 @@ fn main() {
                     let backend: Arc<dyn TlsBackend> = Arc::new(backend);
                     let tls_tx = tx.clone();
                     let tls_counter = counter.clone();
+                    let tls_proxy_trust = proxy_trust.clone();
                     thread::spawn(move || {
                         socketengine::accept_loop(
                             tls_listener,
@@ -94,6 +97,7 @@ fn main() {
                             tls_counter,
                             false,
                             max_line,
+                            tls_proxy_trust,
                         )
                     });
                 }
@@ -111,7 +115,7 @@ fn main() {
                 let s_tx = tx.clone();
                 let s_counter = counter.clone();
                 thread::spawn(move || {
-                    socketengine::accept_loop(sl, s_tx, None, s_counter, true, max_line)
+                    socketengine::accept_loop(sl, s_tx, None, s_counter, true, max_line, Vec::new())
                 });
             }
             Err(e) => eprintln!("echoircd: cannot bind server port {bind_srv}: {e}"),
@@ -137,7 +141,7 @@ fn main() {
 
     // client plaintext connections: one mio reactor thread drives them all
     thread::spawn(move || {
-        socketengine::run_reactor(client_listener, tx, counter, max_line, max_sendq)
+        socketengine::run_reactor(client_listener, tx, counter, max_line, max_sendq, proxy_trust)
     });
     let _ = core.join();
 }
