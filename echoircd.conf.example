@@ -130,6 +130,12 @@ amu_target    = both
 #     "nick!user@host realname" matches a regex (native engine; no config to enable).
 # rline_matchonnickchange = yes   # also re-check the R-lines when a user changes nick
 
+# --- syslog: mirror the server-notice / log stream to the system logger ---
+# syslog          = yes
+# syslog_target   = /dev/log        # a Unix socket path, or host:port for UDP
+# syslog_facility = daemon          # kern user mail daemon auth ... local0..local7
+# syslog_tag      = echoircd
+
 # --- security groups: securitygroup = <name> [criteria...]
 #     criteria: public tls insecure account unregistered oper exclude-oper
 #     bot exclude-bot webirc exclude-webirc mask=<glob> exclude=<glob>

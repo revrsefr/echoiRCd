@@ -66,6 +66,7 @@ pub mod serverban;
 pub mod showfile;
 pub mod solvemsg;
 pub mod snoop;
+pub mod syslog;
 pub mod tline;
 pub mod whoisport;
 
