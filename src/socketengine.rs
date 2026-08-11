@@ -236,7 +236,7 @@ pub fn run_reactor(
                             // add_conn sees the real client IP.
                             let via_proxy = proxy_trust
                                 .iter()
-                                .any(|g| crate::channels::glob_match(g, &addr.ip().to_string()));
+                                .any(|g| crate::modules::connclass::ip_matches(g, &addr.ip().to_string()));
                             let out = OutSink::Reactor {
                                 token,
                                 tx: out_tx.clone(),
@@ -687,7 +687,7 @@ fn tls_conn(
     // TLS handshake); consume it and rewrite the client address.
     let addr = if proxy_trust
         .iter()
-        .any(|g| crate::channels::glob_match(g, &addr.ip().to_string()))
+        .any(|g| crate::modules::connclass::ip_matches(g, &addr.ip().to_string()))
     {
         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
         let real = match crate::proxy::read_header(&mut stream) {

@@ -137,11 +137,24 @@ amu_target    = both
 # syslog_tag      = echoircd
 
 # --- PROXY protocol: trust the HAProxy/nginx PROXY header (v1 or v2) from these
-#     source IPs (glob, repeatable), so the real client IP is used instead of the
-#     proxy's. A connection from a trusted proxy MUST lead with a PROXY header.
+#     sources (glob or CIDR, repeatable), so the real client IP is used instead of
+#     the proxy's. A connection from a trusted proxy MUST lead with a PROXY header.
 #     Applies to the plaintext and TLS client listeners (WebSocket uses XFF instead).
 # proxy = 127.0.0.1
-# proxy = 10.0.0.*
+# proxy = 10.0.0.0/8
+
+# --- WebSocket transport (browser IRC clients connect straight to echoIRCd) ---
+# bind_ws               = 127.0.0.1:8097   # ws:// listener
+# bind_wss              = 0.0.0.0:7799      # wss:// listener (uses tls_cert/tls_key)
+# ws_origin             = https://x.example # (repeatable) allowed Origin globs; empty = any
+# ws_defaultmode        = text              # frame mode with no subprotocol: text|binary|reject
+# ws_proxyranges        = 127.0.0.1         # (repeatable) glob/CIDR of proxies whose
+#                                           # X-Real-IP / X-Forwarded-For we trust
+# ws_allowmissingorigin = yes               # allow clients that send no Origin header
+# ws_nativeping         = yes               # liveness via WebSocket pings (no = IRC PING)
+# ws_handshake_timeout  = 10                # seconds to complete the HTTP Upgrade
+# ws_ping_interval      = 60                # seconds between WebSocket keepalive pings
+# ws_timeout            = 120               # drop after this many seconds of silence
 
 # --- security groups: securitygroup = <name> [criteria...]
 #     criteria: public tls insecure account unregistered oper exclude-oper

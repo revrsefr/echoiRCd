@@ -12,7 +12,12 @@
 //!   ws_handshake_timeout = 10               seconds to finish the Upgrade
 //!   ws_ping_interval     = 60               seconds between server keepalive pings (0 = off)
 //!   ws_timeout           = 120              seconds with no traffic before we drop it
-//!   ws_trust_proxy       = no               read X-Forwarded-For / -Proto (behind nginx)
+//!   ws_defaultmode       = text             frame mode with no subprotocol: text|binary|reject
+//!   ws_proxyranges       = 127.0.0.1        (repeatable) glob/CIDR of proxies to trust
+//!                                           X-Real-IP / X-Forwarded-For from
+//!   ws_allowmissingorigin = yes             allow clients that send no Origin header
+//!   ws_nativeping        = yes              liveness via WebSocket pings (no ⇒ IRC PING)
+//!   ws_trust_proxy       = no               legacy: trust proxy headers from any peer
 
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream};
@@ -46,6 +51,14 @@ const OP_CLOSE: u8 = 0x8;
 const OP_PING: u8 = 0x9;
 const OP_PONG: u8 = 0xA;
 
+/// The frame mode used when a client negotiates no IRCv3 subprotocol.
+#[derive(Clone, Copy, PartialEq)]
+enum DefaultMode {
+    Text,
+    Binary,
+    Reject,
+}
+
 /// Tunables read once from the config.
 #[derive(Clone)]
 pub struct WsConfig {
@@ -53,8 +66,11 @@ pub struct WsConfig {
     handshake_timeout: Duration,
     ping_interval: Duration,
     idle_timeout: Duration,
-    trust_proxy: bool,
-    binary_ok: bool,
+    trust_proxy: bool,             // legacy: trust proxy headers from any peer
+    proxyranges: Vec<String>,      // glob/CIDR of proxies whose headers we trust
+    default_mode: DefaultMode,     // frame mode when no subprotocol is negotiated
+    allow_missing_origin: bool,    // accept clients that send no Origin header
+    native_ping: bool,             // ping via WebSocket frames (else rely on IRC PING)
 }
 
 /// A stream the WS session can drive — implemented for a plaintext `TcpStream`
@@ -123,6 +139,11 @@ pub fn maybe_start(cfg: &Config, core: Sender<Event>, counter: Arc<AtomicU64>) {
             .map(Duration::from_secs)
             .unwrap_or(Duration::from_secs(d))
     };
+    let default_mode = match get("ws_defaultmode").map(|s| s.to_ascii_lowercase()).as_deref() {
+        Some("binary") => DefaultMode::Binary,
+        Some("reject") => DefaultMode::Reject,
+        _ => DefaultMode::Text,
+    };
     let wscfg = WsConfig {
         origins: cfg.raw.get("ws_origin").cloned().unwrap_or_default(),
         handshake_timeout: dur("ws_handshake_timeout", 10),
@@ -131,7 +152,12 @@ pub fn maybe_start(cfg: &Config, core: Sender<Event>, counter: Arc<AtomicU64>) {
         trust_proxy: get("ws_trust_proxy")
             .map(crate::config::yesish)
             .unwrap_or(false),
-        binary_ok: true,
+        proxyranges: cfg.raw.get("ws_proxyranges").cloned().unwrap_or_default(),
+        default_mode,
+        allow_missing_origin: get("ws_allowmissingorigin")
+            .map(crate::config::yesish)
+            .unwrap_or(true),
+        native_ping: get("ws_nativeping").map(crate::config::yesish).unwrap_or(true),
     };
 
     if let Some(bind) = get("bind_ws").map(str::to_string) {
@@ -228,7 +254,7 @@ fn ws_session<S: WsStream>(
 ) {
     // --- HTTP Upgrade handshake (bounded by the handshake timeout) ---
     let _ = stream.set_read_timeout(Some(cfg.handshake_timeout));
-    let hs = match do_handshake(&mut stream, &cfg) {
+    let hs = match do_handshake(&mut stream, &cfg, addr.ip()) {
         Ok(h) => h,
         Err(_) => {
             let _ = shutdown.shutdown(Shutdown::Both);
@@ -353,15 +379,19 @@ fn io_loop<S: WsStream>(
         }
         let _ = stream.flush();
 
-        // 3) keepalive + idle timeout
-        if cfg.ping_interval > Duration::ZERO && last_ping.elapsed() >= cfg.ping_interval {
-            last_ping = Instant::now();
-            if stream.write_all(&encode(OP_PING, b"echo")).is_err() {
-                return;
+        // 3) keepalive + idle timeout — WS-native pinging. With ws_nativeping=no the
+        //    IRC core's PING / ping-timeout drives liveness instead, so the WS layer
+        //    neither pings nor idle-drops.
+        if cfg.native_ping {
+            if cfg.ping_interval > Duration::ZERO && last_ping.elapsed() >= cfg.ping_interval {
+                last_ping = Instant::now();
+                if stream.write_all(&encode(OP_PING, b"echo")).is_err() {
+                    return;
+                }
             }
-        }
-        if last_rx.elapsed() >= cfg.idle_timeout {
-            return; // dead connection
+            if last_rx.elapsed() >= cfg.idle_timeout {
+                return; // dead connection
+            }
         }
     }
 }
@@ -472,8 +502,10 @@ fn encode(opcode: u8, payload: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Read and validate the HTTP Upgrade request, then write the 101 response.
-fn do_handshake<S: WsStream>(stream: &mut S, cfg: &WsConfig) -> io::Result<Handshake> {
+/// Read and validate the HTTP Upgrade request, then write the 101 response. `peer`
+/// is the socket's remote IP, matched against `proxyranges` to decide whether the
+/// X-Real-IP / X-Forwarded-* headers may be trusted.
+fn do_handshake<S: WsStream>(stream: &mut S, cfg: &WsConfig, peer: IpAddr) -> io::Result<Handshake> {
     // read headers (bounded)
     let mut buf = Vec::new();
     let mut chunk = [0u8; 2048];
@@ -504,35 +536,62 @@ fn do_handshake<S: WsStream>(stream: &mut S, cfg: &WsConfig) -> io::Result<Hands
     }
     let key = hdr("sec-websocket-key").ok_or_else(|| io::Error::other("no key"))?;
 
-    // origin check (CSWSH guard): if any configured, the Origin must match one
-    if !cfg.origins.is_empty() {
-        let origin = hdr("origin").unwrap_or_default();
-        if !cfg.origins.iter().any(|g| glob_match(g, &origin)) {
-            let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
-            return Err(io::Error::other("origin rejected"));
+    // origin check (CSWSH guard): a present Origin must match a configured glob (if
+    // any); a missing Origin is allowed unless ws_allowmissingorigin = no.
+    match hdr("origin") {
+        Some(origin) => {
+            if !cfg.origins.is_empty() && !cfg.origins.iter().any(|g| glob_match(g, &origin)) {
+                let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+                return Err(io::Error::other("origin rejected"));
+            }
+        }
+        None => {
+            if !cfg.allow_missing_origin {
+                let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+                return Err(io::Error::other("missing origin"));
+            }
         }
     }
 
-    // subprotocol: prefer text.ircv3.net; accept binary.ircv3.net
+    // subprotocol: prefer text.ircv3.net, accept binary.ircv3.net; with neither,
+    // fall back to ws_defaultmode (and reject the handshake if that is "reject").
     let offered = hdr("sec-websocket-protocol")
         .unwrap_or_default()
         .to_ascii_lowercase();
     let (chosen, binary) = if offered.split(',').any(|p| p.trim() == "text.ircv3.net") {
         (Some("text.ircv3.net"), false)
-    } else if cfg.binary_ok && offered.split(',').any(|p| p.trim() == "binary.ircv3.net") {
+    } else if offered.split(',').any(|p| p.trim() == "binary.ircv3.net") {
         (Some("binary.ircv3.net"), true)
     } else {
-        (None, false)
-    };
-
-    // real IP / scheme from a trusted reverse proxy
-    let (mut real_ip, mut secure) = (None, false);
-    if cfg.trust_proxy {
-        if let Some(xff) = hdr("x-forwarded-for") {
-            if let Some(ip) = xff.split(',').next().and_then(|s| s.trim().parse().ok()) {
-                real_ip = Some(ip);
+        match cfg.default_mode {
+            DefaultMode::Text => (None, false),
+            DefaultMode::Binary => (None, true),
+            DefaultMode::Reject => {
+                let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+                return Err(io::Error::other("no subprotocol (reject mode)"));
             }
         }
+    };
+
+    // real IP / scheme from a trusted reverse proxy: trust the headers only when the
+    // peer matches a configured proxyrange (glob/CIDR), or the legacy trust_proxy is on
+    let trusted = if cfg.proxyranges.is_empty() {
+        cfg.trust_proxy
+    } else {
+        let ip = peer.to_string();
+        cfg.proxyranges
+            .iter()
+            .any(|r| crate::modules::connclass::ip_matches(r, &ip))
+    };
+    let (mut real_ip, mut secure) = (None, false);
+    if trusted {
+        // X-Real-IP wins; else the first hop of X-Forwarded-For
+        real_ip = hdr("x-real-ip")
+            .and_then(|v| v.trim().parse().ok())
+            .or_else(|| {
+                hdr("x-forwarded-for")
+                    .and_then(|xff| xff.split(',').next().and_then(|s| s.trim().parse().ok()))
+            });
         secure = hdr("x-forwarded-proto").is_some_and(|v| v.eq_ignore_ascii_case("https"));
     }
 

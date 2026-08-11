@@ -196,6 +196,13 @@ fn cidr_contains(base: IpAddr, bits: u8, target: IpAddr) -> bool {
     }
 }
 
+/// Whether `ip` matches `mask`, where `mask` is a CIDR range or an IP glob. Shared
+/// with the WebSocket `proxyranges` and PROXY-protocol trust checks so they accept
+/// the same glob-or-CIDR syntax.
+pub fn ip_matches(mask: &str, ip: &str) -> bool {
+    mask_match(mask, ip, "")
+}
+
 /// Match one mask against a client's IP and (once known) resolved host. A mask with
 /// a `/` is a CIDR range tested against the IP; otherwise it's a glob tested against
 /// both the IP text and the host.
