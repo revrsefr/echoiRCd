@@ -103,6 +103,7 @@ impl Ircd {
         crate::modules::metadata::load(&mut server); // restore channel metadata
         crate::modules::reputation::load(&mut server); // restore per-IP reputation
         crate::modules::geoip::init(&mut server); // load the GeoIP database
+        crate::modules::customprefix::init(&server); // load prefix-sigil overrides
         Ircd {
             server,
             commands: command_table(),

@@ -20,6 +20,7 @@ pub mod conn_waitpong;
 pub mod connclass;
 pub mod connectban;
 pub mod connflood;
+pub mod customprefix;
 pub mod customtitle;
 pub mod dccallow;
 pub mod denychans;

@@ -616,12 +616,10 @@ impl Server {
         let chathist = crate::modules::chathistory::limit(self);
         let maxnick = self.conf_num("maxnick", 30usize);
         let maxchan = self.conf_num("maxchannel", 50usize);
-        // operprefix/ojoin add the server oper prefix `y` (sigil `!`) above owner
-        let prefix = if self.conf_bool("operprefix", false) || self.conf_bool("ojoin", false) {
-            "(yqaohv)!~&@%+"
-        } else {
-            "(qaohv)~&@%+"
-        };
+        // operprefix/ojoin add the server oper prefix `y` above owner; sigils are
+        // config-overridable (see modules::customprefix)
+        let include_oper = self.conf_bool("operprefix", false) || self.conf_bool("ojoin", false);
+        let prefix = crate::modules::customprefix::isupport(include_oper);
         let mut lines = vec![format!(
             "CHANTYPES=# PREFIX={prefix} CHANMODES=beIgXw,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnpstuz EXTBAN=,Gbcgjmnrsy WATCH={maxwatch} MONITOR={maxmon} SILENCE={maxsil} CALLERID=g WHOX CHATHISTORY={chathist} MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN={maxnick} CHANNELLEN={maxchan} NETWORK={}",
             self.network

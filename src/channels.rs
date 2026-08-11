@@ -51,20 +51,22 @@ impl Member {
         }
     }
 
-    /// Highest prefix char for NAMES (`""` for a plain member).
+    /// Highest prefix char for NAMES (`""` for a plain member). The sigil per tier is
+    /// config-overridable via [`crate::modules::customprefix`].
     pub fn prefix_char(&self) -> &'static str {
+        use crate::modules::customprefix::sigil;
         if self.oprefix {
-            "!"
+            sigil(0)
         } else if self.owner {
-            "~"
+            sigil(1)
         } else if self.admin {
-            "&"
+            sigil(2)
         } else if self.op {
-            "@"
+            sigil(3)
         } else if self.halfop {
-            "%"
+            sigil(4)
         } else if self.voice {
-            "+"
+            sigil(5)
         } else {
             ""
         }
@@ -85,17 +87,18 @@ impl Member {
 
     /// Every prefix char this member holds, high→low (for the `multi-prefix` cap).
     pub fn all_prefixes(&self) -> String {
+        use crate::modules::customprefix::sigil;
         let mut s = String::new();
-        for (on, c) in [
-            (self.oprefix, '!'),
-            (self.owner, '~'),
-            (self.admin, '&'),
-            (self.op, '@'),
-            (self.halfop, '%'),
-            (self.voice, '+'),
+        for (on, i) in [
+            (self.oprefix, 0),
+            (self.owner, 1),
+            (self.admin, 2),
+            (self.op, 3),
+            (self.halfop, 4),
+            (self.voice, 5),
         ] {
             if on {
-                s.push(c);
+                s.push_str(sigil(i));
             }
         }
         s

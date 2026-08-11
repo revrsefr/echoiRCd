@@ -1434,14 +1434,8 @@ fn split_member(tok: &str) -> (String, String) {
 
 /// Map a prefix char to its mode letter (`@` → `o`, …).
 fn prefix_letter(c: char) -> char {
-    match c {
-        '~' => 'q',
-        '&' => 'a',
-        '@' => 'o',
-        '%' => 'h',
-        '+' => 'v',
-        _ => ' ',
-    }
+    // config-overridable sigils (customprefix); a linked network shares this config
+    crate::modules::customprefix::letter_for_sigil(c)
 }
 
 #[cfg(test)]
