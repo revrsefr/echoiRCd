@@ -131,15 +131,20 @@ impl Command for Oper {
             s.numeric(uid, ERR_PASSWDMISMATCH, ":Password incorrect");
             return CmdResult::Fail;
         };
-        // bcrypt is slow — verify it off the core thread (result arrives as OperAuth).
-        if hash.starts_with("$2") {
-            if !s.spawn_auth(uid, hash, pass, level) {
+        // a KDF password (bcrypt / pbkdf2) is slow — verify it off the core thread
+        // (result arrives as OperAuth), so it can't freeze the server or be a DoS.
+        if crate::modules::password_hash::is_slow(&hash) {
+            let ok = s.spawn_crypto(move || {
+                let ok = crate::modules::password_hash::verify(&hash, &pass);
+                crate::ircd::Event::OperAuth { uid, ok, level }
+            });
+            if !ok {
                 s.numeric(uid, ERR_PASSWDMISMATCH, ":Too many auth attempts, try again");
                 return CmdResult::Fail;
             }
             return CmdResult::Ok; // pending; oper-up happens when the verify returns
         }
-        // fast hashes (plaintext / sha* / pbkdf2) verify inline
+        // fast hashes (plaintext / sha*) verify inline
         if crate::modules::password_hash::verify(&hash, &pass) {
             s.oper_up(uid);
             crate::modules::operlevels::set(s, uid, level); // operlevels: KILL protection

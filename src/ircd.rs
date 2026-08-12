@@ -53,12 +53,18 @@ pub enum Event {
         uid: Uid,
         ident: Option<String>,
     },
-    /// A background OPER password verify finished. bcrypt is deliberately slow, so it
-    /// runs on a worker thread (see `Server::spawn_auth`) instead of freezing the core.
+    /// A background OPER password verify finished. KDF hashes are deliberately slow,
+    /// so they run on a worker thread (see `Server::spawn_crypto`), not on the core.
     OperAuth {
         uid: Uid,
         ok: bool,
         level: u32,
+    },
+    /// A background MKPASSWD hash finished (KDFs run off the core thread).
+    MkpasswdResult {
+        uid: Uid,
+        algo: String,
+        hash: Option<String>,
     },
     /// A module's async HTTP request finished. `tag` is `"<module>:<detail>"`
     /// so the core can route the reply back to the module that issued it (e.g.
@@ -218,6 +224,22 @@ impl Ircd {
                     self.server
                         .numeric(uid, ERR_PASSWDMISMATCH, ":Password incorrect");
                 }
+            }
+            Event::MkpasswdResult { uid, algo, hash } => {
+                let nick = self
+                    .server
+                    .users
+                    .get(&uid)
+                    .map(|u| u.nick.clone())
+                    .unwrap_or_default();
+                let line = match hash {
+                    Some(h) => format!(
+                        ":{} NOTICE {nick} :{algo} hashed password: {h}",
+                        self.server.name
+                    ),
+                    None => format!(":{} NOTICE {nick} :Could not hash with '{algo}'", self.server.name),
+                };
+                self.server.send(uid, line);
             }
             Event::HttpResult {
                 uid,

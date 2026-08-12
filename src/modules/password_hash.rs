@@ -129,6 +129,18 @@ fn make(algo: &str, plaintext: &str) -> Option<String> {
     Some(format!("{}:{}", algo.to_ascii_lowercase(), hex(&d)))
 }
 
+/// Whether *verifying* this stored credential is a deliberately-slow KDF (bcrypt or
+/// pbkdf2) that should run off the core thread rather than inline.
+pub fn is_slow(stored: &str) -> bool {
+    stored.starts_with("$2") || stored.starts_with("pbkdf2:")
+}
+
+/// Whether *producing* a hash with this algorithm name is a slow KDF (for MKPASSWD).
+pub fn is_slow_algo(algo: &str) -> bool {
+    let a = algo.to_ascii_lowercase();
+    a == "bcrypt" || a.starts_with("bcrypt:") || a == "pbkdf2"
+}
+
 pub fn commands() -> Vec<Box<dyn Command>> {
     vec![Box::new(MkPasswd)]
 }
@@ -152,13 +164,28 @@ impl Command for MkPasswd {
             );
             return CmdResult::Fail;
         }
-        let (algo, pass) = (&params[0], &params[1]);
+        let (algo, pass) = (params[0].clone(), params[1].clone());
         let nick = s
             .users
             .get(&uid)
             .map(|u| u.nick.clone())
             .unwrap_or_default();
-        match make(algo, pass) {
+        // a KDF (bcrypt / pbkdf2) is slow — hash it off the core thread (result comes
+        // back as MkpasswdResult) so an oper's MKPASSWD can't freeze the whole server.
+        if is_slow_algo(&algo) {
+            let started = s.spawn_crypto(move || {
+                let hash = make(&algo, &pass);
+                crate::ircd::Event::MkpasswdResult { uid, algo, hash }
+            });
+            if !started {
+                s.send(
+                    uid,
+                    format!(":{} NOTICE {nick} :Busy hashing, try again", s.name),
+                );
+            }
+            return CmdResult::Ok;
+        }
+        match make(&algo, &pass) {
             Some(hashed) => {
                 s.send(
                     uid,
