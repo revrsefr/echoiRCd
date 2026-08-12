@@ -308,7 +308,7 @@ pub fn save(s: &Server) {
             out.push_str(&format!("{ip} {} {}\n", e.score, e.last_seen));
         }
     }
-    let _ = std::fs::write(db_path(s), out);
+    s.disk_write(db_path(s), out); // off-core: a slow disk mustn't stall the event loop
 }
 
 /// Reload persisted reputation at startup.

@@ -485,6 +485,43 @@ impl Server {
         true
     }
 
+    /// Fire-and-forget full-snapshot write of `contents` to `path`. The core thread
+    /// hands the buffer to a dedicated background writer and returns immediately, so a
+    /// slow or full disk never stalls the event loop. Writes coalesce per path (newest
+    /// content wins), so a backed-up writer stays bounded at one pending snapshot per
+    /// file — safe precisely because each write is the complete current state.
+    pub fn disk_write(&self, path: String, contents: String) {
+        use std::collections::HashMap;
+        use std::sync::{Condvar, Mutex, OnceLock};
+        type Pending = std::sync::Arc<(Mutex<HashMap<String, String>>, Condvar)>;
+        static WRITER: OnceLock<Pending> = OnceLock::new();
+        let pending = WRITER.get_or_init(|| {
+            let p: Pending = std::sync::Arc::new((Mutex::new(HashMap::new()), Condvar::new()));
+            let worker = p.clone();
+            std::thread::spawn(move || {
+                let (lock, cv) = &*worker;
+                loop {
+                    let batch = {
+                        let mut map = lock.lock().unwrap_or_else(|e| e.into_inner());
+                        while map.is_empty() {
+                            map = cv.wait(map).unwrap_or_else(|e| e.into_inner());
+                        }
+                        std::mem::take(&mut *map) // drain, releasing the lock before writing
+                    };
+                    for (path, contents) in batch {
+                        let _ = std::fs::write(path, contents);
+                    }
+                }
+            });
+            p
+        });
+        let (lock, cv) = &**pending;
+        if let Ok(mut map) = lock.lock() {
+            map.insert(path, contents);
+            cv.notify_one();
+        }
+    }
+
     /// A pre-registration `:server NOTICE * :*** <msg>` line.
     pub(crate) fn notice_star(&self, uid: Uid, msg: &str) {
         self.send(uid, format!(":{} NOTICE * :*** {msg}", self.name));

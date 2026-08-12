@@ -228,7 +228,7 @@ pub fn save(s: &Server) {
             }
         }
     }
-    let _ = std::fs::write(db_path(s), out);
+    s.disk_write(db_path(s), out); // off-core: a slow disk mustn't stall the event loop
 }
 
 /// Reload persisted channel metadata at startup.
