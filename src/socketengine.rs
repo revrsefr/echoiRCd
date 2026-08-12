@@ -1,9 +1,11 @@
 //! The socket engine: the I/O edge. Two coexisting models feed the one core:
 //!
-//! - **Client plaintext** connections run on a single **mio epoll reactor**
-//!   ([`run_reactor`]) — one thread drives tens of thousands of sockets, so the
-//!   daemon scales to ~50k users without a thread per connection. The core stays
-//!   single-threaded and there is no async runtime.
+//! - **Client plaintext** connections run on a **pool of mio epoll reactors**
+//!   ([`run_reactor_pool`]) — one acceptor round-robins connections across N worker
+//!   threads (one per core by default), each driving tens of thousands of sockets, so
+//!   the daemon scales to hundreds of thousands of users without a thread per
+//!   connection. The state core stays single-threaded and there is no async runtime;
+//!   workers only frame lines and feed it Events, so the parallel I/O needs no locks.
 //! - **TLS** and **server links** keep a thread per connection (few of them, and
 //!   a TLS session can't be split across reader+writer threads).
 //!
@@ -166,23 +168,70 @@ fn set_interest(poll: &mut Poll, c: &mut Conn, t: usize) {
     let _ = poll.registry().reregister(&mut c.stream, Token(t), interest);
 }
 
-/// Run the client plaintext reactor on this thread. `listener` is an already-bound
-/// mio listener (bound in `main` so a bind failure is fatal and fails fast).
 /// Largest PROXY header we'll buffer before giving up (v1 ≤ 107, v2 header ≤ ~232).
 const PROXY_MAX: usize = 256;
 
-pub fn run_reactor(
+/// A freshly accepted client the acceptor hands to a reactor worker to adopt.
+struct Accepted {
+    stream: MioStream,
+    uid: Uid,
+    addr: SocketAddr,
+    local_port: u16,
+    via_proxy: bool,
+}
+
+/// The acceptor's handle to one reactor worker: its handoff queue and the waker that
+/// nudges the worker to adopt whatever was queued.
+struct ReactorHandle {
+    handoff: Sender<Accepted>,
+    waker: Arc<Waker>,
+}
+
+/// Resolve the reactor-pool size. An explicit `io_threads` wins; 0 means auto — one
+/// worker per CPU, floored at 1 and capped at 4 so a many-core box doesn't over-thread
+/// the plaintext path (set `io_threads` explicitly to raise it).
+fn resolve_io_threads(io_threads: usize) -> usize {
+    if io_threads > 0 {
+        return io_threads;
+    }
+    thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .clamp(1, 4)
+}
+
+/// Drive the client plaintext listener with a pool of reactor threads. One acceptor
+/// (this thread) owns the listener and round-robins each new connection to a worker;
+/// each worker runs its own poll and connection map on its own core. The state core
+/// stays single-threaded — workers only frame lines and feed it Events — so the
+/// per-connection I/O scales across cores with no shared locking.
+pub fn run_reactor_pool(
     mut listener: MioListener,
     core: Sender<Event>,
     counter: Arc<AtomicU64>,
     max_line: usize,
     max_sendq: usize,
     proxy_trust: Vec<String>,
+    io_threads: usize,
 ) {
+    let workers = resolve_io_threads(io_threads);
+    let mut reactors: Vec<ReactorHandle> = Vec::with_capacity(workers);
+    for _ in 0..workers {
+        match spawn_reactor(core.clone(), max_line, max_sendq) {
+            Ok(h) => reactors.push(h),
+            Err(e) => eprintln!("reactor: cannot start a worker: {e}"),
+        }
+    }
+    if reactors.is_empty() {
+        eprintln!("reactor: no worker threads started; plaintext clients disabled");
+        return;
+    }
+    eprintln!("echoircd plaintext reactor pool: {} thread(s)", reactors.len());
+
     let mut poll = match Poll::new() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("reactor: cannot create poll: {e}");
+            eprintln!("acceptor: cannot create poll: {e}");
             return;
         }
     };
@@ -191,18 +240,88 @@ pub fn run_reactor(
         .register(&mut listener, LISTENER, Interest::READABLE)
         .is_err()
     {
-        eprintln!("reactor: cannot register listener");
+        eprintln!("acceptor: cannot register listener");
         return;
     }
-    let waker = match Waker::new(poll.registry(), WAKE) {
-        Ok(w) => Arc::new(w),
-        Err(e) => {
-            eprintln!("reactor: cannot create waker: {e}");
-            return;
+    let mut events = Events::with_capacity(64);
+    let mut rr: usize = 0;
+    loop {
+        if poll.poll(&mut events, None).is_err() {
+            continue;
         }
-    };
-    let (out_tx, out_rx) = mpsc::channel::<Out>();
+        // the listener is the only source registered here, so drain the accept queue
+        for _ in events.iter() {
+            loop {
+                match listener.accept() {
+                    Ok((stream, _addr)) => {
+                        let _ = stream.set_nodelay(true);
+                        let uid = counter.fetch_add(1, Ordering::Relaxed);
+                        let addr = stream
+                            .peer_addr()
+                            .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap());
+                        let local_port = stream.local_addr().map(|a| a.port()).unwrap_or(0);
+                        // a connection from a trusted proxy leads with a PROXY header;
+                        // the worker holds its Connect until that header is consumed so
+                        // the core sees the real client IP.
+                        let via_proxy = proxy_trust.iter().any(|g| {
+                            crate::modules::connclass::ip_matches(g, &addr.ip().to_string())
+                        });
+                        let idx = rr % reactors.len();
+                        rr = rr.wrapping_add(1);
+                        let accepted = Accepted {
+                            stream,
+                            uid,
+                            addr,
+                            local_port,
+                            via_proxy,
+                        };
+                        if reactors[idx].handoff.send(accepted).is_ok() {
+                            let _ = reactors[idx].waker.wake();
+                        }
+                    }
+                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                    Err(_) => break,
+                }
+            }
+        }
+    }
+}
 
+/// Spawn one reactor worker and return the acceptor's handle to it. The worker owns
+/// its poll, connection map, and token space; tokens are reactor-local (each write is
+/// routed to the owning worker by the `out_tx` baked into that connection's OutSink),
+/// while uids come from the shared counter and stay globally unique.
+fn spawn_reactor(
+    core: Sender<Event>,
+    max_line: usize,
+    max_sendq: usize,
+) -> io::Result<ReactorHandle> {
+    let poll = Poll::new()?;
+    let waker = Arc::new(Waker::new(poll.registry(), WAKE)?);
+    let (handoff_tx, handoff_rx) = mpsc::channel::<Accepted>();
+    let (out_tx, out_rx) = mpsc::channel::<Out>();
+    let handle = ReactorHandle {
+        handoff: handoff_tx,
+        waker: waker.clone(),
+    };
+    thread::spawn(move || {
+        reactor_loop(poll, waker, handoff_rx, out_tx, out_rx, core, max_line, max_sendq)
+    });
+    Ok(handle)
+}
+
+/// One reactor worker's event loop: adopt handed-off connections, drive their reads
+/// and writes, and apply the output the core queued for them.
+fn reactor_loop(
+    mut poll: Poll,
+    waker: Arc<Waker>,
+    handoff_rx: Receiver<Accepted>,
+    out_tx: Sender<Out>,
+    out_rx: Receiver<Out>,
+    core: Sender<Event>,
+    max_line: usize,
+    max_sendq: usize,
+) {
     let mut conns: HashMap<usize, Conn> = HashMap::new();
     let mut next_token = FIRST_CONN;
     let mut events = Events::with_capacity(1024);
@@ -213,86 +332,71 @@ pub fn run_reactor(
         }
         for event in events.iter() {
             match event.token() {
-                LISTENER => loop {
-                    match listener.accept() {
-                        Ok((mut stream, _addr)) => {
-                            let _ = stream.set_nodelay(true);
-                            let token = next_token;
-                            next_token += 1;
-                            if poll
-                                .registry()
-                                .register(&mut stream, Token(token), Interest::READABLE)
-                                .is_err()
-                            {
-                                continue;
-                            }
-                            let uid = counter.fetch_add(1, Ordering::Relaxed);
-                            let addr = stream
-                                .peer_addr()
-                                .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap());
-                            let local_port = stream.local_addr().map(|a| a.port()).unwrap_or(0);
-                            // a connection from a trusted proxy leads with a PROXY
-                            // header; hold the Connect event until it's consumed so
-                            // add_conn sees the real client IP.
-                            let via_proxy = proxy_trust
-                                .iter()
-                                .any(|g| crate::modules::connclass::ip_matches(g, &addr.ip().to_string()));
-                            let out = OutSink::Reactor {
-                                token,
-                                tx: out_tx.clone(),
-                                waker: waker.clone(),
-                            };
-                            conns.insert(
-                                token,
-                                Conn {
-                                    stream,
-                                    uid,
-                                    addr,
-                                    local_port,
-                                    rbuf: Vec::new(),
-                                    wbuf: Vec::new(),
-                                    wpos: 0,
-                                    want_read: true,
-                                    want_write: false,
-                                    closing: false,
-                                    paused: false,
-                                    recvq: max_line,
-                                    hardsendq: max_sendq,
-                                    softsendq: max_sendq,
-                                    proxy_pending: via_proxy,
-                                    pending_out: Some(out),
-                                },
-                            );
-                            // non-proxy: announce the connection immediately (a proxy
-                            // one is announced from read_conn once its header lands)
-                            if !via_proxy {
-                                let out = conns.get_mut(&token).and_then(|c| c.pending_out.take());
-                                if let Some(out) = out {
-                                    if core
-                                        .send(Event::Connect {
-                                            uid,
-                                            addr,
-                                            out,
-                                            sock: None,
-                                            secure: false,
-                                            certfp: None,
-                                            local_port,
-                                            link: false,
-                                            outbound: false,
-                                            websocket: false,
-                                        })
-                                        .is_err()
-                                    {
-                                        return; // core gone
-                                    }
+                WAKE => {
+                    // first adopt any connections the acceptor handed us, then apply
+                    // the output the core queued and flush the connections it touched.
+                    while let Ok(a) = handoff_rx.try_recv() {
+                        let token = next_token;
+                        next_token += 1;
+                        let mut stream = a.stream;
+                        if poll
+                            .registry()
+                            .register(&mut stream, Token(token), Interest::READABLE)
+                            .is_err()
+                        {
+                            continue;
+                        }
+                        let out = OutSink::Reactor {
+                            token,
+                            tx: out_tx.clone(),
+                            waker: waker.clone(),
+                        };
+                        conns.insert(
+                            token,
+                            Conn {
+                                stream,
+                                uid: a.uid,
+                                addr: a.addr,
+                                local_port: a.local_port,
+                                rbuf: Vec::new(),
+                                wbuf: Vec::new(),
+                                wpos: 0,
+                                want_read: true,
+                                want_write: false,
+                                closing: false,
+                                paused: false,
+                                recvq: max_line,
+                                hardsendq: max_sendq,
+                                softsendq: max_sendq,
+                                proxy_pending: a.via_proxy,
+                                pending_out: Some(out),
+                            },
+                        );
+                        // non-proxy: announce immediately (a proxy conn is announced
+                        // from read_conn once its header lands)
+                        if !a.via_proxy {
+                            let out = conns.get_mut(&token).and_then(|c| c.pending_out.take());
+                            if let Some(out) = out {
+                                if core
+                                    .send(Event::Connect {
+                                        uid: a.uid,
+                                        addr: a.addr,
+                                        out,
+                                        sock: None,
+                                        secure: false,
+                                        certfp: None,
+                                        local_port: a.local_port,
+                                        link: false,
+                                        outbound: false,
+                                        websocket: false,
+                                    })
+                                    .is_err()
+                                {
+                                    return; // core gone
                                 }
                             }
                         }
-                        Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                        Err(_) => break,
                     }
-                },
-                WAKE => {
                     // drain everything the core queued, then flush the touched conns
                     let mut touched: HashSet<usize> = HashSet::new();
                     while let Ok(msg) = out_rx.try_recv() {

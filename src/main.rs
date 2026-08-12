@@ -58,6 +58,8 @@ fn main() {
     };
     let max_line = raw_num("max_line", socketengine::DEFAULT_MAX_LINE);
     let max_sendq = raw_num("max_sendq", socketengine::DEFAULT_MAX_SENDQ);
+    // plaintext reactor-pool size (0 = auto: one worker per core, capped)
+    let io_threads = raw_num("io_threads", 0);
     // trusted PROXY-protocol source globs (reactor rewrites the client IP from them)
     let proxy_trust: Vec<String> = cfg.raw.get("proxy").cloned().unwrap_or_default();
 
@@ -163,7 +165,15 @@ fn main() {
 
     // client plaintext connections: one mio reactor thread drives them all
     thread::spawn(move || {
-        socketengine::run_reactor(client_listener, tx, counter, max_line, max_sendq, proxy_trust)
+        socketengine::run_reactor_pool(
+            client_listener,
+            tx,
+            counter,
+            max_line,
+            max_sendq,
+            proxy_trust,
+            io_threads,
+        )
     });
     let _ = core.join();
 }
