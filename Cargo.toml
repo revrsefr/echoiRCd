@@ -23,5 +23,9 @@ openssl = "0.10"
 # so the daemon is still `#![forbid(unsafe_code)]`; no async runtime is pulled in.
 mio = { version = "1", features = ["os-poll", "net"] }
 
+[dev-dependencies]
+# integration tests spawn the built binary and act as a TLS client against it
+openssl = "0.10"
+
 [profile.release]
 opt-level = 3
