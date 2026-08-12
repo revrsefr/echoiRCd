@@ -515,7 +515,13 @@ impl Server {
                         std::mem::take(&mut *map) // drain, releasing the lock before writing
                     };
                     for (path, contents) in batch {
-                        let _ = std::fs::write(path, contents);
+                        // write a sibling temp then rename over the target: rename is
+                        // atomic, so a crash mid-write can never leave a truncated
+                        // snapshot — the file on disk is always a complete prior state.
+                        let tmp = format!("{path}.tmp");
+                        if std::fs::write(&tmp, &contents).is_ok() {
+                            let _ = std::fs::rename(&tmp, &path);
+                        }
                     }
                 }
             });
