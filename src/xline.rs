@@ -333,7 +333,7 @@ impl Server {
                 x.reason
             ));
         }
-        let _ = std::fs::write(self.xline_db_path(), out);
+        self.disk_write(self.xline_db_path(), out); // off-core: a slow disk mustn't stall the event loop
     }
 
     /// Reload persisted x-lines at startup, skipping any already expired.
