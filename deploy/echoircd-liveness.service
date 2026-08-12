@@ -1,0 +1,8 @@
+[Unit]
+Description=echoIRCd liveness probe — restart the daemon if it stops responding
+
+[Service]
+Type=oneshot
+# a hung (but not exited) daemon isn't caught by Restart=on-failure; this probe
+# does a real register round-trip and restarts the service if it doesn't answer.
+ExecStart=/home/debian/irc/ircd/echoIRCd/scripts/liveness.sh 6767

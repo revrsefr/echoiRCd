@@ -1,0 +1,19 @@
+[Unit]
+Description=echoIRCd (production) — native Rust ircd
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=debian
+WorkingDirectory=/home/debian/irc/ircd/echoIRCd
+LimitNOFILE=200000
+# runs a PINNED release binary (bin/echoircd), not target/debug — so a stray
+# `cargo build` never changes what a restart would launch. Deploy = copy a fresh
+# `cargo build --release` binary over bin/echoircd, then `systemctl restart`.
+ExecStart=/home/debian/irc/ircd/echoIRCd/bin/echoircd /home/debian/irc/ircd/echoIRCd/echoircd.conf
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
