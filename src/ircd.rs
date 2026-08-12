@@ -73,6 +73,12 @@ pub enum Event {
         title: String,
         vhost: String,
     },
+    /// A background connect-class password verify finished (see `crate::modules::connclass`);
+    /// registration was held until now.
+    ConnclassAuth {
+        uid: Uid,
+        ok: bool,
+    },
     /// A module's async HTTP request finished. `tag` is `"<module>:<detail>"`
     /// so the core can route the reply back to the module that issued it (e.g.
     /// account registration, captcha verification). `status` is 0 on transport
@@ -258,6 +264,28 @@ impl Ircd {
                     crate::modules::customtitle::grant(&mut self.server, uid, &title, &vhost);
                 } else {
                     crate::modules::customtitle::deny(&self.server, uid);
+                }
+            }
+            Event::ConnclassAuth { uid, ok } => {
+                // registration was held pending this off-core class-password verify
+                let held = self
+                    .server
+                    .users
+                    .get_mut(&uid)
+                    .map(|u| {
+                        let was = u.auth_pending;
+                        u.auth_pending = false;
+                        was
+                    })
+                    .unwrap_or(false);
+                if !held {
+                    return; // user vanished (or wasn't actually waiting)
+                }
+                if ok {
+                    crate::modules::connclass::finish_register(&mut self.server, uid);
+                    self.server.welcome(uid);
+                } else {
+                    self.reject_link(uid, "Password mismatch for your connection class");
                 }
             }
             Event::HttpResult {
@@ -500,6 +528,7 @@ impl Ircd {
                     && !u.cap
                     && !u.dns_pending
                     && !u.ident_pending
+                    && !u.auth_pending
                     && u.waitpong.is_none()
             })
             .unwrap_or(false);
@@ -555,16 +584,27 @@ impl Ircd {
             self.server.remove_user(uid, &reason);
             return;
         }
-        // connectclass: verify the class password and apply its on-connect modes
-        if let Some(reason) = crate::modules::connclass::on_register(&mut self.server, uid) {
-            self.server
-                .numeric(uid, ERR_PASSWDMISMATCH, &format!(":{reason}"));
-            self.server
-                .send(uid, format!("ERROR :Closing link: ({reason})"));
-            self.server.remove_user(uid, &reason);
-            return;
+        // connectclass: verify the class password and apply its on-connect modes.
+        // A KDF password verifies off-core: `Pending` holds registration until the
+        // ConnclassAuth event lands, which then welcomes or rejects.
+        match crate::modules::connclass::on_register(&mut self.server, uid) {
+            crate::modules::connclass::AuthOutcome::Proceed => {}
+            crate::modules::connclass::AuthOutcome::Pending => return,
+            crate::modules::connclass::AuthOutcome::Reject(reason) => {
+                self.reject_link(uid, &reason);
+                return;
+            }
         }
         self.server.welcome(uid);
+    }
+
+    /// Refuse a link at registration: numeric + ERROR line + drop the user.
+    fn reject_link(&mut self, uid: Uid, reason: &str) {
+        self.server
+            .numeric(uid, ERR_PASSWDMISMATCH, &format!(":{reason}"));
+        self.server
+            .send(uid, format!("ERROR :Closing link: ({reason})"));
+        self.server.remove_user(uid, reason);
     }
 
     fn quit_user(&mut self, uid: Uid, reason: &str) {

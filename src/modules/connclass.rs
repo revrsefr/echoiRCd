@@ -344,12 +344,22 @@ pub fn assign(s: &mut Server, uid: Uid) -> Option<String> {
     None
 }
 
-/// At registration: re-pick the class now the host is resolved (host masks), verify
-/// the class password, enforce a required client cert, and apply on-connect modes.
-/// Returns `Some(reason)` to reject.
-pub fn on_register(s: &mut Server, uid: Uid) -> Option<String> {
-    let (ip, host, secure, has_cert, port, sent) = {
-        let u = s.users.get(&uid)?;
+/// Outcome of the connect-class check run at registration.
+pub enum AuthOutcome {
+    /// All checks passed and on-connect modes applied; the caller should welcome.
+    Proceed,
+    /// Refuse the connection with this reason.
+    Reject(String),
+    /// A slow (KDF) class password is being verified off the core thread; hold
+    /// registration until the resulting `Event::ConnclassAuth` lands.
+    Pending,
+}
+
+/// At registration: re-pick the class now the host is resolved (host masks), enforce a
+/// required client cert, verify the class password, and apply on-connect modes. A KDF
+/// password is verified off the core thread ([`AuthOutcome::Pending`]).
+pub fn on_register(s: &mut Server, uid: Uid) -> AuthOutcome {
+    let Some((ip, host, secure, has_cert, port, sent)) = s.users.get(&uid).map(|u| {
         (
             u.addr.ip().to_string(),
             u.host.clone(),
@@ -358,10 +368,12 @@ pub fn on_register(s: &mut Server, uid: Uid) -> Option<String> {
             u.port,
             u.pass.clone(),
         )
+    }) else {
+        return AuthOutcome::Proceed;
     };
     match pick(s, uid, &ip, &host, secure, has_cert, port) {
         Pick::Deny(name) => {
-            return Some(format!("Connection class {name} denies your address"));
+            return AuthOutcome::Reject(format!("Connection class {name} denies your address"));
         }
         Pick::Class(c) => {
             if let Some(u) = s.users.get_mut(&uid) {
@@ -370,24 +382,57 @@ pub fn on_register(s: &mut Server, uid: Uid) -> Option<String> {
         }
         Pick::None => {} // keep whatever was assigned at connect
     }
-    let name = s.users.get(&uid)?.class.clone()?;
-    let class = named(s, &name)?;
-    if let Some(pw) = &class.password {
+    let Some(class) = s.users.get(&uid).and_then(|u| u.class.clone()).and_then(|n| named(s, &n))
+    else {
+        return AuthOutcome::Proceed;
+    };
+    // cheap cert check before the (possibly slow) password verify
+    if class.ssl_trusted && !has_cert {
+        return AuthOutcome::Reject("Your connection class requires a client certificate".into());
+    }
+    if let Some(pw) = class.password.clone() {
+        // a KDF class password is slow — verify it off the core thread and hold
+        // registration, so connect floods to a password-protected class can't freeze us.
+        if crate::modules::password_hash::is_slow(&pw) {
+            let started = s.spawn_crypto(move || {
+                let ok = sent
+                    .as_deref()
+                    .map(|p| crate::modules::password_hash::verify(&pw, p))
+                    .unwrap_or(false);
+                crate::ircd::Event::ConnclassAuth { uid, ok }
+            });
+            if !started {
+                return AuthOutcome::Reject("Server busy, try again".into());
+            }
+            if let Some(u) = s.users.get_mut(&uid) {
+                u.auth_pending = true;
+            }
+            return AuthOutcome::Pending;
+        }
         let ok = sent
             .as_deref()
-            .map(|p| crate::modules::password_hash::verify(pw, p))
+            .map(|p| crate::modules::password_hash::verify(&pw, p))
             .unwrap_or(false);
         if !ok {
-            return Some("Password mismatch for your connection class".to_string());
+            return AuthOutcome::Reject("Password mismatch for your connection class".into());
         }
     }
-    if class.ssl_trusted && !has_cert {
-        return Some("Your connection class requires a client certificate".to_string());
-    }
-    if let Some(m) = class.modes {
+    finish_register(s, uid);
+    AuthOutcome::Proceed
+}
+
+/// Apply the assigned class's on-connect user modes. Runs after the password check
+/// (inline, or from the `ConnclassAuth` handler once an off-core verify succeeds).
+pub fn finish_register(s: &mut Server, uid: Uid) {
+    let modes = s
+        .users
+        .get(&uid)
+        .and_then(|u| u.class.clone())
+        .and_then(|n| named(s, &n))
+        .and_then(|c| c.modes);
+    if let Some(m) = modes {
         crate::coremods::core_mode::svs_set_user_modes(s, uid, &m);
     }
-    None
 }
 
 // --- per-class getters consulted by the core / other modules -----------------

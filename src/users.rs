@@ -294,6 +294,7 @@ pub struct User {
     pub registered: bool,
     pub dns_pending: bool,     // holding registration for a reverse-DNS lookup
     pub ident_pending: bool,   // holding registration for an ident (RFC1413) lookup
+    pub auth_pending: bool,    // holding registration for an off-core connect-class password verify
     pub waitpong: Option<String>, // conn_waitpong: cookie the client must PONG before registering
     pub class: Option<String>, // connectclass: assigned connection class name
     pub pass: Option<String>,  // password sent via PASS (for connectclass passwords)
