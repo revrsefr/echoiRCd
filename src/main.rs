@@ -64,6 +64,9 @@ fn main() {
     // against connections that open but never negotiate
     let hs = raw_num("tls_handshake_timeout", 15);
     let handshake_timeout = (hs > 0).then(|| Duration::from_secs(hs as u64));
+    // per-IP accept-rate limit (0 = off): drop connection-churn floods at the edge
+    let accept_limiter =
+        socketengine::AcceptLimiter::from_conf(raw_num("accept_rate", 0), raw_num("accept_burst", 0));
     // trusted PROXY-protocol source globs (reactor rewrites the client IP from them)
     let proxy_trust: Vec<String> = cfg.raw.get("proxy").cloned().unwrap_or_default();
 
@@ -123,6 +126,7 @@ fn main() {
                     let tls_counter = counter.clone();
                     let tls_proxy_trust = proxy_trust.clone();
                     let tls_reactors = reactors.clone();
+                    let tls_limiter = accept_limiter.clone();
                     thread::spawn(move || {
                         socketengine::accept_loop(
                             tls_listener,
@@ -133,6 +137,7 @@ fn main() {
                             max_line,
                             tls_proxy_trust,
                             tls_reactors,
+                            tls_limiter,
                         )
                     });
                 }
@@ -150,7 +155,7 @@ fn main() {
                 let s_tx = tx.clone();
                 let s_counter = counter.clone();
                 thread::spawn(move || {
-                    // links stay on the thread path: no reactor handoff
+                    // links stay on the thread path: no reactor handoff, no rate limit
                     socketengine::accept_loop(
                         sl,
                         s_tx,
@@ -160,6 +165,7 @@ fn main() {
                         max_line,
                         Vec::new(),
                         Vec::new(),
+                        None,
                     )
                 });
             }
@@ -185,6 +191,8 @@ fn main() {
     }
 
     // client plaintext connections: the acceptor round-robins them across the pool
-    thread::spawn(move || socketengine::run_acceptor(client_listener, reactors, counter, proxy_trust));
+    thread::spawn(move || {
+        socketengine::run_acceptor(client_listener, reactors, counter, proxy_trust, accept_limiter)
+    });
     let _ = core.join();
 }

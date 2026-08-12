@@ -76,6 +76,10 @@ impl Drop for Server {
 
 impl Server {
     fn start(io_threads: usize, tls: bool, hs_timeout: u32) -> Server {
+        Server::start_full(io_threads, tls, hs_timeout, 0)
+    }
+
+    fn start_full(io_threads: usize, tls: bool, hs_timeout: u32, accept_rate: usize) -> Server {
         let (plain, tlsp, s2s) = (free_port(), free_port(), free_port());
         let dir = std::env::temp_dir().join(format!("echoircd-it-{}-{plain}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -83,6 +87,9 @@ impl Server {
             "servername = it.test\nnetwork = itNet\nbind = 127.0.0.1:{plain}\n\
              bind_server = 127.0.0.1:{s2s}\nsid = 1AA\nmotd = hi\nio_threads = {io_threads}\n"
         );
+        if accept_rate > 0 {
+            conf.push_str(&format!("accept_rate = {accept_rate}\naccept_burst = {accept_rate}\n"));
+        }
         if tls {
             let (cert, key) = gen_cert();
             let (cp, kp) = (dir.join("cert.pem"), dir.join("key.pem"));
@@ -262,6 +269,35 @@ fn tls_in_reactor_handshake_and_cross_transport() {
     assert!(
         read_until(&mut p, " 671 ", Duration::from_secs(3)),
         "TLS user not reported as using a secure connection"
+    );
+}
+
+#[test]
+fn accept_rate_limit_drops_connection_churn() {
+    // rate/burst = 5: a rapid burst of 20 connections from one IP must be partly dropped
+    // at the accept edge — some register, but not all 20.
+    let srv = Server::start_full(2, false, 5, 5);
+    let mut socks = Vec::new();
+    for i in 0..20 {
+        if let Ok(mut s) = TcpStream::connect(("127.0.0.1", srv.plain)) {
+            s.set_read_timeout(Some(Duration::from_millis(600))).unwrap();
+            let _ = s.write_all(format!("NICK n{i}\r\nUSER n{i} 0 * :n\r\n").as_bytes());
+            socks.push(s);
+        }
+    }
+    let mut registered = 0;
+    for s in socks.iter_mut() {
+        if read_until(s, " 001 ", Duration::from_millis(800)) {
+            registered += 1;
+        }
+    }
+    assert!(
+        registered < 20,
+        "rate limit didn't drop any of a 20-connection burst ({registered} registered)"
+    );
+    assert!(
+        registered >= 3,
+        "rate limit dropped too much — burst of 5 should let at least a few through ({registered})"
     );
 }
 

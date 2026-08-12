@@ -17,10 +17,10 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -283,6 +283,69 @@ fn dispatch(reactors: &[ReactorHandle], rr: &mut usize, a: Accepted) {
     }
 }
 
+/// A token-bucket rate limiter keyed by source IP, checked at the accept edge so a
+/// connection-churn flood is dropped before any per-connection state is allocated —
+/// the cheapest possible rejection. Shared (behind a mutex) by the plaintext and TLS
+/// acceptors, so one IP can't earn a fresh budget per listener. Off unless
+/// `accept_rate` is configured. Complements the connclass *concurrent* clone caps with
+/// a *rate* cap, and skips connections from trusted proxies (whose peer IP is the proxy).
+pub struct AcceptLimiter {
+    rate: f64,  // sustained new connections/sec per IP
+    burst: f64, // bucket capacity — the instantaneous burst allowed per IP
+    inner: Mutex<LimiterState>,
+}
+
+struct LimiterState {
+    buckets: HashMap<IpAddr, (f64, Instant)>, // ip -> (tokens, last refill)
+    last_prune: Instant,
+}
+
+impl AcceptLimiter {
+    /// Build a limiter from config, or `None` when disabled (`rate` 0). `burst` 0
+    /// defaults to `rate` (one second's worth).
+    pub fn from_conf(rate: usize, burst: usize) -> Option<Arc<AcceptLimiter>> {
+        if rate == 0 {
+            return None;
+        }
+        let burst = if burst == 0 { rate } else { burst };
+        Some(Arc::new(AcceptLimiter {
+            rate: rate as f64,
+            burst: burst.max(1) as f64,
+            inner: Mutex::new(LimiterState {
+                buckets: HashMap::new(),
+                last_prune: Instant::now(),
+            }),
+        }))
+    }
+
+    /// Whether a new connection from `ip` is allowed now, consuming one token.
+    fn allow(&self, ip: IpAddr) -> bool {
+        let now = Instant::now();
+        let mut st = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        // periodically forget IPs idle for a while, so memory tracks only active sources
+        if now.duration_since(st.last_prune) >= Duration::from_secs(30) {
+            st.buckets
+                .retain(|_, &mut (_, last)| now.duration_since(last) < Duration::from_secs(60));
+            st.last_prune = now;
+        }
+        let entry = st.buckets.entry(ip).or_insert((self.burst, now));
+        let refilled =
+            (entry.0 + self.rate * now.duration_since(entry.1).as_secs_f64()).min(self.burst);
+        if refilled >= 1.0 {
+            *entry = (refilled - 1.0, now);
+            true
+        } else {
+            *entry = (refilled, now);
+            false
+        }
+    }
+}
+
+/// True when a limiter is configured and this IP is over its accept rate.
+fn rate_limited(limiter: &Option<Arc<AcceptLimiter>>, ip: IpAddr) -> bool {
+    limiter.as_ref().map(|l| !l.allow(ip)).unwrap_or(false)
+}
+
 /// The plaintext client acceptor: owns the listener and round-robins each new
 /// connection onto a reactor worker.
 pub fn run_acceptor(
@@ -290,6 +353,7 @@ pub fn run_acceptor(
     reactors: Vec<ReactorHandle>,
     counter: Arc<AtomicU64>,
     proxy_trust: Vec<String>,
+    limiter: Option<Arc<AcceptLimiter>>,
 ) {
     if reactors.is_empty() {
         eprintln!("acceptor: no worker threads; plaintext clients disabled");
@@ -321,18 +385,23 @@ pub fn run_acceptor(
             loop {
                 match listener.accept() {
                     Ok((stream, _addr)) => {
-                        let _ = stream.set_nodelay(true);
-                        let uid = counter.fetch_add(1, Ordering::Relaxed);
                         let addr = stream
                             .peer_addr()
                             .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap());
-                        let local_port = stream.local_addr().map(|a| a.port()).unwrap_or(0);
                         // a connection from a trusted proxy leads with a PROXY header;
                         // the worker holds its Connect until that header is consumed so
                         // the core sees the real client IP.
                         let via_proxy = proxy_trust.iter().any(|g| {
                             crate::modules::connclass::ip_matches(g, &addr.ip().to_string())
                         });
+                        // rate-limit direct clients at the edge; drop before allocating
+                        // anything. Proxied clients carry the proxy's IP, so skip them.
+                        if !via_proxy && rate_limited(&limiter, addr.ip()) {
+                            continue; // stream drops here, nothing else touched
+                        }
+                        let _ = stream.set_nodelay(true);
+                        let uid = counter.fetch_add(1, Ordering::Relaxed);
+                        let local_port = stream.local_addr().map(|a| a.port()).unwrap_or(0);
                         dispatch(
                             &reactors,
                             &mut rr,
@@ -855,6 +924,7 @@ pub fn accept_loop(
     max_line: usize,
     proxy_trust: Vec<String>,
     reactors: Vec<ReactorHandle>,
+    limiter: Option<Arc<AcceptLimiter>>,
 ) {
     let mut rr: usize = 0;
     for conn in listener.incoming() {
@@ -862,6 +932,15 @@ pub fn accept_loop(
         let Ok(addr) = stream.peer_addr() else {
             continue;
         };
+        // rate-limit direct client connections at the edge (not S2S links, not proxied)
+        if !link {
+            let via_proxy = proxy_trust
+                .iter()
+                .any(|g| crate::modules::connclass::ip_matches(g, &addr.ip().to_string()));
+            if !via_proxy && rate_limited(&limiter, addr.ip()) {
+                continue; // drop before any per-connection work
+            }
+        }
         let _ = stream.set_nodelay(true);
         let local_port = stream.local_addr().map(|a| a.port()).unwrap_or(0);
         let uid = counter.fetch_add(1, Ordering::Relaxed);
