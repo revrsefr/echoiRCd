@@ -154,6 +154,13 @@ impl Sock {
             Sock::Tls(t) => t.write(buf),
         }
     }
+    /// Best-effort graceful close. TLS sends a close_notify alert; plaintext relies on
+    /// the socket's own FIN when the stream drops.
+    fn shutdown(&mut self) {
+        if let Sock::Tls(t) = self {
+            t.shutdown();
+        }
+    }
 }
 
 struct Conn {
@@ -816,6 +823,10 @@ fn flush_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core:
 fn close_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: &Sender<Event>) {
     if let Some(mut c) = conns.remove(&t) {
         let _ = poll.registry().deregister(c.sock.source());
+        // send a TLS close_notify for an established session (not a half-done handshake)
+        if !c.handshaking {
+            c.sock.shutdown();
+        }
         let uid = c.uid;
         // a conn whose Connect was never emitted — a still-pending PROXY header or an
         // unfinished TLS handshake — must not send the core a Disconnect for a uid it

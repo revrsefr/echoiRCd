@@ -143,6 +143,9 @@ impl TlsSession for OpensslSession {
         Some(digest.iter().map(|b| format!("{b:02x}")).collect())
     }
     fn shutdown(&mut self) {
+        // best-effort TLS close_notify, then close the socket. Non-blocking, so a
+        // WouldBlock just means the alert is queued — we don't wait for the peer's.
+        let _ = self.0.shutdown();
         let _ = self.0.get_ref().shutdown(Shutdown::Both);
     }
 }
