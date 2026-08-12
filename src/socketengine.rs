@@ -351,11 +351,25 @@ pub fn run_reactor(
                     }
                 }
                 Token(t) => {
+                    // isolate per-connection I/O: a panic framing one client's bytes
+                    // drops that client, never the reactor that serves all the others.
                     if event.is_readable() {
-                        read_conn(&mut poll, &mut conns, t, &core);
+                        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            read_conn(&mut poll, &mut conns, t, &core)
+                        }));
+                        if r.is_err() {
+                            eprintln!("[reactor] recovered from a panic reading a socket; dropping that connection");
+                            close_conn(&mut poll, &mut conns, t, &core);
+                        }
                     }
                     if event.is_writable() && conns.contains_key(&t) {
-                        flush_conn(&mut poll, &mut conns, t, &core);
+                        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            flush_conn(&mut poll, &mut conns, t, &core)
+                        }));
+                        if r.is_err() {
+                            eprintln!("[reactor] recovered from a panic writing a socket; dropping that connection");
+                            close_conn(&mut poll, &mut conns, t, &core);
+                        }
                     }
                 }
             }

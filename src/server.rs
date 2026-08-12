@@ -479,8 +479,14 @@ impl Server {
         let tx = self.event_tx.clone();
         std::thread::spawn(move || {
             let _guard = Guard; // decrements even on panic
-            let ev = f();
-            let _ = tx.send(ev);
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+                Ok(ev) => {
+                    let _ = tx.send(ev);
+                }
+                // a panic here can't reach the core (we don't know which Event to send);
+                // log it so a stuck request is diagnosable instead of silent.
+                Err(_) => eprintln!("[worker] a background crypto/http task panicked; its request was dropped"),
+            }
         });
         true
     }
