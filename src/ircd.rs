@@ -112,96 +112,111 @@ impl Ircd {
         }
     }
 
-    /// Run until the event channel closes (i.e. the listener is gone).
+    /// Run until the event channel closes (i.e. the listener is gone). Each event is
+    /// handled inside `catch_unwind`: a panic in one command's handler is logged and
+    /// the loop carries on, instead of the panic taking the whole single-threaded
+    /// server down with it. State touched before the panic may be left inconsistent,
+    /// so this is a last-resort safety net, not a licence to panic — the untrusted
+    /// parsers are still written so they can't panic in the first place.
     pub fn run(mut self, rx: Receiver<Event>) {
         for ev in rx {
-            match ev {
-                Event::Connect {
-                    uid,
-                    addr,
-                    out,
-                    sock,
-                    secure,
-                    certfp,
-                    local_port,
-                    link,
-                    outbound,
-                    websocket,
-                } => {
-                    if link {
-                        self.server.add_link(uid, addr, out, sock, outbound);
-                    } else {
-                        self.server
-                            .add_conn(uid, addr, out, sock, secure, certfp, local_port);
-                        if websocket {
-                            if let Some(u) = self.server.users.get_mut(&uid) {
-                                u.flags.via_websocket = true;
-                            }
-                        }
-                    }
-                }
-                Event::Line { uid, line } => {
-                    if self.server.links.contains_key(&uid) {
-                        if let Some(msg) = message::parse(&line) {
-                            self.server.on_link(uid, &msg);
-                        }
-                    } else {
-                        self.on_line(uid, &line);
-                    }
-                }
-                Event::Disconnect { uid } => {
-                    if self.server.links.contains_key(&uid) {
-                        self.server.close_link(uid, "Connection closed");
-                    } else {
-                        self.quit_user(uid, "Connection closed");
-                    }
-                }
-                Event::ResolvedHost { uid, host, dnsbl } => {
-                    self.server.on_resolved(uid, host, dnsbl);
-                    // now that the notice block has printed, replay the handshake
-                    // lines we held while resolving
-                    for line in self.server.take_deferred(uid) {
-                        if !self.server.users.contains_key(&uid) {
-                            break; // a replayed QUIT/ban already dropped them
-                        }
-                        self.on_line(uid, &line);
-                    }
-                    self.try_register(uid); // DNS may have been the last thing we waited on
-                }
-                Event::Ident { uid, ident } => {
-                    crate::modules::ident::on_result(&mut self.server, uid, ident);
-                    self.try_register(uid); // ident may have been the last hold
-                }
-                Event::HttpResult {
-                    uid,
-                    tag,
-                    status,
-                    body,
-                } => {
-                    if let Some(detail) = tag.strip_prefix("acctreg:") {
-                        crate::modules::account_registration::on_http_result(
-                            &mut self.server,
-                            uid,
-                            detail,
-                            status,
-                            &body,
-                        );
-                    }
-                }
-                Event::RpcRequest {
-                    method,
-                    params,
-                    id,
-                    reply,
-                } => {
-                    let resp =
-                        crate::modules::rpc::dispatch(&mut self.server, &method, &params, &id);
-                    let _ = reply.send(resp);
-                }
-                Event::Tick => self.on_tick(),
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.handle_event(ev)))
+                .is_err()
+            {
+                // the default panic hook already logged the details to stderr
+                eprintln!("[core] recovered from a panicking event handler; continuing");
             }
-            self.drain_hooks();
         }
+    }
+
+    /// Dispatch one event, then drain any hooks it queued.
+    fn handle_event(&mut self, ev: Event) {
+        match ev {
+            Event::Connect {
+                uid,
+                addr,
+                out,
+                sock,
+                secure,
+                certfp,
+                local_port,
+                link,
+                outbound,
+                websocket,
+            } => {
+                if link {
+                    self.server.add_link(uid, addr, out, sock, outbound);
+                } else {
+                    self.server
+                        .add_conn(uid, addr, out, sock, secure, certfp, local_port);
+                    if websocket {
+                        if let Some(u) = self.server.users.get_mut(&uid) {
+                            u.flags.via_websocket = true;
+                        }
+                    }
+                }
+            }
+            Event::Line { uid, line } => {
+                if self.server.links.contains_key(&uid) {
+                    if let Some(msg) = message::parse(&line) {
+                        self.server.on_link(uid, &msg);
+                    }
+                } else {
+                    self.on_line(uid, &line);
+                }
+            }
+            Event::Disconnect { uid } => {
+                if self.server.links.contains_key(&uid) {
+                    self.server.close_link(uid, "Connection closed");
+                } else {
+                    self.quit_user(uid, "Connection closed");
+                }
+            }
+            Event::ResolvedHost { uid, host, dnsbl } => {
+                self.server.on_resolved(uid, host, dnsbl);
+                // now that the notice block has printed, replay the handshake
+                // lines we held while resolving
+                for line in self.server.take_deferred(uid) {
+                    if !self.server.users.contains_key(&uid) {
+                        break; // a replayed QUIT/ban already dropped them
+                    }
+                    self.on_line(uid, &line);
+                }
+                self.try_register(uid); // DNS may have been the last thing we waited on
+            }
+            Event::Ident { uid, ident } => {
+                crate::modules::ident::on_result(&mut self.server, uid, ident);
+                self.try_register(uid); // ident may have been the last hold
+            }
+            Event::HttpResult {
+                uid,
+                tag,
+                status,
+                body,
+            } => {
+                if let Some(detail) = tag.strip_prefix("acctreg:") {
+                    crate::modules::account_registration::on_http_result(
+                        &mut self.server,
+                        uid,
+                        detail,
+                        status,
+                        &body,
+                    );
+                }
+            }
+            Event::RpcRequest {
+                method,
+                params,
+                id,
+                reply,
+            } => {
+                let resp =
+                    crate::modules::rpc::dispatch(&mut self.server, &method, &params, &id);
+                let _ = reply.send(resp);
+            }
+            Event::Tick => self.on_tick(),
+        }
+        self.drain_hooks();
     }
 
     fn on_line(&mut self, uid: Uid, line: &str) {
