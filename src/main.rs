@@ -102,6 +102,10 @@ fn main() {
         }
     });
 
+    // reactor worker pool: shared by the plaintext acceptor and the direct-TLS
+    // acceptor, so client I/O (framing + TLS crypto) spreads across cores.
+    let reactors = socketengine::spawn_reactors(tx.clone(), max_line, max_sendq, io_threads);
+
     // optional TLS listener (bind_tls + tls_cert + tls_key). A cert/bind problem
     // disables TLS but never takes the plaintext listener down.
     if let (Some(bind_tls), Some(cert), Some(key)) = (&cfg.bind_tls, &cfg.tls_cert, &cfg.tls_key) {
@@ -113,6 +117,7 @@ fn main() {
                     let tls_tx = tx.clone();
                     let tls_counter = counter.clone();
                     let tls_proxy_trust = proxy_trust.clone();
+                    let tls_reactors = reactors.clone();
                     thread::spawn(move || {
                         socketengine::accept_loop(
                             tls_listener,
@@ -122,6 +127,7 @@ fn main() {
                             false,
                             max_line,
                             tls_proxy_trust,
+                            tls_reactors,
                         )
                     });
                 }
@@ -139,7 +145,17 @@ fn main() {
                 let s_tx = tx.clone();
                 let s_counter = counter.clone();
                 thread::spawn(move || {
-                    socketengine::accept_loop(sl, s_tx, None, s_counter, true, max_line, Vec::new())
+                    // links stay on the thread path: no reactor handoff
+                    socketengine::accept_loop(
+                        sl,
+                        s_tx,
+                        None,
+                        s_counter,
+                        true,
+                        max_line,
+                        Vec::new(),
+                        Vec::new(),
+                    )
                 });
             }
             Err(e) => eprintln!("echoircd: cannot bind server port {bind_srv}: {e}"),
@@ -163,17 +179,7 @@ fn main() {
         });
     }
 
-    // client plaintext connections: one mio reactor thread drives them all
-    thread::spawn(move || {
-        socketengine::run_reactor_pool(
-            client_listener,
-            tx,
-            counter,
-            max_line,
-            max_sendq,
-            proxy_trust,
-            io_threads,
-        )
-    });
+    // client plaintext connections: the acceptor round-robins them across the pool
+    thread::spawn(move || socketengine::run_acceptor(client_listener, reactors, counter, proxy_trust));
     let _ = core.join();
 }

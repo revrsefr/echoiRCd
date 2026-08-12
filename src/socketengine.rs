@@ -1,13 +1,16 @@
 //! The socket engine: the I/O edge. Two coexisting models feed the one core:
 //!
-//! - **Client plaintext** connections run on a **pool of mio epoll reactors**
-//!   ([`run_reactor_pool`]) — one acceptor round-robins connections across N worker
-//!   threads (one per core by default), each driving tens of thousands of sockets, so
-//!   the daemon scales to hundreds of thousands of users without a thread per
-//!   connection. The state core stays single-threaded and there is no async runtime;
-//!   workers only frame lines and feed it Events, so the parallel I/O needs no locks.
-//! - **TLS** and **server links** keep a thread per connection (few of them, and
-//!   a TLS session can't be split across reader+writer threads).
+//! - **Client connections** run on a **pool of mio epoll reactors** — acceptors
+//!   ([`run_acceptor`] for plaintext, [`accept_loop`] for TLS) round-robin connections
+//!   across N worker threads ([`spawn_reactors`], one per core by default), each
+//!   driving tens of thousands of sockets — plaintext and **direct TLS** alike, the
+//!   handshake and crypto run non-blocking in the worker — so the daemon scales to
+//!   hundreds of thousands of users without a thread per connection. The state core
+//!   stays single-threaded and there is no async runtime; workers only frame lines and
+//!   feed it Events, so the parallel I/O (including TLS crypto) needs no locks.
+//! - **Proxied TLS** (a PROXY header before the handshake) and **server links** keep a
+//!   thread per connection: few of them, and the pre-handshake header wants the
+//!   simpler blocking path.
 //!
 //! Both hand the core the same [`OutSink`] output handle, so the core never
 //! knows or cares which model a connection uses.
@@ -25,7 +28,7 @@ use mio::net::{TcpListener as MioListener, TcpStream as MioStream};
 use mio::{Events, Interest, Poll, Token, Waker};
 
 use crate::ircd::Event;
-use crate::tls::TlsBackend;
+use crate::tls::{TlsBackend, TlsSession};
 use crate::Uid;
 
 /// Default recvq: longest single line we'll buffer before dropping it. Overridable
@@ -123,8 +126,38 @@ const LISTENER: Token = Token(0);
 const WAKE: Token = Token(1);
 const FIRST_CONN: usize = 16; // conn tokens start past the reserved ones
 
+/// A reactor connection's socket: a raw plaintext stream, or a non-blocking TLS
+/// session driven by the same reactor. Both expose the underlying mio socket for
+/// poll registration, so the read/write/backpressure machinery is identical.
+enum Sock {
+    Plain(MioStream),
+    Tls(Box<dyn TlsSession>),
+}
+
+impl Sock {
+    /// The underlying socket, for poll (re)register/deregister.
+    fn source(&mut self) -> &mut MioStream {
+        match self {
+            Sock::Plain(s) => s,
+            Sock::Tls(t) => t.source(),
+        }
+    }
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Sock::Plain(s) => s.read(buf),
+            Sock::Tls(t) => t.read(buf),
+        }
+    }
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Sock::Plain(s) => s.write(buf),
+            Sock::Tls(t) => t.write(buf),
+        }
+    }
+}
+
 struct Conn {
-    stream: MioStream,
+    sock: Sock,
     uid: Uid,
     addr: SocketAddr, // peer, or the real client once a PROXY header is parsed
     local_port: u16,  // listener port (for the deferred-Connect case)
@@ -138,6 +171,7 @@ struct Conn {
     recvq: usize,      // max buffered unterminated-line bytes before dropping
     hardsendq: usize,  // max queued output bytes before dropping + closing
     softsendq: usize,  // queued output above this pauses reads until it drains
+    handshaking: bool, // TLS: still negotiating; hold reads + the Connect until done
     proxy_pending: bool, // hold the Connect event until a PROXY header is consumed
     pending_out: Option<OutSink>, // the OutSink held for that deferred Connect
 }
@@ -153,7 +187,9 @@ impl Conn {
 /// serviced) while keeping WRITABLE to drain the backlog that paused it.
 fn set_interest(poll: &mut Poll, c: &mut Conn, t: usize) {
     let want_read = !c.paused;
-    let want_write = !c.wbuf.is_empty() || c.paused;
+    // a TLS handshake may need to write (its flight) as well as read, so keep both
+    // until it completes; after that, write only when there's a backlog to drain.
+    let want_write = c.handshaking || !c.wbuf.is_empty() || c.paused;
     if want_read == c.want_read && want_write == c.want_write {
         return;
     }
@@ -165,7 +201,7 @@ fn set_interest(poll: &mut Poll, c: &mut Conn, t: usize) {
         // never both-false (paused ⟹ backlog ⟹ want_write); READABLE is a safe floor
         _ => Interest::READABLE,
     };
-    let _ = poll.registry().reregister(&mut c.stream, Token(t), interest);
+    let _ = poll.registry().reregister(c.sock.source(), Token(t), interest);
 }
 
 /// Largest PROXY header we'll buffer before giving up (v1 ≤ 107, v2 header ≤ ~232).
@@ -178,11 +214,15 @@ struct Accepted {
     addr: SocketAddr,
     local_port: u16,
     via_proxy: bool,
+    tls: Option<Arc<dyn TlsBackend>>, // Some ⇒ the worker negotiates TLS on this socket
 }
 
 /// The acceptor's handle to one reactor worker: its handoff queue and the waker that
-/// nudges the worker to adopt whatever was queued.
-struct ReactorHandle {
+/// nudges the worker to adopt whatever was queued. Cloneable so several acceptors
+/// (plaintext + TLS) can share the same pool, each round-robining independently.
+/// Opaque to callers — `main` only holds a `Vec` of these and passes it along.
+#[derive(Clone)]
+pub struct ReactorHandle {
     handoff: Sender<Accepted>,
     waker: Arc<Waker>,
 }
@@ -200,34 +240,53 @@ fn resolve_io_threads(io_threads: usize) -> usize {
         .clamp(1, 4)
 }
 
-/// Drive the client plaintext listener with a pool of reactor threads. One acceptor
-/// (this thread) owns the listener and round-robins each new connection to a worker;
-/// each worker runs its own poll and connection map on its own core. The state core
-/// stays single-threaded — workers only frame lines and feed it Events — so the
-/// per-connection I/O scales across cores with no shared locking.
-pub fn run_reactor_pool(
-    mut listener: MioListener,
+/// Start the reactor worker pool and return the acceptors' handles to it. Sized by
+/// `io_threads` (0 = auto: one worker per core, capped). Each worker runs its own poll
+/// and connection map on its own core; the state core stays single-threaded — workers
+/// only frame lines and feed it Events — so per-connection I/O (plaintext framing and
+/// TLS crypto alike) scales across cores with no shared locking.
+pub fn spawn_reactors(
     core: Sender<Event>,
-    counter: Arc<AtomicU64>,
     max_line: usize,
     max_sendq: usize,
-    proxy_trust: Vec<String>,
     io_threads: usize,
-) {
+) -> Vec<ReactorHandle> {
     let workers = resolve_io_threads(io_threads);
-    let mut reactors: Vec<ReactorHandle> = Vec::with_capacity(workers);
+    let mut reactors = Vec::with_capacity(workers);
     for _ in 0..workers {
         match spawn_reactor(core.clone(), max_line, max_sendq) {
             Ok(h) => reactors.push(h),
             Err(e) => eprintln!("reactor: cannot start a worker: {e}"),
         }
     }
+    eprintln!("echoircd reactor pool: {} worker thread(s)", reactors.len());
+    reactors
+}
+
+/// Round-robin one accepted connection onto a worker and wake it to adopt the conn.
+fn dispatch(reactors: &[ReactorHandle], rr: &mut usize, a: Accepted) {
     if reactors.is_empty() {
-        eprintln!("reactor: no worker threads started; plaintext clients disabled");
+        return; // no workers: drop it (a.stream closes on drop)
+    }
+    let idx = *rr % reactors.len();
+    *rr = rr.wrapping_add(1);
+    if reactors[idx].handoff.send(a).is_ok() {
+        let _ = reactors[idx].waker.wake();
+    }
+}
+
+/// The plaintext client acceptor: owns the listener and round-robins each new
+/// connection onto a reactor worker.
+pub fn run_acceptor(
+    mut listener: MioListener,
+    reactors: Vec<ReactorHandle>,
+    counter: Arc<AtomicU64>,
+    proxy_trust: Vec<String>,
+) {
+    if reactors.is_empty() {
+        eprintln!("acceptor: no worker threads; plaintext clients disabled");
         return;
     }
-    eprintln!("echoircd plaintext reactor pool: {} thread(s)", reactors.len());
-
     let mut poll = match Poll::new() {
         Ok(p) => p,
         Err(e) => {
@@ -266,18 +325,18 @@ pub fn run_reactor_pool(
                         let via_proxy = proxy_trust.iter().any(|g| {
                             crate::modules::connclass::ip_matches(g, &addr.ip().to_string())
                         });
-                        let idx = rr % reactors.len();
-                        rr = rr.wrapping_add(1);
-                        let accepted = Accepted {
-                            stream,
-                            uid,
-                            addr,
-                            local_port,
-                            via_proxy,
-                        };
-                        if reactors[idx].handoff.send(accepted).is_ok() {
-                            let _ = reactors[idx].waker.wake();
-                        }
+                        dispatch(
+                            &reactors,
+                            &mut rr,
+                            Accepted {
+                                stream,
+                                uid,
+                                addr,
+                                local_port,
+                                via_proxy,
+                                tls: None,
+                            },
+                        );
                     }
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
                     Err(_) => break,
@@ -338,10 +397,23 @@ fn reactor_loop(
                     while let Ok(a) = handoff_rx.try_recv() {
                         let token = next_token;
                         next_token += 1;
-                        let mut stream = a.stream;
+                        // build the socket: a TLS conn negotiates non-blocking in this
+                        // worker; a plaintext one is ready to read immediately.
+                        let (mut sock, handshaking) = match a.tls {
+                            Some(backend) => match backend.start(a.stream) {
+                                Ok(sess) => (Sock::Tls(sess), true),
+                                Err(_) => continue, // couldn't start TLS: drop it
+                            },
+                            None => (Sock::Plain(a.stream), false),
+                        };
+                        let interest = if handshaking {
+                            Interest::READABLE | Interest::WRITABLE
+                        } else {
+                            Interest::READABLE
+                        };
                         if poll
                             .registry()
-                            .register(&mut stream, Token(token), Interest::READABLE)
+                            .register(sock.source(), Token(token), interest)
                             .is_err()
                         {
                             continue;
@@ -354,7 +426,7 @@ fn reactor_loop(
                         conns.insert(
                             token,
                             Conn {
-                                stream,
+                                sock,
                                 uid: a.uid,
                                 addr: a.addr,
                                 local_port: a.local_port,
@@ -362,19 +434,20 @@ fn reactor_loop(
                                 wbuf: Vec::new(),
                                 wpos: 0,
                                 want_read: true,
-                                want_write: false,
+                                want_write: handshaking,
                                 closing: false,
                                 paused: false,
                                 recvq: max_line,
                                 hardsendq: max_sendq,
                                 softsendq: max_sendq,
+                                handshaking,
                                 proxy_pending: a.via_proxy,
                                 pending_out: Some(out),
                             },
                         );
-                        // non-proxy: announce immediately (a proxy conn is announced
-                        // from read_conn once its header lands)
-                        if !a.via_proxy {
+                        // announce now only if nothing defers it: a TLS conn waits for
+                        // its handshake, a proxy conn for its header.
+                        if !a.via_proxy && !handshaking {
                             let out = conns.get_mut(&token).and_then(|c| c.pending_out.take());
                             if let Some(out) = out {
                                 if core
@@ -481,9 +554,70 @@ fn reactor_loop(
     }
 }
 
+/// Drive a pending TLS handshake for `t`. Returns true once the connection is
+/// established — its deferred Connect emitted with the peer's cert fingerprint, so
+/// normal reads/writes may proceed — and false while it still needs I/O or was closed
+/// on a fatal handshake error. A plaintext (or already-established) conn returns true.
+fn try_handshake(
+    poll: &mut Poll,
+    conns: &mut HashMap<usize, Conn>,
+    t: usize,
+    core: &Sender<Event>,
+) -> bool {
+    let mut close = false;
+    let mut connect: Option<(Uid, SocketAddr, u16, Option<String>, OutSink)> = None;
+    if let Some(c) = conns.get_mut(&t) {
+        if !c.handshaking {
+            return true;
+        }
+        if let Sock::Tls(sess) = &mut c.sock {
+            match sess.accept() {
+                Ok(true) => {
+                    c.handshaking = false;
+                    let certfp = sess.peer_cert_fp();
+                    connect = c
+                        .pending_out
+                        .take()
+                        .map(|out| (c.uid, c.addr, c.local_port, certfp, out));
+                    set_interest(poll, c, t); // handshake done: drop the extra WRITABLE
+                }
+                Ok(false) => return false, // still negotiating
+                Err(_) => close = true,
+            }
+        } else {
+            c.handshaking = false; // not TLS (shouldn't happen): treat as established
+        }
+    } else {
+        return false;
+    }
+    if let Some((uid, addr, local_port, certfp, out)) = connect {
+        let _ = core.send(Event::Connect {
+            uid,
+            addr,
+            out,
+            sock: None,
+            secure: true,
+            certfp,
+            local_port,
+            link: false,
+            outbound: false,
+            websocket: false,
+        });
+    }
+    if close {
+        close_conn(poll, conns, t, core);
+        return false;
+    }
+    true
+}
+
 /// Drain readable bytes from `t` (edge-triggered: read until WouldBlock), frame
 /// complete lines and forward them to the core; close on EOF/error.
 fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: &Sender<Event>) {
+    // a TLS conn must finish negotiating before any application bytes flow
+    if !try_handshake(poll, conns, t, core) {
+        return;
+    }
     let mut chunk = [0u8; 8192];
     let mut lines: Vec<(Uid, String)> = Vec::new();
     // a deferred Connect (PROXY conn) to emit, before any lines from the same read
@@ -491,7 +625,7 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
     let mut close = false;
     if let Some(c) = conns.get_mut(&t) {
         loop {
-            match c.stream.read(&mut chunk) {
+            match c.sock.read(&mut chunk) {
                 Ok(0) => {
                     close = true;
                     break;
@@ -597,11 +731,15 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
 /// backlog dropped back under softsendq, un-pause reads and catch up (edge-triggered:
 /// data that arrived while paused won't re-fire, so read it here).
 fn flush_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: &Sender<Event>) {
+    // a writable event during a TLS handshake advances it, not the (empty) write queue
+    if !try_handshake(poll, conns, t, core) {
+        return;
+    }
     let mut close = false;
     let mut unpaused = false;
     if let Some(c) = conns.get_mut(&t) {
         while c.wpos < c.wbuf.len() {
-            match c.stream.write(&c.wbuf[c.wpos..]) {
+            match c.sock.write(&c.wbuf[c.wpos..]) {
                 Ok(0) => break,
                 Ok(n) => c.wpos += n,
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
@@ -635,11 +773,12 @@ fn flush_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core:
 /// Deregister + drop `t`'s socket and tell the core the connection is gone.
 fn close_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: &Sender<Event>) {
     if let Some(mut c) = conns.remove(&t) {
-        let _ = poll.registry().deregister(&mut c.stream);
+        let _ = poll.registry().deregister(c.sock.source());
         let uid = c.uid;
-        // a still-pending PROXY conn was never announced to the core, so don't tell
-        // it about a disconnect for a uid it never saw
-        let announced = !c.proxy_pending;
+        // a conn whose Connect was never emitted — a still-pending PROXY header or an
+        // unfinished TLS handshake — must not send the core a Disconnect for a uid it
+        // never saw
+        let announced = !c.proxy_pending && !c.handshaking;
         drop(c); // closes the socket
         if announced {
             let _ = core.send(Event::Disconnect { uid });
@@ -649,9 +788,11 @@ fn close_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core:
 
 // === thread model: TLS + server links ========================================
 
-/// Accept forever on a thread-per-connection listener (TLS or S2S). `tls` is the
-/// backend to wrap sockets in (None ⇒ plaintext link). `counter` is shared with
-/// the reactor so uids stay unique across every listener.
+/// Accept forever on a listener (TLS or S2S). `tls` is the backend to wrap sockets in
+/// (None ⇒ plaintext link). `counter` is shared with the reactor so uids stay unique
+/// across every listener. `reactors` is the worker pool: a direct (non-proxy) TLS
+/// client is handed off to it to negotiate non-blocking; a proxied TLS client (PROXY
+/// header before the handshake) and every server link keep the thread path.
 pub fn accept_loop(
     listener: TcpListener,
     core: Sender<Event>,
@@ -660,7 +801,9 @@ pub fn accept_loop(
     link: bool,
     max_line: usize,
     proxy_trust: Vec<String>,
+    reactors: Vec<ReactorHandle>,
 ) {
+    let mut rr: usize = 0;
     for conn in listener.incoming() {
         let Ok(stream) = conn else { continue };
         let Ok(addr) = stream.peer_addr() else {
@@ -701,6 +844,27 @@ pub fn accept_loop(
                 thread::spawn(move || reader_loop(reader, uid, core_tx, max_line));
             }
             Some(backend) => {
+                let via_proxy = proxy_trust
+                    .iter()
+                    .any(|g| crate::modules::connclass::ip_matches(g, &addr.ip().to_string()));
+                // direct TLS clients negotiate in the reactor pool (non-blocking, one
+                // worker per core); a proxied client keeps the thread path so its
+                // plaintext PROXY header is read before the handshake.
+                if !via_proxy && !reactors.is_empty() && stream.set_nonblocking(true).is_ok() {
+                    dispatch(
+                        &reactors,
+                        &mut rr,
+                        Accepted {
+                            stream: MioStream::from_std(stream),
+                            uid,
+                            addr,
+                            local_port,
+                            via_proxy: false,
+                            tls: Some(backend.clone()),
+                        },
+                    );
+                    continue;
+                }
                 let backend = backend.clone();
                 let core_tx = core.clone();
                 let pt = proxy_trust.clone();
