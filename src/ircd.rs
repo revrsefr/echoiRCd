@@ -4,7 +4,10 @@
 
 use std::collections::HashMap;
 use std::net::{SocketAddr, TcpStream};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::Arc;
+use std::time::Instant;
 
 use crate::command::Command;
 use crate::config::Config;
@@ -118,13 +121,25 @@ impl Ircd {
     /// server down with it. State touched before the panic may be left inconsistent,
     /// so this is a last-resort safety net, not a licence to panic — the untrusted
     /// parsers are still written so they can't panic in the first place.
-    pub fn run(mut self, rx: Receiver<Event>) {
+    /// `busy` is a shared marker the watchdog thread samples: it holds the ms-since-
+    /// `base` at which the current event started (0 = idle), so a stuck handler is
+    /// visible from outside. Events slower than `slow_command_ms` are also snoticed.
+    pub fn run(mut self, rx: Receiver<Event>, busy: Arc<AtomicU64>, base: Instant) {
+        let slow_ms = self.server.conf_num("slow_command_ms", 200u64);
         for ev in rx {
+            busy.store((base.elapsed().as_millis() as u64).max(1), Ordering::Relaxed);
+            let start = Instant::now();
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.handle_event(ev)))
                 .is_err()
             {
                 // the default panic hook already logged the details to stderr
                 eprintln!("[core] recovered from a panicking event handler; continuing");
+            }
+            busy.store(0, Ordering::Relaxed);
+            let ms = start.elapsed().as_millis() as u64;
+            if slow_ms != 0 && ms >= slow_ms {
+                self.server
+                    .snotice(&format!("slow event: a command took {ms}ms on the core thread"));
             }
         }
     }

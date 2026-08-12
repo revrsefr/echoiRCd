@@ -4,10 +4,11 @@
 #![forbid(unsafe_code)]
 
 use std::net::TcpListener;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
+use std::time::{Duration, Instant};
 
 use echoircd::config::Config;
 use echoircd::ircd::{Event, Ircd};
@@ -67,7 +68,28 @@ fn main() {
     let core_cfg = cfg.clone();
     let core_tx = tx.clone(); // the core self-injects events (DNS results)
     let core_counter = counter.clone();
-    let core = thread::spawn(move || Ircd::new(core_cfg, core_tx, core_counter).run(rx));
+    // watchdog: the core stores when it started the current event into `core_busy`
+    // (0 = idle); a separate thread warns if it stays stuck past `watchdog_ms`.
+    let wd_base = Instant::now();
+    let core_busy = Arc::new(AtomicU64::new(0));
+    let watchdog_ms = raw_num("watchdog_ms", 5000) as u64; // 0 = off
+    if watchdog_ms > 0 {
+        let (wb, base) = (core_busy.clone(), wd_base);
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_millis(1000));
+            let cur = wb.load(Ordering::Relaxed);
+            if cur != 0 {
+                let stuck = (base.elapsed().as_millis() as u64).saturating_sub(cur);
+                if stuck > watchdog_ms {
+                    eprintln!(
+                        "[watchdog] core thread stuck ~{stuck}ms on one event — a handler is blocking the whole server"
+                    );
+                }
+            }
+        });
+    }
+    let (busy, base) = (core_busy, wd_base);
+    let core = thread::spawn(move || Ircd::new(core_cfg, core_tx, core_counter).run(rx, busy, base));
 
     // background timer: drives ping/idle timeouts
     let tick_tx = tx.clone();

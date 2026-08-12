@@ -132,6 +132,10 @@ amu_target    = both
 # connectclass_required = yes    # refuse clients that match no allow class (default no)
 
 # --- global connection limits (per-class recvq/hardsendq/softsendq override these) ---
+# --- core-thread health (single-threaded core: nothing slow may run inline) ---
+# slow_command_ms = 200   # snotice when one event takes at least this long (0 = off)
+# watchdog_ms     = 5000  # a thread warns to the log if the core is stuck this long (0 = off)
+
 # max_line  = 16384            # max bytes in one line / receive queue (default 16 KiB)
 # max_sendq = 1048576          # max queued output before a slow client is dropped (1 MiB)
 
