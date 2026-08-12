@@ -450,6 +450,28 @@ impl Server {
         });
     }
 
+    /// Verify an OPER password on a worker thread, delivering the result back as
+    /// `Event::OperAuth`. bcrypt is deliberately expensive (tens to hundreds of ms),
+    /// so running it inline would freeze the single-threaded core — and an OPER flood
+    /// against a bcrypt block would be a trivial DoS. Bounded so the flood can't spawn
+    /// unlimited hash threads; returns `false` when at capacity.
+    pub fn spawn_auth(&self, uid: Uid, hash: String, pass: String, level: u32) -> bool {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static ACTIVE: AtomicUsize = AtomicUsize::new(0);
+        const MAX_ACTIVE: usize = 16;
+        if ACTIVE.fetch_add(1, Ordering::Relaxed) >= MAX_ACTIVE {
+            ACTIVE.fetch_sub(1, Ordering::Relaxed);
+            return false;
+        }
+        let tx = self.event_tx.clone();
+        std::thread::spawn(move || {
+            let ok = crate::modules::password_hash::verify(&hash, &pass);
+            ACTIVE.fetch_sub(1, Ordering::Relaxed);
+            let _ = tx.send(crate::ircd::Event::OperAuth { uid, ok, level });
+        });
+        true
+    }
+
     /// A pre-registration `:server NOTICE * :*** <msg>` line.
     pub(crate) fn notice_star(&self, uid: Uid, msg: &str) {
         self.send(uid, format!(":{} NOTICE * :*** {msg}", self.name));

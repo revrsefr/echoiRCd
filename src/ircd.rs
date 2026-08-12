@@ -53,6 +53,13 @@ pub enum Event {
         uid: Uid,
         ident: Option<String>,
     },
+    /// A background OPER password verify finished. bcrypt is deliberately slow, so it
+    /// runs on a worker thread (see `Server::spawn_auth`) instead of freezing the core.
+    OperAuth {
+        uid: Uid,
+        ok: bool,
+        level: u32,
+    },
     /// A module's async HTTP request finished. `tag` is `"<module>:<detail>"`
     /// so the core can route the reply back to the module that issued it (e.g.
     /// account registration, captcha verification). `status` is 0 on transport
@@ -202,6 +209,15 @@ impl Ircd {
             Event::Ident { uid, ident } => {
                 crate::modules::ident::on_result(&mut self.server, uid, ident);
                 self.try_register(uid); // ident may have been the last hold
+            }
+            Event::OperAuth { uid, ok, level } => {
+                if ok {
+                    self.server.oper_up(uid);
+                    crate::modules::operlevels::set(&mut self.server, uid, level);
+                } else if self.server.users.contains_key(&uid) {
+                    self.server
+                        .numeric(uid, ERR_PASSWDMISMATCH, ":Password incorrect");
+                }
             }
             Event::HttpResult {
                 uid,

@@ -121,13 +121,26 @@ impl Command for Oper {
         2
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
-        let (name, pass) = (&params[0], &params[1]);
-        let level = s
+        let (name, pass) = (params[0].clone(), params[1].clone());
+        let Some((hash, level)) = s
             .opers
             .iter()
-            .find(|(n, p, _)| n == name && crate::modules::password_hash::verify(p, pass))
-            .map(|(_, _, lvl)| *lvl);
-        if let Some(level) = level {
+            .find(|(n, _, _)| *n == name)
+            .map(|(_, p, lvl)| (p.clone(), *lvl))
+        else {
+            s.numeric(uid, ERR_PASSWDMISMATCH, ":Password incorrect");
+            return CmdResult::Fail;
+        };
+        // bcrypt is slow — verify it off the core thread (result arrives as OperAuth).
+        if hash.starts_with("$2") {
+            if !s.spawn_auth(uid, hash, pass, level) {
+                s.numeric(uid, ERR_PASSWDMISMATCH, ":Too many auth attempts, try again");
+                return CmdResult::Fail;
+            }
+            return CmdResult::Ok; // pending; oper-up happens when the verify returns
+        }
+        // fast hashes (plaintext / sha* / pbkdf2) verify inline
+        if crate::modules::password_hash::verify(&hash, &pass) {
             s.oper_up(uid);
             crate::modules::operlevels::set(s, uid, level); // operlevels: KILL protection
             CmdResult::Ok
