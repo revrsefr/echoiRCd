@@ -29,6 +29,37 @@ pub fn commands() -> Vec<Box<dyn Command>> {
     vec![Box::new(TitleCmd)]
 }
 
+fn nick(s: &Server, uid: Uid) -> String {
+    s.users
+        .get(&uid)
+        .map(|u| u.nick.clone())
+        .unwrap_or_default()
+}
+
+/// Apply a verified title: store it, apply the vhost (unless `*`), and confirm.
+pub fn grant(s: &mut Server, uid: Uid, title: &str, vhost: &str) {
+    if let Some(u) = s.users.get_mut(&uid) {
+        u.ext.set(Title(title.to_string()));
+    }
+    if vhost != "*" && !vhost.is_empty() {
+        s.change_host_ident(uid, None, Some(vhost));
+    }
+    let nick = nick(s, uid);
+    s.send(
+        uid,
+        format!(":{} NOTICE {nick} :*** TITLE: you are now known as \"{title}\".", s.name),
+    );
+}
+
+/// Reject a TITLE attempt (bad name or password).
+pub fn deny(s: &Server, uid: Uid) {
+    let nick = nick(s, uid);
+    s.send(
+        uid,
+        format!(":{} NOTICE {nick} :*** TITLE: invalid title name or password.", s.name),
+    );
+}
+
 struct TitleCmd;
 impl Command for TitleCmd {
     fn name(&self) -> &'static str {
@@ -39,47 +70,43 @@ impl Command for TitleCmd {
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         let (name, pass) = (params[0].clone(), params[1].clone());
-        // find a matching <name> <password> <vhost> <title…> block
-        let found = s.conf_all("customtitle").iter().find_map(|line| {
+        // find the <name> <password> <vhost> <title…> block by name (first wins)
+        let block = s.conf_all("customtitle").iter().find_map(|line| {
             let mut it = line.split_whitespace();
             let cname = it.next()?;
             let cpass = it.next()?;
             let cvhost = it.next()?;
             let title = it.collect::<Vec<_>>().join(" ");
-            if cname == name && !title.is_empty() && password_hash::verify(cpass, &pass) {
-                Some((title, cvhost.to_string()))
-            } else {
-                None
-            }
+            (cname == name && !title.is_empty())
+                .then(|| (cpass.to_string(), cvhost.to_string(), title))
         });
-        let nick = s
-            .users
-            .get(&uid)
-            .map(|u| u.nick.clone())
-            .unwrap_or_default();
-        let Some((title, vhost)) = found else {
-            s.send(
-                uid,
-                format!(
-                    ":{} NOTICE {nick} :*** TITLE: invalid title name or password.",
-                    s.name
-                ),
-            );
+        let Some((cpass, cvhost, title)) = block else {
+            deny(s, uid);
             return CmdResult::Fail;
         };
-        if let Some(u) = s.users.get_mut(&uid) {
-            u.ext.set(Title(title.clone()));
+        // a KDF title password is slow — verify it off the core thread (result comes
+        // back as TitleAuth) so /TITLE spam can't freeze the server.
+        if password_hash::is_slow(&cpass) {
+            let started = s.spawn_crypto(move || {
+                let ok = password_hash::verify(&cpass, &pass);
+                crate::ircd::Event::TitleAuth {
+                    uid,
+                    ok,
+                    title,
+                    vhost: cvhost,
+                }
+            });
+            if !started {
+                deny(s, uid);
+            }
+            return CmdResult::Ok;
         }
-        if vhost != "*" && !vhost.is_empty() {
-            s.change_host_ident(uid, None, Some(&vhost));
+        if password_hash::verify(&cpass, &pass) {
+            grant(s, uid, &title, &cvhost);
+            CmdResult::Ok
+        } else {
+            deny(s, uid);
+            CmdResult::Fail
         }
-        s.send(
-            uid,
-            format!(
-                ":{} NOTICE {nick} :*** TITLE: you are now known as \"{title}\".",
-                s.name
-            ),
-        );
-        CmdResult::Ok
     }
 }

@@ -66,6 +66,13 @@ pub enum Event {
         algo: String,
         hash: Option<String>,
     },
+    /// A background `/TITLE` password verify finished (see `crate::modules::customtitle`).
+    TitleAuth {
+        uid: Uid,
+        ok: bool,
+        title: String,
+        vhost: String,
+    },
     /// A module's async HTTP request finished. `tag` is `"<module>:<detail>"`
     /// so the core can route the reply back to the module that issued it (e.g.
     /// account registration, captcha verification). `status` is 0 on transport
@@ -240,6 +247,18 @@ impl Ircd {
                     None => format!(":{} NOTICE {nick} :Could not hash with '{algo}'", self.server.name),
                 };
                 self.server.send(uid, line);
+            }
+            Event::TitleAuth {
+                uid,
+                ok,
+                title,
+                vhost,
+            } => {
+                if ok {
+                    crate::modules::customtitle::grant(&mut self.server, uid, &title, &vhost);
+                } else {
+                    crate::modules::customtitle::deny(&self.server, uid);
+                }
             }
             Event::HttpResult {
                 uid,
