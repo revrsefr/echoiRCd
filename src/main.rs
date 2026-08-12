@@ -58,8 +58,12 @@ fn main() {
     };
     let max_line = raw_num("max_line", socketengine::DEFAULT_MAX_LINE);
     let max_sendq = raw_num("max_sendq", socketengine::DEFAULT_MAX_SENDQ);
-    // plaintext reactor-pool size (0 = auto: one worker per core, capped)
+    // reactor-pool size (0 = auto: one worker per core, capped)
     let io_threads = raw_num("io_threads", 0);
+    // reap a TLS handshake that stalls this long (0 = never); guards the TLS port
+    // against connections that open but never negotiate
+    let hs = raw_num("tls_handshake_timeout", 15);
+    let handshake_timeout = (hs > 0).then(|| Duration::from_secs(hs as u64));
     // trusted PROXY-protocol source globs (reactor rewrites the client IP from them)
     let proxy_trust: Vec<String> = cfg.raw.get("proxy").cloned().unwrap_or_default();
 
@@ -104,7 +108,8 @@ fn main() {
 
     // reactor worker pool: shared by the plaintext acceptor and the direct-TLS
     // acceptor, so client I/O (framing + TLS crypto) spreads across cores.
-    let reactors = socketengine::spawn_reactors(tx.clone(), max_line, max_sendq, io_threads);
+    let reactors =
+        socketengine::spawn_reactors(tx.clone(), max_line, max_sendq, io_threads, handshake_timeout);
 
     // optional TLS listener (bind_tls + tls_cert + tls_key). A cert/bind problem
     // disables TLS but never takes the plaintext listener down.

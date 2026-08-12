@@ -144,6 +144,7 @@ amu_target    = both
 # threads that frame lines / run TLS crypto off the single state core. One acceptor
 # round-robins connections across the pool; the core stays single-threaded and lock-free.
 # io_threads = 0               # reactor workers; 0 = auto (one per core, capped at 4)
+# tls_handshake_timeout = 15   # drop a TLS conn that stalls mid-handshake (secs; 0 = off)
 
 # --- ident (RFC1413): off by default; a connection class can also enable it ---
 # useident      = yes          # look up every client's ident (adds connect latency)

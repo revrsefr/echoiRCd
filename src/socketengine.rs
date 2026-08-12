@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use mio::net::{TcpListener as MioListener, TcpStream as MioStream};
 use mio::{Events, Interest, Poll, Token, Waker};
@@ -250,11 +250,12 @@ pub fn spawn_reactors(
     max_line: usize,
     max_sendq: usize,
     io_threads: usize,
+    handshake_timeout: Option<Duration>,
 ) -> Vec<ReactorHandle> {
     let workers = resolve_io_threads(io_threads);
     let mut reactors = Vec::with_capacity(workers);
     for _ in 0..workers {
-        match spawn_reactor(core.clone(), max_line, max_sendq) {
+        match spawn_reactor(core.clone(), max_line, max_sendq, handshake_timeout) {
             Ok(h) => reactors.push(h),
             Err(e) => eprintln!("reactor: cannot start a worker: {e}"),
         }
@@ -354,6 +355,7 @@ fn spawn_reactor(
     core: Sender<Event>,
     max_line: usize,
     max_sendq: usize,
+    handshake_timeout: Option<Duration>,
 ) -> io::Result<ReactorHandle> {
     let poll = Poll::new()?;
     let waker = Arc::new(Waker::new(poll.registry(), WAKE)?);
@@ -364,7 +366,17 @@ fn spawn_reactor(
         waker: waker.clone(),
     };
     thread::spawn(move || {
-        reactor_loop(poll, waker, handoff_rx, out_tx, out_rx, core, max_line, max_sendq)
+        reactor_loop(
+            poll,
+            waker,
+            handoff_rx,
+            out_tx,
+            out_rx,
+            core,
+            max_line,
+            max_sendq,
+            handshake_timeout,
+        )
     });
     Ok(handle)
 }
@@ -380,14 +392,39 @@ fn reactor_loop(
     core: Sender<Event>,
     max_line: usize,
     max_sendq: usize,
+    handshake_timeout: Option<Duration>,
 ) {
     let mut conns: HashMap<usize, Conn> = HashMap::new();
     let mut next_token = FIRST_CONN;
     let mut events = Events::with_capacity(1024);
+    // TLS conns still negotiating, with the deadline by which they must finish; a
+    // stalled handshake holds no uid so nothing else would ever reap it.
+    let mut pending_hs: Vec<(usize, Instant)> = Vec::new();
 
     loop {
-        if poll.poll(&mut events, None).is_err() {
+        // block indefinitely when idle; while handshakes are pending, wake ~1s to reap
+        // any that blew their deadline (slow-loris on the TLS port).
+        let timeout = (!pending_hs.is_empty()).then(|| Duration::from_millis(1000));
+        if poll.poll(&mut events, timeout).is_err() {
             continue;
+        }
+        if !pending_hs.is_empty() {
+            let now = Instant::now();
+            let mut expired = Vec::new();
+            pending_hs.retain(|&(tok, dl)| match conns.get(&tok) {
+                Some(c) if c.handshaking => {
+                    if now >= dl {
+                        expired.push(tok);
+                        false
+                    } else {
+                        true
+                    }
+                }
+                _ => false, // handshake finished, or the conn is already gone
+            });
+            for tok in expired {
+                close_conn(&mut poll, &mut conns, tok, &core);
+            }
         }
         for event in events.iter() {
             match event.token() {
@@ -445,6 +482,11 @@ fn reactor_loop(
                                 pending_out: Some(out),
                             },
                         );
+                        if handshaking {
+                            if let Some(d) = handshake_timeout {
+                                pending_hs.push((token, Instant::now() + d));
+                            }
+                        }
                         // announce now only if nothing defers it: a TLS conn waits for
                         // its handshake, a proxy conn for its header.
                         if !a.via_proxy && !handshaking {
