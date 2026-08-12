@@ -139,6 +139,12 @@ amu_target    = both
 # max_line  = 16384            # max bytes in one line / receive queue (default 16 KiB)
 # max_sendq = 1048576          # max queued output before a slow client is dropped (1 MiB)
 
+# --- I/O scaling ---
+# Client connections (plaintext and direct TLS) are served by a pool of reactor
+# threads that frame lines / run TLS crypto off the single state core. One acceptor
+# round-robins connections across the pool; the core stays single-threaded and lock-free.
+# io_threads = 0               # reactor workers; 0 = auto (one per core, capped at 4)
+
 # --- ident (RFC1413): off by default; a connection class can also enable it ---
 # useident      = yes          # look up every client's ident (adds connect latency)
 # requireident  = yes          # refuse clients whose ident can't be confirmed
