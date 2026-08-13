@@ -18,6 +18,7 @@ This folder is the reference manual. Start with whichever fits what you're doing
 | [IRCv3](ircv3.md) | The advertised capabilities and the notable extensions. |
 | [Anti-abuse & flood protection](anti-abuse.md) | The layered defenses, from the accept edge up to the application, and how they fit with kernel/upstream filtering. |
 | [Deployment](deployment.md) | Running in production: release builds, a supervised service, log shipping, reverse proxies, and firewall hardening. |
+| [**Module developer API**](api/) | Write your own commands, modes, and modules — the trait reference, the `Server` API, and a first-module tutorial. |
 
 ## At a glance
 

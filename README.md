@@ -117,7 +117,8 @@ objects instead of a fragile plugin ABI. **Full design notes:**
 
 ## Extending
 
-Three small extension points, each one file + one table line:
+Three small extension points, each one file + one table line — full reference and
+a tutorial in [`docs/api/`](docs/api/):
 
 - **Commands** (`src/command.rs`, `src/coremods/`) — a handler with `name`,
   `min_params`, `before_reg`, `handle(&mut Server, uid, params)`.
