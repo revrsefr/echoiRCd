@@ -1165,7 +1165,7 @@ static HIDECHANS: UFlag = UFlag {
     ch: 'I',
     set: set_hidechans,
 };
-static HIDEOPER: UFlag = UFlag {
+static HIDEOPER: OperFlag = OperFlag {
     ch: 'H',
     set: set_hideoper,
 };
@@ -1181,7 +1181,7 @@ static CALLERID: UFlag = UFlag {
     ch: 'g',
     set: set_callerid,
 };
-static SHOWWHOIS: UFlag = UFlag {
+static SHOWWHOIS: OperFlag = OperFlag {
     ch: 'W',
     set: set_showwhois,
 };
@@ -1195,6 +1195,43 @@ impl UserMode for UFlag {
         self.ch
     }
     fn apply(&self, s: &mut Server, uid: Uid, adding: bool) -> bool {
+        if let Some(u) = s.users.get_mut(&uid) {
+            (self.set)(&mut u.flags, adding);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+fn set_helpop(f: &mut UserFlags, v: bool) {
+    f.helpop = v;
+}
+fn set_snomask(f: &mut UserFlags, v: bool) {
+    f.snomask = v;
+}
+
+/// An oper-only boolean flag (+H / +W / +h / +s): only an operator may **set** it;
+/// anyone may clear it. A non-oper who tries to set it is told they aren't an
+/// operator (`ERR_NOPRIVILEGES`) and the flag is left off — it never silently
+/// "sticks" with no effect.
+struct OperFlag {
+    ch: char,
+    set: fn(&mut UserFlags, bool),
+}
+impl UserMode for OperFlag {
+    fn letter(&self) -> char {
+        self.ch
+    }
+    fn apply(&self, s: &mut Server, uid: Uid, adding: bool) -> bool {
+        if adding && !s.is_oper(uid) {
+            s.numeric(
+                uid,
+                ERR_NOPRIVILEGES,
+                ":Permission Denied- You're not an IRC operator",
+            );
+            return false;
+        }
         if let Some(u) = s.users.get_mut(&uid) {
             (self.set)(&mut u.flags, adding);
             true
@@ -1227,26 +1264,12 @@ impl UserMode for OperMode {
     }
 }
 
-/// `+h` — helpop: marks a user as available for help (shown in WHOIS). Only opers
-/// may set it on themselves; anyone may clear it.
-struct HelpMode;
-static HELPOP: HelpMode = HelpMode;
-impl UserMode for HelpMode {
-    fn letter(&self) -> char {
-        'h'
-    }
-    fn apply(&self, s: &mut Server, uid: Uid, adding: bool) -> bool {
-        if adding && !s.is_oper(uid) {
-            return false; // only opers may declare themselves a helpop
-        }
-        if let Some(u) = s.users.get_mut(&uid) {
-            u.flags.helpop = adding;
-            true
-        } else {
-            false
-        }
-    }
-}
+/// `+h` — helpop: marks a user as available for help (shown in WHOIS). Oper-only to
+/// set; anyone may clear it.
+static HELPOP: OperFlag = OperFlag {
+    ch: 'h',
+    set: set_helpop,
+};
 
 /// `+x` — host cloaking. The cloak string is computed once at connect by
 /// [`crate::modules::cloak`]; this handler only toggles whether it's shown.
@@ -1312,24 +1335,10 @@ impl UserMode for RegisteredMode {
 }
 
 /// `+s` — server-notice (snomask) receiver. Oper-only to set; anyone may drop it.
-struct SnoMode;
-static SNOMASK: SnoMode = SnoMode;
-impl UserMode for SnoMode {
-    fn letter(&self) -> char {
-        's'
-    }
-    fn apply(&self, s: &mut Server, uid: Uid, adding: bool) -> bool {
-        if adding && !s.is_oper(uid) {
-            return false; // only operators receive server notices
-        }
-        if let Some(u) = s.users.get_mut(&uid) {
-            u.flags.snomask = adding;
-            true
-        } else {
-            false
-        }
-    }
-}
+static SNOMASK: OperFlag = OperFlag {
+    ch: 's',
+    set: set_snomask,
+};
 
 #[cfg(test)]
 mod tests {
