@@ -280,6 +280,11 @@ impl ChanModes {
             (self.reg_moderated, 'M'),
             (self.censor, 'G'),
             (self.auditorium, 'u'),
+            (self.permanent, 'P'),
+            (self.nokicks, 'Q'),
+            (self.allowinvite, 'A'),
+            (self.opmoderated, 'U'),
+            (self.delayjoin, 'D'),
         ] {
             if on {
                 s.push(ch);
@@ -306,6 +311,18 @@ impl ChanModes {
         if self.history.is_some() {
             s.push('H');
         }
+        if self.anticaps.is_some() {
+            s.push('B');
+        }
+        if self.kicknorejoin.is_some() {
+            s.push('J');
+        }
+        if self.delaymsg.is_some() {
+            s.push('d');
+        }
+        if self.repeat.is_some() {
+            s.push('K');
+        }
         if params {
             if let Some(k) = &self.key {
                 s.push(' ');
@@ -331,6 +348,18 @@ impl ChanModes {
             }
             if let Some((n, t)) = &self.history {
                 s.push_str(&format!(" {n}:{t}"));
+            }
+            if let Some(p) = self.anticaps {
+                s.push_str(&format!(" {p}"));
+            }
+            if let Some(secs) = self.kicknorejoin {
+                s.push_str(&format!(" {secs}"));
+            }
+            if let Some(secs) = self.delaymsg {
+                s.push_str(&format!(" {secs}"));
+            }
+            if let Some(n) = self.repeat {
+                s.push_str(&format!(" {n}"));
             }
         }
         s
