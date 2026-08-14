@@ -289,7 +289,7 @@ static PRIVATE: Flag = Flag {
     ch: 'p',
     set: set_private,
 };
-static OPERONLY: Flag = Flag {
+static OPERONLY: OperFlagChan = OperFlagChan {
     ch: 'O',
     set: set_operonly,
 };
@@ -364,7 +364,7 @@ static ALLOWINVITE: Flag = Flag {
     ch: 'A',
     set: set_allowinvite,
 };
-static PERMANENT: Flag = Flag {
+static PERMANENT: OperFlagChan = OperFlagChan {
     ch: 'P',
     set: set_permanent,
 };
@@ -393,6 +393,45 @@ impl ChanMode for Flag {
         adding: bool,
         _param: Option<&str>,
     ) -> Applied {
+        if let Some(c) = s.channels.get_mut(key) {
+            (self.set)(&mut c.modes, adding);
+        }
+        Applied::Yes(None)
+    }
+}
+
+/// A channel flag only an IRC operator may **set** — for modes that reach past a
+/// single channel (a network resource, or a staff-only policy) where chan-op rank
+/// isn't enough. Anyone with the usual rank may clear it. Server / services authority
+/// (`mode_sudo`, used by SAMODE and the RPC/S2S appliers) bypasses the oper check.
+struct OperFlagChan {
+    ch: char,
+    set: fn(&mut ChanModes, bool),
+}
+impl ChanMode for OperFlagChan {
+    fn letter(&self) -> char {
+        self.ch
+    }
+    fn wants_param(&self, _adding: bool) -> bool {
+        false
+    }
+    fn apply(
+        &self,
+        s: &mut Server,
+        chan: &str,
+        key: &str,
+        uid: Uid,
+        adding: bool,
+        _param: Option<&str>,
+    ) -> Applied {
+        if adding && !s.mode_sudo && !s.is_oper(uid) {
+            s.numeric(
+                uid,
+                ERR_NOPRIVILEGES,
+                &format!("{chan} :Only IRC operators may set channel mode +{}", self.ch),
+            );
+            return Applied::No;
+        }
         if let Some(c) = s.channels.get_mut(key) {
             (self.set)(&mut c.modes, adding);
         }
@@ -648,6 +687,32 @@ impl ChanMode for ListMode {
             s.numeric(uid, end_num, &format!("{chan} :End of channel {noun}"));
             return Applied::No;
         };
+        // autoop (+w) embeds a status prefix to grant on join, applied under server
+        // authority — so adding an entry that grants a prefix the setter couldn't grant
+        // by hand would let e.g. a half-op auto-op itself. Gate it by the rank the
+        // prefix needs (SAMODE / services authority bypasses via mode_sudo).
+        if adding && matches!(self.kind, ListKind::AutoOp) && !s.mode_sudo {
+            let pfx = mask.split_once(':').and_then(|(p, _)| p.chars().next());
+            let needed = match pfx {
+                Some('q') => RANK_OWNER,
+                Some('a') => RANK_ADMIN,
+                Some('o') => RANK_OP,
+                Some('h') => RANK_HALFOP,
+                Some('v') => RANK_VOICE,
+                _ => 0,
+            };
+            if s.rank(uid, key) < needed {
+                s.numeric(
+                    uid,
+                    ERR_CHANOPRIVSNEEDED,
+                    &format!(
+                        "{chan} :You lack the channel rank to auto-grant +{}",
+                        pfx.unwrap_or('?')
+                    ),
+                );
+                return Applied::No;
+            }
+        }
         let mask = if self.kind.normalizes() {
             normalize_ban_mask(mask)
         } else {
