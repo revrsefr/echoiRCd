@@ -55,9 +55,10 @@ pub struct RemoteUser {
     pub host: String,
     pub realname: String,
     pub account: Option<String>,
-    pub ip: String,  // client IP (for network-wide clone limits); "" if a peer omitted it
-    pub sid: String, // origin server id
-    pub via: Uid,    // local link uid it is reached through
+    pub ip: String,    // client IP (for network-wide clone limits); "" if a peer omitted it
+    pub modes: String, // user mode letters (no leading '+'); e.g. services wear "iHB"
+    pub sid: String,   // origin server id
+    pub via: Uid,      // local link uid it is reached through
 }
 
 impl RemoteUser {
@@ -866,6 +867,11 @@ impl Server {
         let host = msg.params[4].clone(); // displayed host
         let ident = msg.params[6].clone(); // displayed ident
         let ip = msg.params[7].clone();
+        let modes = msg
+            .params
+            .get(9)
+            .map(|m| m.trim_start_matches('+').to_string())
+            .unwrap_or_default();
         let realname = msg.params.last().cloned().unwrap_or_default();
         // nick collision: a local holder is killed (both sides do this, so both
         // vanish deterministically); an existing remote holder simply wins.
@@ -889,6 +895,7 @@ impl Server {
                 realname,
                 account: None,
                 ip,
+                modes,
                 sid,
                 via,
             },

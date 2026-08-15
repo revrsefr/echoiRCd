@@ -135,6 +135,18 @@ impl Command for Whois {
                             &format!("{} {a} :is logged in as", ru.nick),
                         );
                     }
+                    // 335: mark remote bots (+B), e.g. services / BotServ bots
+                    if ru.modes.contains('B') {
+                        s.numeric(uid, RPL_WHOISBOT, &format!("{} :is a bot", ru.nick));
+                    }
+                    // 379: a remote user's modes — opers only (self is impossible here)
+                    if s.is_oper(uid) && !ru.modes.is_empty() {
+                        s.numeric(
+                            uid,
+                            RPL_WHOISMODES,
+                            &format!("{} :is using modes +{}", ru.nick, ru.modes),
+                        );
+                    }
                     s.numeric(
                         uid,
                         RPL_ENDOFWHOIS,
