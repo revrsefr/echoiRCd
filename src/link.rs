@@ -964,7 +964,7 @@ impl Server {
     }
 
     /// Tell linked servers a local user joined a channel.
-    pub fn propagate_join(&self, uid: Uid, chan: &str) {
+    pub fn propagate_join(&self, uid: Uid, chan: &str, is_new: bool) {
         if self.links.is_empty() {
             return;
         }
@@ -975,26 +975,42 @@ impl Server {
         if !u.registered {
             return;
         }
-        // introduce the join as a single-member channel burst, carrying whatever
-        // status the user holds (creator gets ops) and the channel's modes/TS so a
-        // peer that doesn't yet know the channel creates it consistently.
         let letters = ch
             .members
             .get(&uid)
             .map(|m| m.mode_letters())
             .unwrap_or_default();
-        self.propagate(
-            &format!(
-                ":{} FJOIN {} {} {} :{},{}",
-                self.sid,
-                ch.name,
-                ch.created,
-                ch.modes.render(false),
-                letters,
-                u.uuid
-            ),
-            None,
-        );
+        if is_new {
+            // a brand-new channel: burst it (its modes + the creating member) so a
+            // peer that doesn't yet know the channel creates it consistently.
+            self.propagate(
+                &format!(
+                    ":{} FJOIN {} {} {} :{},{}",
+                    self.sid,
+                    ch.name,
+                    ch.created,
+                    ch.modes.render(false),
+                    letters,
+                    u.uuid
+                ),
+                None,
+            );
+        } else {
+            // joining an existing channel: an incremental single-member add that must
+            // NOT carry the channel's modes. Re-asserting them on every join fights a
+            // linked services mode-lock (it would re-apply +r etc. each time someone
+            // enters). `IJOIN` carries only membership + status, per the standard
+            // incremental-join primitive.
+            let flags = if letters.is_empty() {
+                String::new()
+            } else {
+                format!(" {letters}")
+            };
+            self.propagate(
+                &format!(":{} IJOIN {} 1 {}{}", u.uuid, ch.name, ch.created, flags),
+                None,
+            );
+        }
     }
 
     /// Tell linked servers a local user parted a channel.
@@ -1220,7 +1236,7 @@ impl Server {
         for c in modestring.chars() {
             match c {
                 '+' | '-' => sign = c,
-                'q' | 'a' | 'o' | 'h' | 'v' => {
+                'y' | 'q' | 'a' | 'o' | 'h' | 'v' => {
                     if let Some(p) = params.get(pi) {
                         out.push(self.nick_to_uuid(p));
                         pi += 1;
@@ -1376,7 +1392,12 @@ impl Server {
         }
         let prefix = self.uuid_prefix(&src).unwrap_or_default();
         self.to_channel(&key, &format!(":{prefix} TOPIC {chan} :{text}"), None);
-        self.propagate(&format!(":{src} TOPIC {chan} :{text}"), Some(via));
+        // relay onward as a timestamped FTOPIC (services/peers ignore a plain TOPIC)
+        let chants = self.channels.get(&key).map(|c| c.created).unwrap_or_else(now);
+        self.propagate(
+            &format!(":{src} FTOPIC {chan} {chants} {} :{text}", now()),
+            Some(via),
+        );
     }
 
     fn link_kick_recv(&mut self, via: Uid, msg: &Message) {
@@ -1533,7 +1554,7 @@ impl Server {
             }
             let adding = sign == '+';
             match c {
-                'q' | 'a' | 'o' | 'h' | 'v' => {
+                'y' | 'q' | 'a' | 'o' | 'h' | 'v' => {
                     if let Some(n) = args.get(argi).cloned() {
                         argi += 1;
                         self.set_member_prefix(&key, &n, c, adding);
@@ -1594,8 +1615,37 @@ impl Server {
                     }
                 }
                 _ => {
-                    if let Some(ch) = self.channels.get_mut(&key) {
-                        ch.modes.set_by_letter(c, adding);
+                    // Any other channel mode. Consult the registry for its arity so
+                    // we consume exactly the right number of params — mis-consuming
+                    // here shifts every later mode's argument — then apply it through
+                    // the same handler the local MODE path uses, so parameter modes
+                    // (+f/+j/+F/+L/+H/+B/+J/+d/+K) and list modes (+g/+X/+w) are
+                    // stored, not silently dropped.
+                    let handler = crate::mode::chan_mode(c);
+                    let param = if handler.map(|h| h.wants_param(adding)).unwrap_or(false) {
+                        let p = args.get(argi).cloned();
+                        if p.is_some() {
+                            argi += 1;
+                        }
+                        p
+                    } else {
+                        None
+                    };
+                    if let Some(p) = &param {
+                        shown.push(p.clone());
+                    }
+                    match handler {
+                        Some(h) => {
+                            self.mode_sudo = true;
+                            h.apply(self, &chan, &key, 0, adding, param.as_deref());
+                            self.mode_sudo = false;
+                        }
+                        // no registry handler (e.g. the services-only +r): a plain flag
+                        None => {
+                            if let Some(ch) = self.channels.get_mut(&key) {
+                                ch.modes.set_by_letter(c, adding);
+                            }
+                        }
                     }
                 }
             }

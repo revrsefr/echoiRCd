@@ -83,7 +83,14 @@ impl Command for Tban {
             });
         }
         s.to_channel(&key, &format!(":{prefix} MODE {chan} +b {mask}"), None);
-        s.propagate_from_user(uid, &format!("MODE {chan} +b {mask}"));
+        // links: a channel mode must go out as a timestamped FMODE, not a plain
+        // MODE (services ignore channel-targeted MODE)
+        let src = s
+            .users
+            .get(&uid)
+            .map(|u| u.uuid.clone())
+            .unwrap_or_else(|| s.sid.clone());
+        s.propagate_chan_mode(&src, chan, "+b", std::slice::from_ref(&mask));
         CmdResult::Ok
     }
 }

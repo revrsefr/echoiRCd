@@ -29,7 +29,9 @@ fn set(s: &mut Server, uid: Uid, key: &str, on: bool) {
     let sign = if on { '+' } else { '-' };
     let name = s.channels.get(key).map(|c| c.name.clone()).unwrap_or_default();
     s.to_channel(key, &format!(":{} MODE {name} {sign}y {nick}", s.name), None);
-    s.propagate(&format!(":{} MODE {name} {sign}y {nick}", s.sid), None);
+    // links: a timestamped FMODE (not a plain channel MODE), member named by uuid
+    let sid = s.sid.clone();
+    s.propagate_chan_mode(&sid, &name, &format!("{sign}y"), std::slice::from_ref(&nick));
 }
 
 /// Grant the oper prefix in `key` (used by ojoin and on-join auto-grant).

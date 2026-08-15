@@ -253,6 +253,8 @@ pub struct ChanModes {
     pub delaymsg: Option<u32>,       // +d <secs> — new joiners can't speak for N secs
     pub repeat: Option<u32>,         // +K <n> — block a line repeated within your last n
     pub delayjoin: bool,             // +D — hide JOINs until the user speaks/reveals
+    pub registered: bool,            // +r — set by services on a registered channel
+                                     // (server/services-only; not user-settable)
 }
 
 impl ChanModes {
@@ -281,6 +283,7 @@ impl ChanModes {
             'P' => self.permanent = on,
             'U' => self.opmoderated = on,
             'D' => self.delayjoin = on,
+            'r' => self.registered = on,
             _ => {}
         }
     }
@@ -289,6 +292,7 @@ impl ChanModes {
     pub fn render(&self, params: bool) -> String {
         let mut s = String::from("+");
         for (on, ch) in [
+            (self.registered, 'r'),
             (self.invite_only, 'i'),
             (self.moderated, 'm'),
             (self.no_external, 'n'),
@@ -452,7 +456,10 @@ impl Channel {
 
     /// Keep this channel in the table: it has members, or it's +P (permanent).
     pub fn keep_alive(&self) -> bool {
-        !self.is_empty() || self.modes.permanent
+        // A registered (+r) channel persists with zero members, like +P: otherwise a
+        // sole user leaving destroys it, and their rejoin recreates it with a new TS —
+        // which makes linked services re-assert the +r lock (and re-op) on every visit.
+        !self.is_empty() || self.modes.permanent || self.modes.registered
     }
 }
 
@@ -918,7 +925,7 @@ impl Server {
         }
         self.send_names(uid, &key);
         self.replay_chanhistory(uid, &key); // +H: replay recent messages to the joiner
-        self.propagate_join(uid, name); // tell linked servers this user joined
+        self.propagate_join(uid, name, is_new); // tell linked servers this user joined
         self.events.push_back(Hook::Join(uid, key));
     }
 
