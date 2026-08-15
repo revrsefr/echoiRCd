@@ -898,6 +898,12 @@ impl Server {
         let Some(newnick) = msg.params.first().cloned() else {
             return;
         };
+        // collision with a local user: kill the local holder (same policy as an
+        // incoming UID clash) so the network converges to one owner for the nick
+        if let Some(luid) = self.find_nick(&newnick) {
+            self.send(luid, "ERROR :Closing link: Nick collision".to_string());
+            self.remove_user(luid, "Nick collision");
+        }
         let old = match self.remote_users.get_mut(&uuid) {
             Some(ru) => {
                 let old = ru.nick.clone();
@@ -1411,7 +1417,7 @@ impl Server {
         let chan = msg.params[0].clone();
         let key = chan.to_ascii_lowercase();
         let victim = msg.params[1].clone();
-        let reason = msg.params.get(2).cloned().unwrap_or_else(|| victim.clone());
+        let reason = msg.params.get(2).cloned().unwrap_or_default();
         let prefix = self.uuid_prefix(&src).unwrap_or_default();
         let mut removed = false;
         let vnick;
@@ -1694,6 +1700,15 @@ impl Server {
                 ch.modes.render(false),
                 mem.join(" ")
             ));
+            // render(false) puts parametric mode letters in the FJOIN without their
+            // values; burst the access-controlling ones (key, limit) as timestamped
+            // FMODEs so they survive netburst (the receiver's FMODE path is param-aware)
+            if let Some(k) = &ch.modes.key {
+                lines.push(format!(":{} FMODE {} {} +k {}", self.sid, ch.name, ch.created, k));
+            }
+            if let Some(l) = ch.modes.limit {
+                lines.push(format!(":{} FMODE {} {} +l {}", self.sid, ch.name, ch.created, l));
+            }
             // burst the ban / except / invite-exception lists as timestamped mode
             // changes sourced from this server
             for (letter, list) in [('b', &ch.bans), ('e', &ch.excepts), ('I', &ch.invex)] {

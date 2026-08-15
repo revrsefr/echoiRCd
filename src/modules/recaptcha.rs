@@ -71,6 +71,11 @@ impl Module for ReCaptcha {
     fn name(&self) -> &'static str {
         "recaptcha"
     }
+    fn on_user_quit(&mut self, s: &mut Server, uid: Uid, _reason: &str) {
+        if let Some(v) = s.ext.get_mut::<Verified>() {
+            v.0.remove(&uid);
+        }
+    }
 
     fn on_user_register(&mut self, srv: &mut Server, uid: Uid) -> ModResult {
         if !enabled(srv) || srv.is_oper(uid) {

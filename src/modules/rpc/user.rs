@@ -107,6 +107,9 @@ pub fn handle(s: &mut Server, action: &str, params: &str) -> Result<String, RpcE
             let host = json::get_str(params, "vhost")
                 .or_else(|| json::get_str(params, "host"))
                 .ok_or_else(|| RpcError::invalid_params("missing 'vhost'"))?;
+            if !crate::users::valid_host(&host) {
+                return Err(RpcError::invalid_params("invalid vhost"));
+            }
             s.change_host_ident(uid, None, Some(&host));
             Ok(obj(&[("result", "true".into())]))
         }
@@ -114,6 +117,16 @@ pub fn handle(s: &mut Server, action: &str, params: &str) -> Result<String, RpcE
             let uid = resolve(s, params).ok_or_else(|| RpcError::not_found("no such user"))?;
             let newnick = json::get_str(params, "newnick")
                 .ok_or_else(|| RpcError::invalid_params("missing 'newnick'"))?;
+            // validate + collision-check like the NICK / SVSNICK paths: an invalid or
+            // taken nick would otherwise inject into the wire or hijack the nick index
+            if !crate::users::valid_nick(&newnick, s.conf_num("maxnick", 30usize)) {
+                return Err(RpcError::invalid_params("invalid nick"));
+            }
+            if s.find_nick(&newnick).is_some_and(|o| o != uid)
+                || s.remote_nick.contains_key(&newnick.to_ascii_lowercase())
+            {
+                return Err(RpcError::invalid_params("nick in use"));
+            }
             s.set_nick(uid, &newnick);
             Ok(obj(&[("result", "true".into())]))
         }

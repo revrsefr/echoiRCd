@@ -73,6 +73,17 @@ pub fn parse_iso(s: &str) -> Option<u64> {
     let h: i64 = t.next()?.parse().ok()?;
     let mi: i64 = t.next()?.parse().ok()?;
     let se: i64 = t.next().unwrap_or("0").parse().ok()?;
+    // bound every field to a sane range: keeps the arithmetic below well inside i64
+    // (a client-supplied huge year/day would otherwise overflow and panic)
+    if !(0..=9999).contains(&y)
+        || !(1..=12).contains(&mo)
+        || !(1..=31).contains(&da)
+        || !(0..=23).contains(&h)
+        || !(0..=59).contains(&mi)
+        || !(0..=60).contains(&se)
+    {
+        return None;
+    }
     // civil date -> days since 1970-01-01
     let yy = y - i64::from(mo <= 2);
     let era = if yy >= 0 { yy } else { yy - 399 } / 400;
@@ -255,6 +266,7 @@ impl Server {
         self.dnsbl_action = fresh.dnsbl_action;
         self.dnsbl_reason = fresh.dnsbl_reason;
         self.sasl_server = fresh.sasl_server;
+        self.webirc = fresh.webirc;
         self.raw_config = fresh.raw;
     }
 

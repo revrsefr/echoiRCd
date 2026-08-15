@@ -402,6 +402,12 @@ fn deliver(msg: &mut Vec<u8>, uid: Uid, core: &Sender<Event>) -> bool {
     let text = String::from_utf8_lossy(msg);
     for piece in text.split('\n') {
         let l = piece.trim_end_matches('\r');
+        // a WS frame can be far larger than a legal IRC line; drop an over-long
+        // line so the transport can't bypass the recvq/max-line flood guard that
+        // every TCP/TLS client is held to (16 KiB is generous — tags included)
+        if l.len() > 16 * 1024 {
+            continue;
+        }
         if !l.is_empty()
             && core
                 .send(Event::Line {

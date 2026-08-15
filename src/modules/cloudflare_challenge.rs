@@ -62,6 +62,11 @@ impl Module for CloudflareChallenge {
     fn name(&self) -> &'static str {
         "cloudflare_challenge"
     }
+    fn on_user_quit(&mut self, s: &mut Server, uid: Uid, _reason: &str) {
+        if let Some(p) = s.ext.get_mut::<Passed>() {
+            p.0.remove(&uid);
+        }
+    }
 
     fn on_user_register(&mut self, srv: &mut Server, uid: Uid) -> ModResult {
         if !enabled(srv) || srv.is_oper(uid) {

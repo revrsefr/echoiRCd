@@ -69,7 +69,9 @@ pub fn parse_duration(s: &str) -> Option<u64> {
     if last.is_ascii_digit() {
         return s.parse::<u64>().ok();
     }
-    let n: u64 = s[..s.len() - 1].parse().ok()?;
+    // strip the suffix by its char length, not one byte — a multi-byte final char
+    // (e.g. "5€") would otherwise slice mid-codepoint and panic
+    let n: u64 = s[..s.len() - last.len_utf8()].parse().ok()?;
     let mul = match last {
         's' => 1,
         'm' => 60,

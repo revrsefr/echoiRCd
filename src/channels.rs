@@ -1288,7 +1288,8 @@ pub fn normalize_ban_mask(m: &str) -> String {
     if b.len() >= 2 && b[1] == b':' && (b[0] as char).is_ascii_alphabetic() {
         // These extbans carry a name / spec / channel / server, not a host mask,
         // so they must not be host-normalised: g: (security group), y: (reputation
-        // score), r: (realname), j: (channel), s: (server name).
+        // score), r: (realname), j: (channel), s: (server name), G: (country),
+        // b: (banned-in-channel).
         if matches!(b[0], b'g' | b'y' | b'r' | b'j' | b's' | b'G' | b'b') {
             return m.to_string();
         }

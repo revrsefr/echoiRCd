@@ -84,19 +84,24 @@ pub fn post(
 /// Decode an HTTP/1.1 chunked body (best effort). Used for both outbound response
 /// bodies here and inbound request bodies in the RPC httpd.
 pub fn dechunk(body: &str) -> String {
-    let mut out = String::new();
-    let mut rest = body;
-    while let Some((size_line, after)) = rest.split_once("\r\n") {
-        let size = usize::from_str_radix(size_line.trim().split(';').next().unwrap_or("0"), 16)
+    // Work on bytes, not the &str: the chunk size is an attacker-supplied byte
+    // count and may land mid-UTF-8-character, so str slicing would panic.
+    let mut out: Vec<u8> = Vec::new();
+    let mut rest = body.as_bytes();
+    while let Some(nl) = rest.windows(2).position(|w| w == b"\r\n") {
+        let size = std::str::from_utf8(&rest[..nl])
+            .ok()
+            .and_then(|s| usize::from_str_radix(s.trim().split(';').next().unwrap_or("0"), 16).ok())
             .unwrap_or(0);
+        let after = &rest[nl + 2..];
         if size == 0 || after.len() < size {
-            out.push_str(&after[..after.len().min(size)]);
+            out.extend_from_slice(&after[..after.len().min(size)]);
             break;
         }
-        out.push_str(&after[..size]);
-        rest = after[size..].strip_prefix("\r\n").unwrap_or(&after[size..]);
+        out.extend_from_slice(&after[..size]);
+        rest = after[size..].strip_prefix(b"\r\n").unwrap_or(&after[size..]);
     }
-    out
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// application/x-www-form-urlencoded escape of a single value.

@@ -28,6 +28,11 @@ impl Module for BlockAmsg {
     fn name(&self) -> &'static str {
         "blockamsg"
     }
+    fn on_user_quit(&mut self, s: &mut Server, uid: Uid, _reason: &str) {
+        if let Some(m) = s.ext.get_mut::<LastMsg>() {
+            m.0.remove(&uid);
+        }
+    }
 
     fn on_pre_command(
         &mut self,

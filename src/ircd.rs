@@ -160,6 +160,10 @@ impl Ircd {
             {
                 // the default panic hook already logged the details to stderr
                 eprintln!("[core] recovered from a panicking event handler; continuing");
+                // a panic mid-handler can leave transient per-command state set;
+                // clear it so it doesn't corrupt the next command
+                self.server.label_capture.borrow_mut().take();
+                self.server.mode_sudo = false;
             }
             busy.store(0, Ordering::Relaxed);
             let ms = start.elapsed().as_millis() as u64;
