@@ -525,7 +525,7 @@ impl Command for Kick {
             &format!(":{prefix} KICK {chan} {victim} :{reason}"),
             None,
         );
-        s.propagate_from_user(uid, &format!("KICK {chan} {victim} :{reason}")); // tell links
+        s.propagate_kick(uid, chan, victim, &reason); // tell links
         if let Some(ch) = s.channels.get_mut(&key) {
             ch.members.remove(&tuid);
             if ch.modes.kicknorejoin.is_some() {
@@ -606,7 +606,7 @@ impl Command for TopicCmd {
             });
         }
         s.to_channel(&key, &format!(":{prefix} TOPIC {target} :{text}"), None);
-        s.propagate_from_user(uid, &format!("TOPIC {target} :{text}")); // tell links
+        s.propagate_topic(uid, target, &text); // tell links
         CmdResult::Ok
     }
 }

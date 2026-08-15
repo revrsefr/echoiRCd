@@ -1132,7 +1132,7 @@ impl Command for SaTopic {
             });
         }
         s.to_channel(&key, &format!(":{prefix} TOPIC {chan} :{text}"), None);
-        s.propagate_from_user(uid, &format!("TOPIC {chan} :{text}"));
+        s.propagate_topic(uid, chan, &text);
         let by = oper_nick(s, uid);
         s.snotice(&format!("{by} used SATOPIC on {chan}"));
         CmdResult::Ok
@@ -1184,7 +1184,7 @@ impl Command for SaKick {
             &format!(":{prefix} KICK {chan} {victim} :{reason}"),
             None,
         );
-        s.propagate_from_user(uid, &format!("KICK {chan} {victim} :{reason}"));
+        s.propagate_kick(uid, chan, victim, &reason);
         if let Some(ch) = s.channels.get_mut(&key) {
             ch.members.remove(&tuid);
         }
@@ -1305,7 +1305,7 @@ impl Command for ClearChan {
                 &format!(":{prefix} KICK {chan} {victim} :{reason}"),
                 None,
             );
-            s.propagate_from_user(uid, &format!("KICK {chan} {victim} :{reason}"));
+            s.propagate_kick(uid, &chan, &victim, &reason);
             if let Some(ch) = s.channels.get_mut(&key) {
                 ch.members.remove(&tuid);
             }

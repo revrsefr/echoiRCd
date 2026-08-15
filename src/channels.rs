@@ -159,6 +159,32 @@ impl Member {
             self.held().iter().map(|(_, s)| *s).collect()
         }
     }
+
+    /// Every status mode *letter* this member holds (`o`, `v`, custom letters),
+    /// high→low. The server-to-server membership burst lists members as
+    /// `<letters>,<uuid>`, so this is the letter form of `all_prefixes`.
+    pub fn mode_letters(&self) -> String {
+        use crate::modules::customprefix::def_for_letter;
+        let mut s = String::new();
+        for (on, l) in [
+            (self.oprefix, 'y'),
+            (self.owner, 'q'),
+            (self.admin, 'a'),
+            (self.op, 'o'),
+            (self.halfop, 'h'),
+            (self.voice, 'v'),
+        ] {
+            if on {
+                s.push(l);
+            }
+        }
+        for &c in &self.custom_prefixes {
+            if def_for_letter(c).is_some() {
+                s.push(c);
+            }
+        }
+        s
+    }
 }
 
 pub struct Topic {
@@ -1131,7 +1157,7 @@ impl Server {
             &format!(":{} KICK {cname} {nick} :Flood", self.name),
             None,
         );
-        self.propagate_from_user(uid, &format!("KICK {cname} {nick} :Flood"));
+        self.propagate_kick(uid, &cname, &nick, "Flood");
         if let Some(c) = self.channels.get_mut(key) {
             c.members.remove(&uid);
         }

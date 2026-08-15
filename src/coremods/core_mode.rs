@@ -167,8 +167,9 @@ pub fn apply_mode(s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
                 None,
             );
         }
-        s.propagate_from_user(uid, &format!("MODE {target} {applied}{pstr}"));
-        // links
+        // links: a timestamped FMODE sourced from the acting user's uuid
+        let src_uuid = s.users[&uid].uuid.clone();
+        s.propagate_chan_mode(&src_uuid, target, &applied, &echoed);
     }
     CmdResult::Ok
 }
@@ -229,7 +230,9 @@ pub fn svs_set_chan_modes(s: &mut Server, target: &str, modestring: &str, args: 
         &format!(":{} MODE {target} {applied}{pstr}", s.name),
         None,
     );
-    s.propagate(&format!(":{} MODE {target} {applied}{pstr}", s.sid), None); // links
+    // links: a timestamped FMODE sourced from this server's sid
+    let sid = s.sid.clone();
+    s.propagate_chan_mode(&sid, target, &applied, &echoed);
     true
 }
 

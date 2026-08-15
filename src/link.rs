@@ -156,9 +156,11 @@ impl Server {
             "JOIN" if registered => self.link_join_recv(uid, msg),
             "PART" if registered => self.link_part_recv(uid, msg),
             "TOPIC" if registered => self.link_topic_recv(uid, msg),
+            "FTOPIC" if registered => self.link_ftopic_recv(uid, msg),
             "KICK" if registered => self.link_kick_recv(uid, msg),
             "MODE" | "FMODE" if registered => self.link_mode_recv(uid, msg),
             "FJOIN" if registered => self.link_fjoin_recv(uid, msg),
+            "IJOIN" if registered => self.link_ijoin_recv(uid, msg),
             // services (SVS*) enforcement + account login, driven by a linked
             // services pseudoserver (forwarded on if the target is on another server)
             "SVSNICK" if registered => self.link_svsnick(uid, msg),
@@ -314,20 +316,36 @@ impl Server {
         }
     }
 
-    /// The `UID` introduction line for a local user.
+    /// The `UID` introduction line for a local user. Field order is uuid, nick
+    /// timestamp, nick, real host, displayed host, real ident, displayed ident,
+    /// ip, signon timestamp, user modes, then the real name as the trailing param.
     fn uid_line(&self, u: &User) -> String {
-        let acct = u.account.clone().unwrap_or_else(|| "*".to_string());
         format!(
-            ":{} UID {} {} {} {} {} {} :{}",
+            ":{} UID {} {} {} {} {} {} {} {} {} {} :{}",
             self.sid,
             u.uuid,
+            u.signon,
             u.nick,
-            u.ident,
+            u.host,
             u.host_display(),
-            acct,
+            u.ident,
+            u.ident,
             u.addr.ip(),
+            u.signon,
+            u.flags.umodes(),
             u.realname
         )
+    }
+
+    /// The lines that introduce a local user across a link: the `UID`, and — when
+    /// they're logged into an account — a `METADATA accountname` so services and
+    /// remote servers see the login (the account isn't carried in `UID`).
+    fn user_intro_lines(&self, u: &User) -> Vec<String> {
+        let mut v = vec![self.uid_line(u)];
+        if let Some(acct) = &u.account {
+            v.push(format!(":{} METADATA {} accountname :{acct}", self.sid, u.uuid));
+        }
+        v
     }
 
     /// Burst all local registered users to a freshly-linked peer.
@@ -336,7 +354,7 @@ impl Server {
             .users
             .values()
             .filter(|u| u.registered)
-            .map(|u| self.uid_line(u))
+            .flat_map(|u| self.user_intro_lines(u))
             .collect();
         for l in lines {
             self.link_out(link_uid, l);
@@ -349,8 +367,9 @@ impl Server {
             return;
         }
         if let Some(u) = self.users.get(&uid) {
-            let line = self.uid_line(u);
-            self.propagate(&line, None);
+            for line in self.user_intro_lines(u) {
+                self.propagate(&line, None);
+            }
         }
     }
 
@@ -358,7 +377,7 @@ impl Server {
     pub fn propagate_nick(&self, uid: Uid, newnick: &str) {
         if let Some(u) = self.users.get(&uid) {
             if u.registered && !self.links.is_empty() {
-                self.propagate(&format!(":{} NICK {newnick}", u.uuid), None);
+                self.propagate(&format!(":{} NICK {newnick} {}", u.uuid, now()), None);
             }
         }
     }
@@ -814,25 +833,20 @@ impl Server {
     // --- inbound S2S records --------------------------------------------------
 
     fn link_uid_recv(&mut self, via: Uid, msg: &Message) {
-        // :<sid> UID <uuid> <nick> <ident> <host> <account> <ip> :<realname>
-        // The <ip> field is newer; tolerate the older 6-param form (no IP).
-        if msg.params.len() < 6 {
+        // :<sid> UID <uuid> <nickts> <nick> <realhost> <disphost> <realident>
+        //             <dispident> <ip> <signonts> +<modes> [modeparams] :<realname>
+        // We keep the displayed host/ident (what other users see) and the real
+        // name; the account arrives separately via METADATA accountname.
+        if msg.params.len() < 11 {
             return;
         }
-        let has_ip = msg.params.len() >= 7;
-        let ip = if has_ip {
-            msg.params[5].clone()
-        } else {
-            String::new()
-        };
-        let realname = if has_ip {
-            msg.params[6].clone()
-        } else {
-            msg.params[5].clone()
-        };
         let sid = msg.source.clone().unwrap_or_default();
         let uuid = msg.params[0].clone();
-        let nick = msg.params[1].clone();
+        let nick = msg.params[2].clone();
+        let host = msg.params[4].clone(); // displayed host
+        let ident = msg.params[6].clone(); // displayed ident
+        let ip = msg.params[7].clone();
+        let realname = msg.params.last().cloned().unwrap_or_default();
         // nick collision: a local holder is killed (both sides do this, so both
         // vanish deterministically); an existing remote holder simply wins.
         if let Some(luid) = self.find_nick(&nick) {
@@ -843,11 +857,6 @@ impl Server {
         if self.remote_nick.contains_key(&nick.to_ascii_lowercase()) {
             return;
         }
-        let account = if msg.params[4] == "*" {
-            None
-        } else {
-            Some(msg.params[4].clone())
-        };
         self.remote_nick
             .insert(nick.to_ascii_lowercase(), uuid.clone());
         self.remote_users.insert(
@@ -855,43 +864,21 @@ impl Server {
             RemoteUser {
                 uuid,
                 nick,
-                ident: msg.params[2].clone(),
-                host: msg.params[3].clone(),
+                ident,
+                host,
                 realname,
-                account,
-                ip: ip.clone(),
-                sid: sid.clone(),
+                account: None,
+                ip,
+                sid,
                 via,
             },
         );
-        // re-propagate to our other peers, carrying the IP when we have one
-        let line = if has_ip {
-            format!(
-                ":{sid} UID {} {} {} {} {} {} :{}",
-                msg.params[0],
-                msg.params[1],
-                msg.params[2],
-                msg.params[3],
-                msg.params[4],
-                ip,
-                msg.params[6]
-            )
-        } else {
-            format!(
-                ":{sid} UID {} {} {} {} {} :{}",
-                msg.params[0],
-                msg.params[1],
-                msg.params[2],
-                msg.params[3],
-                msg.params[4],
-                msg.params[5]
-            )
-        };
-        self.propagate(&line, Some(via));
+        // re-propagate verbatim to our other peers (keeps every field intact)
+        self.propagate(&msg.to_wire(), Some(via));
     }
 
     fn link_nick_recv(&mut self, via: Uid, msg: &Message) {
-        // :<uuid> NICK <newnick>
+        // :<uuid> NICK <newnick> [<ts>]
         let Some(uuid) = msg.source.clone() else {
             return;
         };
@@ -909,7 +896,8 @@ impl Server {
         self.remote_nick.remove(&old.to_ascii_lowercase());
         self.remote_nick
             .insert(newnick.to_ascii_lowercase(), uuid.clone());
-        self.propagate(&format!(":{uuid} NICK {newnick}"), Some(via));
+        let ts = msg.params.get(1).cloned().unwrap_or_else(|| now().to_string());
+        self.propagate(&format!(":{uuid} NICK {newnick} {ts}"), Some(via));
     }
 
     fn link_quit_recv(&mut self, via: Uid, msg: &Message) {
@@ -967,11 +955,33 @@ impl Server {
         if self.links.is_empty() {
             return;
         }
-        if let Some(u) = self.users.get(&uid) {
-            if u.registered {
-                self.propagate(&format!(":{} JOIN {chan}", u.uuid), None);
-            }
+        let key = chan.to_ascii_lowercase();
+        let (Some(u), Some(ch)) = (self.users.get(&uid), self.channels.get(&key)) else {
+            return;
+        };
+        if !u.registered {
+            return;
         }
+        // introduce the join as a single-member channel burst, carrying whatever
+        // status the user holds (creator gets ops) and the channel's modes/TS so a
+        // peer that doesn't yet know the channel creates it consistently.
+        let letters = ch
+            .members
+            .get(&uid)
+            .map(|m| m.mode_letters())
+            .unwrap_or_default();
+        self.propagate(
+            &format!(
+                ":{} FJOIN {} {} {} :{},{}",
+                self.sid,
+                ch.name,
+                ch.created,
+                ch.modes.render(false),
+                letters,
+                u.uuid
+            ),
+            None,
+        );
     }
 
     /// Tell linked servers a local user parted a channel.
@@ -1048,6 +1058,44 @@ impl Server {
             .unwrap_or_default();
         self.to_channel(&key, &format!(":{prefix} JOIN {chan}"), None);
         self.propagate(&format!(":{uuid} JOIN {chan}"), Some(via));
+    }
+
+    /// `:<uuid> IJOIN <channel> [<membid>] [<ts>] [<modes>]` — a single remote
+    /// member joining an existing channel (services pseudo-clients use this to
+    /// enter their control channel). The optional trailing token is the status
+    /// modes the user joins holding.
+    fn link_ijoin_recv(&mut self, via: Uid, msg: &Message) {
+        let Some(uuid) = msg.source.clone() else {
+            return;
+        };
+        let Some(chan) = msg.params.first().cloned() else {
+            return;
+        };
+        if !chan.starts_with('#') || !self.remote_users.contains_key(&uuid) {
+            return;
+        }
+        let key = chan.to_ascii_lowercase();
+        let mut m = Member::default();
+        // membid and ts are numeric; a trailing all-letter token is the modes
+        if let Some(modes) = msg.params.get(3) {
+            if modes.chars().all(|c| c.is_ascii_alphabetic()) {
+                for c in modes.chars() {
+                    m.set_prefix(c, true);
+                }
+            }
+        }
+        self.channels
+            .entry(key.clone())
+            .or_insert_with(|| Channel::new(&chan))
+            .rmembers
+            .insert(uuid.clone(), m);
+        let prefix = self
+            .remote_users
+            .get(&uuid)
+            .map(|r| r.prefix())
+            .unwrap_or_default();
+        self.to_channel(&key, &format!(":{prefix} JOIN {chan}"), None);
+        self.propagate(&msg.to_wire(), Some(via));
     }
 
     fn link_part_recv(&mut self, via: Uid, msg: &Message) {
@@ -1132,9 +1180,123 @@ impl Server {
         }
     }
 
-    /// Set a prefix mode on `nick` in `key`, be they a local or remote member.
-    fn set_member_prefix(&mut self, key: &str, nick: &str, letter: char, adding: bool) {
-        if let Some(uid) = self.find_nick(nick) {
+    /// Resolve a nickname to its network uuid (local or remote); pass anything
+    /// that isn't a known nick (a ban mask, a key) through unchanged.
+    fn nick_to_uuid(&self, tok: &str) -> String {
+        if let Some(u) = self.find_nick(tok).and_then(|l| self.users.get(&l)) {
+            return u.uuid.clone();
+        }
+        if let Some((uuid, _)) = self.find_remote(tok) {
+            return uuid;
+        }
+        tok.to_string()
+    }
+
+    /// Propagate a local channel mode change to links as a timestamped `FMODE`,
+    /// rewriting member (prefix) params from nicks to uuids as the protocol wants.
+    /// `params` are the displayed params in mode order (member nicks, masks, key…).
+    pub fn propagate_chan_mode(&self, src: &str, chan: &str, modestring: &str, params: &[String]) {
+        if self.links.is_empty() {
+            return;
+        }
+        let key = chan.to_ascii_lowercase();
+        let ts = self.channels.get(&key).map(|c| c.created).unwrap_or_else(now);
+        let mut out: Vec<String> = Vec::new();
+        let mut pi = 0usize;
+        let mut sign = '+';
+        for c in modestring.chars() {
+            match c {
+                '+' | '-' => sign = c,
+                'q' | 'a' | 'o' | 'h' | 'v' => {
+                    if let Some(p) = params.get(pi) {
+                        out.push(self.nick_to_uuid(p));
+                        pi += 1;
+                    }
+                }
+                'b' | 'e' | 'I' | 'k' => {
+                    if let Some(p) = params.get(pi) {
+                        out.push(p.clone());
+                        pi += 1;
+                    }
+                }
+                'l' => {
+                    if sign == '+' {
+                        if let Some(p) = params.get(pi) {
+                            out.push(p.clone());
+                            pi += 1;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        while pi < params.len() {
+            out.push(params[pi].clone());
+            pi += 1;
+        }
+        let pstr = if out.is_empty() {
+            String::new()
+        } else {
+            format!(" {}", out.join(" "))
+        };
+        self.propagate(&format!(":{src} FMODE {chan} {ts} {modestring}{pstr}"), None);
+    }
+
+    /// Propagate a local user's topic change to links as `FTOPIC`, carrying the
+    /// channel and topic timestamps and the setter mask the protocol expects.
+    pub fn propagate_topic(&self, uid: Uid, chan: &str, text: &str) {
+        if self.links.is_empty() {
+            return;
+        }
+        let key = chan.to_ascii_lowercase();
+        let (Some(u), Some(c)) = (self.users.get(&uid), self.channels.get(&key)) else {
+            return;
+        };
+        if !u.registered {
+            return;
+        }
+        let ts = c.topic.as_ref().map(|t| t.ts).unwrap_or_else(now);
+        self.propagate(
+            &format!(
+                ":{} FTOPIC {} {} {} {} :{text}",
+                u.uuid,
+                c.name,
+                c.created,
+                ts,
+                u.prefix()
+            ),
+            None,
+        );
+    }
+
+    /// Propagate a local KICK to links, naming the victim by network uuid.
+    pub fn propagate_kick(&self, uid: Uid, chan: &str, victim: &str, reason: &str) {
+        if self.links.is_empty() {
+            return;
+        }
+        let Some(u) = self.users.get(&uid) else {
+            return;
+        };
+        if !u.registered {
+            return;
+        }
+        let vuuid = self.nick_to_uuid(victim);
+        self.propagate(
+            &format!(":{} KICK {chan} {vuuid} :{reason}", u.uuid),
+            None,
+        );
+    }
+
+    /// Set a status prefix on a channel member named by network uuid or nickname
+    /// (the S2S form uses uuids; a local MODE may pass a nick).
+    fn set_member_prefix(&mut self, key: &str, who: &str, letter: char, adding: bool) {
+        // a local user, by uuid then by nick
+        let luid = self
+            .uuid_local
+            .get(who)
+            .copied()
+            .or_else(|| self.find_nick(who));
+        if let Some(uid) = luid {
             if let Some(m) = self
                 .channels
                 .get_mut(key)
@@ -1142,7 +1304,15 @@ impl Server {
             {
                 m.set_prefix(letter, adding);
             }
-        } else if let Some((uuid, _)) = self.find_remote(nick) {
+            return;
+        }
+        // a remote user, by uuid then by nick
+        let ruuid = if self.remote_users.contains_key(who) {
+            Some(who.to_string())
+        } else {
+            self.find_remote(who).map(|(u, _)| u)
+        };
+        if let Some(uuid) = ruuid {
             if let Some(m) = self
                 .channels
                 .get_mut(key)
@@ -1151,6 +1321,18 @@ impl Server {
                 m.set_prefix(letter, adding);
             }
         }
+    }
+
+    /// Resolve a network uuid to a nick for client-facing display; pass anything
+    /// else (already a nick, a mask) through unchanged.
+    fn uuid_to_nick(&self, tok: &str) -> String {
+        if let Some(ru) = self.remote_users.get(tok) {
+            return ru.nick.clone();
+        }
+        if let Some(u) = self.uuid_local.get(tok).and_then(|&l| self.users.get(&l)) {
+            return u.nick.clone();
+        }
+        tok.to_string()
     }
 
     fn link_topic_recv(&mut self, via: Uid, msg: &Message) {
@@ -1185,7 +1367,7 @@ impl Server {
     }
 
     fn link_kick_recv(&mut self, via: Uid, msg: &Message) {
-        // :<kicker-uuid> KICK #chan <victim-nick> :<reason>
+        // :<kicker> KICK #chan <victim-uuid|nick> :<reason>  (the S2S form uses a uuid)
         let Some(src) = msg.source.clone() else {
             return;
         };
@@ -1198,7 +1380,18 @@ impl Server {
         let reason = msg.params.get(2).cloned().unwrap_or_else(|| victim.clone());
         let prefix = self.uuid_prefix(&src).unwrap_or_default();
         let mut removed = false;
-        if let Some(vuid) = self.find_nick(&victim) {
+        let vnick;
+        let vlocal = self
+            .uuid_local
+            .get(&victim)
+            .copied()
+            .or_else(|| self.find_nick(&victim));
+        if let Some(vuid) = vlocal {
+            vnick = self
+                .users
+                .get(&vuid)
+                .map(|u| u.nick.clone())
+                .unwrap_or_else(|| victim.clone());
             if let Some(c) = self.channels.get_mut(&key) {
                 removed = c.members.remove(&vuid).is_some();
             }
@@ -1206,10 +1399,27 @@ impl Server {
                 if let Some(u) = self.users.get_mut(&vuid) {
                     u.channels.remove(&key);
                 }
+                // the kicked local user must see it too (they've left the member set)
+                self.send(vuid, format!(":{prefix} KICK {chan} {vnick} :{reason}"));
             }
-        } else if let Some((vuuid, _)) = self.find_remote(&victim) {
-            if let Some(c) = self.channels.get_mut(&key) {
-                removed = c.rmembers.remove(&vuuid).is_some();
+        } else {
+            let vuuid = if self.remote_users.contains_key(&victim) {
+                Some(victim.clone())
+            } else {
+                self.find_remote(&victim).map(|(u, _)| u)
+            };
+            match vuuid {
+                Some(vuuid) => {
+                    vnick = self
+                        .remote_users
+                        .get(&vuuid)
+                        .map(|r| r.nick.clone())
+                        .unwrap_or_else(|| victim.clone());
+                    if let Some(c) = self.channels.get_mut(&key) {
+                        removed = c.rmembers.remove(&vuuid).is_some();
+                    }
+                }
+                None => return,
             }
         }
         if !removed {
@@ -1217,19 +1427,19 @@ impl Server {
         }
         self.to_channel(
             &key,
-            &format!(":{prefix} KICK {chan} {victim} :{reason}"),
+            &format!(":{prefix} KICK {chan} {vnick} :{reason}"),
             None,
         );
         self.channels.retain(|_, c| c.keep_alive());
-        self.propagate(&format!(":{src} KICK {chan} {victim} :{reason}"), Some(via));
+        self.propagate(&msg.to_wire(), Some(via));
     }
 
-    fn link_mode_recv(&mut self, via: Uid, msg: &Message) {
-        // :<uuid> MODE #chan <modestring> [params...]  (applied without re-checking)
+    fn link_ftopic_recv(&mut self, via: Uid, msg: &Message) {
+        // :<src> FTOPIC <#chan> <chants> <topicts> [<setter>] :<topic>
         let Some(src) = msg.source.clone() else {
             return;
         };
-        if msg.params.len() < 2 || !msg.params[0].starts_with('#') {
+        if msg.params.len() < 4 {
             return;
         }
         let chan = msg.params[0].clone();
@@ -1237,10 +1447,72 @@ impl Server {
         if !self.channels.contains_key(&key) {
             return;
         }
-        let modestring = msg.params[1].clone();
-        let args: Vec<String> = msg.params[2..].to_vec();
+        let topic = msg.params.last().cloned().unwrap_or_default();
+        let ts = msg.params[2].parse().unwrap_or_else(|_| now());
+        // an explicit setter mask sits at param[3] when present (>=5 params); else
+        // fall back to the source's display name
+        let setter = if msg.params.len() >= 5 {
+            msg.params[3].clone()
+        } else {
+            self.remote_users
+                .get(&src)
+                .map(|r| r.nick.clone())
+                .or_else(|| self.servers.get(&src).map(|s| s.name.clone()))
+                .unwrap_or_else(|| src.clone())
+        };
+        if let Some(c) = self.channels.get_mut(&key) {
+            c.topic = Some(Topic {
+                text: topic.clone(),
+                setter: setter.clone(),
+                ts,
+            });
+        }
+        let prefix = self
+            .uuid_prefix(&src)
+            .or_else(|| self.servers.get(&src).map(|s| s.name.clone()))
+            .unwrap_or(setter);
+        self.to_channel(&key, &format!(":{prefix} TOPIC {chan} :{topic}"), None);
+        self.propagate(&msg.to_wire(), Some(via));
+    }
+
+    fn link_mode_recv(&mut self, via: Uid, msg: &Message) {
+        // Channel modes arrive as `:<src> FMODE <#chan> <ts> <modes> [params]`
+        // (timestamped) or `:<src> MODE <#chan> <modes> [params]`; user modes as
+        // `:<src> MODE <uuid> <modes>`. Applied without re-checking privilege — the
+        // originating server already authorised the change.
+        let Some(src) = msg.source.clone() else {
+            return;
+        };
+        if msg.params.len() < 2 {
+            return;
+        }
+        // FMODE inserts a channel timestamp before the mode string
+        let mode_idx = if msg.command == "FMODE" { 2 } else { 1 };
+
+        // a user-mode change: relay onward, and drop it if aimed at a local (we
+        // don't re-toggle umodes here — services force user modes via SVSMODE)
+        if !msg.params[0].starts_with('#') {
+            self.propagate(&msg.to_wire(), Some(via));
+            return;
+        }
+
+        let chan = msg.params[0].clone();
+        let key = chan.to_ascii_lowercase();
+        if !self.channels.contains_key(&key) {
+            return;
+        }
+        let Some(modestring) = msg.params.get(mode_idx).cloned() else {
+            return;
+        };
+        let args: Vec<String> = msg
+            .params
+            .get(mode_idx + 1..)
+            .map(<[String]>::to_vec)
+            .unwrap_or_default();
         let mut argi = 0usize;
         let mut sign = '+';
+        // client-facing param list: prefix-mode targets shown as nicks, not uuids
+        let mut shown: Vec<String> = Vec::new();
         for c in modestring.chars() {
             if c == '+' || c == '-' {
                 sign = c;
@@ -1252,12 +1524,14 @@ impl Server {
                     if let Some(n) = args.get(argi).cloned() {
                         argi += 1;
                         self.set_member_prefix(&key, &n, c, adding);
+                        shown.push(self.uuid_to_nick(&n));
                     }
                 }
                 'k' => {
                     let p = args.get(argi).cloned();
-                    if p.is_some() {
+                    if let Some(p) = &p {
                         argi += 1;
+                        shown.push(p.clone());
                     }
                     if let Some(ch) = self.channels.get_mut(&key) {
                         ch.modes.key = if adding { p } else { None };
@@ -1266,6 +1540,7 @@ impl Server {
                 'l' => {
                     if adding {
                         if let Some(n) = args.get(argi).and_then(|s| s.parse::<u32>().ok()) {
+                            shown.push(args[argi].clone());
                             argi += 1;
                             if let Some(ch) = self.channels.get_mut(&key) {
                                 ch.modes.limit = Some(n);
@@ -1278,6 +1553,7 @@ impl Server {
                 'b' | 'e' | 'I' => {
                     if let Some(mask) = args.get(argi).cloned() {
                         argi += 1;
+                        shown.push(mask.clone());
                         let setter = self
                             .remote_users
                             .get(&src)
@@ -1311,25 +1587,24 @@ impl Server {
                 }
             }
         }
-        // source is a user (uuid) or, for a burst, a server (sid)
+        // client-facing line: source is a user (uuid) or, for a burst, a server
+        // (sid); params show member nicks rather than uuids
         let prefix = self
             .uuid_prefix(&src)
             .or_else(|| self.servers.get(&src).map(|s| s.name.clone()))
             .unwrap_or_else(|| self.name.clone());
-        let paramstr = if args.is_empty() {
+        let paramstr = if shown.is_empty() {
             String::new()
         } else {
-            format!(" {}", args.join(" "))
+            format!(" {}", shown.join(" "))
         };
         self.to_channel(
             &key,
             &format!(":{prefix} MODE {chan} {modestring}{paramstr}"),
             None,
         );
-        self.propagate(
-            &format!(":{src} MODE {chan} {modestring}{paramstr}"),
-            Some(via),
-        );
+        // relay onward exactly as received (keeps the FMODE timestamp intact)
+        self.propagate(&msg.to_wire(), Some(via));
     }
 
     /// Burst every channel (name, ts, modes, prefixed members) to a new peer.
@@ -1339,11 +1614,11 @@ impl Server {
             let mut mem: Vec<String> = Vec::new();
             for (uid, m) in &ch.members {
                 if let Some(u) = self.users.get(uid) {
-                    mem.push(format!("{}{}", m.all_prefixes(), u.uuid));
+                    mem.push(format!("{},{}", m.mode_letters(), u.uuid));
                 }
             }
             for (uuid, m) in &ch.rmembers {
-                mem.push(format!("{}{}", m.all_prefixes(), uuid));
+                mem.push(format!("{},{}", m.mode_letters(), uuid));
             }
             if mem.is_empty() {
                 continue;
@@ -1356,12 +1631,13 @@ impl Server {
                 ch.modes.render(false),
                 mem.join(" ")
             ));
-            // burst the ban / except / invite-exception lists too
+            // burst the ban / except / invite-exception lists as timestamped mode
+            // changes sourced from this server
             for (letter, list) in [('b', &ch.bans), ('e', &ch.excepts), ('I', &ch.invex)] {
                 for b in list {
                     lines.push(format!(
-                        ":{} MODE {} +{letter} {}",
-                        self.sid, ch.name, b.mask
+                        ":{} FMODE {} {} +{letter} {}",
+                        self.sid, ch.name, ch.created, b.mask
                     ));
                 }
             }
@@ -1401,13 +1677,13 @@ impl Server {
         }
         let mut adds: Vec<(String, Member)> = Vec::new();
         for tok in memberlist.split_whitespace() {
-            let (pfx, uuid) = split_member(tok);
+            let (letters, uuid) = split_member(tok);
             if self.uuid_local.contains_key(&uuid) || !self.remote_users.contains_key(&uuid) {
                 continue; // our own user, or one we don't know yet
             }
             let mut m = Member::default();
-            for pc in pfx.chars() {
-                m.set_prefix(prefix_letter(pc), true);
+            for pc in letters.chars() {
+                m.set_prefix(pc, true);
             }
             adds.push((uuid, m));
         }
@@ -1424,18 +1700,12 @@ impl Server {
     }
 }
 
-/// Split a bursted member token `@+0AAAAAAAB` into its prefix chars and uuid.
+/// Split a bursted member token `ov,0AAAAAAAB` (with an optional `:membid`
+/// suffix) into its status mode letters and the bare uuid.
 fn split_member(tok: &str) -> (String, String) {
-    let idx = tok
-        .find(|c: char| !"~&@%+".contains(c))
-        .unwrap_or(tok.len());
-    (tok[..idx].to_string(), tok[idx..].to_string())
-}
-
-/// Map a prefix char to its mode letter (`@` → `o`, …).
-fn prefix_letter(c: char) -> char {
-    // config-overridable sigils (customprefix); a linked network shares this config
-    crate::modules::customprefix::letter_for_sigil(c)
+    let (letters, rest) = tok.split_once(',').unwrap_or(("", tok));
+    let uuid = rest.split(':').next().unwrap_or(rest);
+    (letters.to_string(), uuid.to_string())
 }
 
 #[cfg(test)]
