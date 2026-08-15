@@ -24,29 +24,37 @@ fn main() {
     // precompute the bcrypt constants off-thread so the first hash never stalls the core
     thread::spawn(echoircd::bcrypt::warm);
 
-    // Client plaintext connections run on the mio reactor, so bind a mio listener
-    // (fail fast if the main port is taken).
-    let bind_addr: std::net::SocketAddr = match cfg.bind.parse() {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("echoircd: bad bind address {}: {e}", cfg.bind);
-            std::process::exit(1);
-        }
-    };
-    let client_listener = match mio::net::TcpListener::bind(bind_addr) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("echoircd: cannot bind {}: {e}", cfg.bind);
-            std::process::exit(1);
-        }
-    };
     eprintln!(
-        "echoircd {} on {} (network {}, server {})",
+        "echoircd {} (network {}, server {})",
         env!("CARGO_PKG_VERSION"),
-        cfg.bind,
         cfg.network,
         cfg.servername
     );
+    // Plaintext client listeners. `bind` is repeatable; a bare `[::]` binds IPv4+IPv6
+    // (dual-stack). Bind each as a mio listener and exit only if none could bind, so an
+    // unavailable family (e.g. no IPv6) degrades gracefully instead of taking us down.
+    let plaintext_binds: Vec<String> = if cfg.bind.is_empty() {
+        vec!["127.0.0.1:6767".to_string()]
+    } else {
+        cfg.bind.clone()
+    };
+    let mut client_listeners: Vec<mio::net::TcpListener> = Vec::new();
+    for b in &plaintext_binds {
+        match b.parse::<std::net::SocketAddr>() {
+            Ok(a) => match mio::net::TcpListener::bind(a) {
+                Ok(l) => {
+                    eprintln!("echoircd plaintext on {b}");
+                    client_listeners.push(l);
+                }
+                Err(e) => eprintln!("echoircd: cannot bind {b}: {e}"),
+            },
+            Err(e) => eprintln!("echoircd: bad bind address {b}: {e}"),
+        }
+    }
+    if client_listeners.is_empty() {
+        eprintln!("echoircd: no plaintext listener could bind; exiting");
+        std::process::exit(1);
+    }
 
     // global queue limits (per-class overrides layer on top of these in the reactor)
     let raw_num = |k: &str, d: usize| {
@@ -114,41 +122,49 @@ fn main() {
     let reactors =
         socketengine::spawn_reactors(tx.clone(), max_line, max_sendq, io_threads, handshake_timeout);
 
-    // optional TLS listener (bind_tls + tls_cert + tls_key). A cert/bind problem
-    // disables TLS but never takes the plaintext listener down.
-    if let (Some(bind_tls), Some(cert), Some(key)) = (&cfg.bind_tls, &cfg.tls_cert, &cfg.tls_key) {
-        match OpensslBackend::new(cert, key) {
-            Ok(backend) => match TcpListener::bind(bind_tls) {
-                Ok(tls_listener) => {
-                    eprintln!("echoircd TLS on {bind_tls} (openssl)");
+    // optional TLS listeners (bind_tls, repeatable + tls_cert + tls_key). A cert/bind
+    // problem disables TLS but never takes the plaintext listeners down.
+    if !cfg.bind_tls.is_empty() {
+        match (&cfg.tls_cert, &cfg.tls_key) {
+            (Some(cert), Some(key)) => match OpensslBackend::new(cert, key) {
+                Ok(backend) => {
                     let backend: Arc<dyn TlsBackend> = Arc::new(backend);
-                    let tls_tx = tx.clone();
-                    let tls_counter = counter.clone();
-                    let tls_proxy_trust = proxy_trust.clone();
-                    let tls_reactors = reactors.clone();
-                    let tls_limiter = accept_limiter.clone();
-                    thread::spawn(move || {
-                        socketengine::accept_loop(
-                            tls_listener,
-                            tls_tx,
-                            Some(backend),
-                            tls_counter,
-                            false,
-                            max_line,
-                            tls_proxy_trust,
-                            tls_reactors,
-                            tls_limiter,
-                        )
-                    });
+                    for bind_tls in &cfg.bind_tls {
+                        match TcpListener::bind(bind_tls) {
+                            Ok(tls_listener) => {
+                                eprintln!("echoircd TLS on {bind_tls} (openssl)");
+                                let tls_tx = tx.clone();
+                                let tls_counter = counter.clone();
+                                let tls_proxy_trust = proxy_trust.clone();
+                                let tls_reactors = reactors.clone();
+                                let tls_limiter = accept_limiter.clone();
+                                let backend = backend.clone();
+                                thread::spawn(move || {
+                                    socketengine::accept_loop(
+                                        tls_listener,
+                                        tls_tx,
+                                        Some(backend),
+                                        tls_counter,
+                                        false,
+                                        max_line,
+                                        tls_proxy_trust,
+                                        tls_reactors,
+                                        tls_limiter,
+                                    )
+                                });
+                            }
+                            Err(e) => eprintln!("echoircd: cannot bind TLS {bind_tls}: {e}"),
+                        }
+                    }
                 }
-                Err(e) => eprintln!("echoircd: cannot bind TLS {bind_tls}: {e}"),
+                Err(e) => eprintln!("echoircd: TLS disabled (cert/key error): {e}"),
             },
-            Err(e) => eprintln!("echoircd: TLS disabled (cert/key error): {e}"),
+            _ => eprintln!("echoircd: bind_tls set but tls_cert/tls_key missing; TLS disabled"),
         }
     }
 
-    // server-to-server link listener (see crate::link)
-    if let Some(bind_srv) = &cfg.bind_server {
+    // server-to-server link listeners (bind_server, repeatable — see crate::link)
+    for bind_srv in &cfg.bind_server {
         match TcpListener::bind(bind_srv) {
             Ok(sl) => {
                 eprintln!("echoircd S2S link listener on {bind_srv} (sid {})", cfg.sid);
@@ -190,9 +206,16 @@ fn main() {
         });
     }
 
-    // client plaintext connections: the acceptor round-robins them across the pool
-    thread::spawn(move || {
-        socketengine::run_acceptor(client_listener, reactors, counter, proxy_trust, accept_limiter)
-    });
+    // client plaintext connections: one acceptor per listener, all round-robining
+    // onto the shared reactor pool
+    for listener in client_listeners {
+        let (r, c, pt, lim) = (
+            reactors.clone(),
+            counter.clone(),
+            proxy_trust.clone(),
+            accept_limiter.clone(),
+        );
+        thread::spawn(move || socketengine::run_acceptor(listener, r, c, pt, lim));
+    }
     let _ = core.join();
 }

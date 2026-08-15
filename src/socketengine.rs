@@ -40,6 +40,18 @@ pub const DEFAULT_MAX_SENDQ: usize = 1 << 20; // 1 MiB
 /// How long a TLS thread blocks on a read before draining its write queue.
 const TLS_POLL: Duration = Duration::from_millis(100);
 
+/// Collapse an IPv4-mapped IPv6 peer address (`::ffff:1.2.3.4`, which is how an IPv4
+/// client shows up on a dual-stack `[::]` listener) back to a plain IPv4 `SocketAddr`,
+/// so cloaking, bans, GeoIP, DNSBL and host display all see the real IPv4 address.
+fn normalize_addr(a: SocketAddr) -> SocketAddr {
+    if let SocketAddr::V6(v6) = a {
+        if let Some(v4) = v6.ip().to_ipv4_mapped() {
+            return SocketAddr::new(IpAddr::V4(v4), a.port());
+        }
+    }
+    a
+}
+
 /// A queued output action the core hands the reactor: a line to write to a
 /// connection, a request to flush-then-close it (sent when the core drops the
 /// [`OutSink`], e.g. on quit), or a per-connection queue-limit override (from the
@@ -385,9 +397,11 @@ pub fn run_acceptor(
             loop {
                 match listener.accept() {
                     Ok((stream, _addr)) => {
-                        let addr = stream
-                            .peer_addr()
-                            .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap());
+                        let addr = normalize_addr(
+                            stream
+                                .peer_addr()
+                                .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap()),
+                        );
                         // a connection from a trusted proxy leads with a PROXY header;
                         // the worker holds its Connect until that header is consumed so
                         // the core sees the real client IP.
@@ -932,6 +946,7 @@ pub fn accept_loop(
         let Ok(addr) = stream.peer_addr() else {
             continue;
         };
+        let addr = normalize_addr(addr);
         // rate-limit direct client connections at the edge (not S2S links, not proxied)
         if !link {
             let via_proxy = proxy_trust

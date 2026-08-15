@@ -65,8 +65,8 @@ impl Default for AntiMixedCfg {
 pub struct Config {
     pub servername: String,
     pub network: String,
-    pub bind: String,
-    pub bind_tls: Option<String>, // e.g. 0.0.0.0:6697 — the TLS listener
+    pub bind: Vec<String>,      // plaintext client listeners (repeatable; e.g. [::]:6667)
+    pub bind_tls: Vec<String>,  // TLS client listeners (repeatable; e.g. [::]:6697)
     pub tls_cert: Option<String>, // PEM certificate chain
     pub tls_key: Option<String>,  // PEM private key
     pub motd: Vec<String>,
@@ -74,7 +74,7 @@ pub struct Config {
     pub cloak_key: Option<String>,             // secret key for host cloaking (+x); None = off
     pub sid: String,                           // this server's 3-char server id (S2S)
     pub serverdesc: String,                    // this server's description
-    pub bind_server: Option<String>,           // the server-to-server link listener
+    pub bind_server: Vec<String>,              // server-to-server link listeners (repeatable)
     pub links: Vec<LinkBlock>,                 // peers we accept / dial
     pub conf_path: String,                     // where this was loaded from (for REHASH)
     pub censor: Vec<(String, String)>, // +G bad words: (find, replace); empty replace = block
@@ -96,8 +96,8 @@ impl Default for Config {
         Config {
             servername: "echo.local".to_string(),
             network: "echoNet".to_string(),
-            bind: "127.0.0.1:6767".to_string(),
-            bind_tls: None,
+            bind: Vec::new(),
+            bind_tls: Vec::new(),
             tls_cert: None,
             tls_key: None,
             motd: Vec::new(),
@@ -105,7 +105,7 @@ impl Default for Config {
             cloak_key: None,
             sid: "0AA".to_string(),
             serverdesc: "echoIRCd server".to_string(),
-            bind_server: None,
+            bind_server: Vec::new(),
             links: Vec::new(),
             conf_path: "echoircd.conf".to_string(),
             censor: Vec::new(),
@@ -167,14 +167,14 @@ impl Config {
             match k {
                 "servername" | "server" => c.servername = v.to_string(),
                 "network" => c.network = v.to_string(),
-                "bind" => c.bind = v.to_string(),
-                "bind_tls" => c.bind_tls = Some(v.to_string()),
+                "bind" => c.bind.push(v.to_string()),
+                "bind_tls" => c.bind_tls.push(v.to_string()),
                 "tls_cert" => c.tls_cert = Some(v.to_string()),
                 "tls_key" => c.tls_key = Some(v.to_string()),
                 "cloak_key" => c.cloak_key = Some(v.to_string()),
                 "sid" => c.sid = v.to_string(),
                 "serverdesc" | "description" => c.serverdesc = v.to_string(),
-                "bind_server" => c.bind_server = Some(v.to_string()),
+                "bind_server" => c.bind_server.push(v.to_string()),
                 "link" => {
                     // link = <name> <ip> <port> <password> [autoconnect]
                     let t: Vec<&str> = v.split_whitespace().collect();

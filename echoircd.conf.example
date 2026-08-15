@@ -5,7 +5,13 @@
 
 servername = irc.example.net
 network    = ExampleNet
+# Listener addresses. `bind`, `bind_tls` and `bind_server` are all REPEATABLE — add a
+# line per address/port. A bare `[::]` binds IPv4 and IPv6 at once (dual-stack), and an
+# IPv4 client on it is normalized back to its real v4 address (not ::ffff:...). So a
+# single `[::]` line serves both families; use explicit lines to pin specific IPs/ports.
 bind       = 0.0.0.0:6667
+# bind     = [::]:6667        # dual-stack (IPv4 + IPv6) on one line
+# bind     = 0.0.0.0:6668     # an extra plaintext port
 
 # TLS listener. Generate a cert/key first, e.g.:
 #   openssl req -x509 -newkey rsa:2048 -keyout tls/key.pem -out tls/cert.pem \
