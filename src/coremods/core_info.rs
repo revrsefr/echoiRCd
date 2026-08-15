@@ -126,6 +126,11 @@ impl Command for Whois {
                     if let Some(a) = &ru.account {
                         s.numeric(
                             uid,
+                            RPL_WHOISREGNICK,
+                            &format!("{} :is a registered nick", ru.nick),
+                        );
+                        s.numeric(
+                            uid,
                             RPL_WHOISACCOUNT,
                             &format!("{} {a} :is logged in as", ru.nick),
                         );
@@ -278,6 +283,23 @@ impl Command for Whois {
                 RPL_WHOISHOST,
                 &format!("{nick} :is connecting from {ident}@{realhost} {realip}"),
             );
+        }
+        // 307: identified to a registered account (carries the +r registered umode)
+        if account.is_some() {
+            s.numeric(
+                uid,
+                RPL_WHOISREGNICK,
+                &format!("{nick} :is a registered nick"),
+            );
+        }
+        // 379: the user's active modes — visible to opers and to the user themselves
+        if is_self || asker_oper {
+            let modes = s
+                .users
+                .get(&tuid)
+                .map(|u| u.flags.umodes())
+                .unwrap_or_default();
+            s.numeric(uid, RPL_WHOISMODES, &format!("{nick} :is using modes {modes}"));
         }
         // 330: logged in to a services account
         if let Some(acct) = &account {
