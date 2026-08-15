@@ -338,3 +338,137 @@ amu_target    = both
 # registration_timeout = 60   # drop clients that never register (NICK+USER) in time
 # ping_frequency       = 90   # send a PING after this much idle time
 # ping_timeout         = 60   # then drop if no PONG within this much longer
+
+# =============================================================================
+#  on-connect behaviour
+# =============================================================================
+# connbanner: a NOTICE line sent to every connecting client (repeatable).
+# connbanner = This network is for authorized users only.
+# conn_umodes (alias autoumodes): user modes auto-set on every client at connect.
+# conn_umodes = +ix
+# autojoin (alias conn_join): channels every client auto-joins on connect
+# (comma/space separated; repeatable).
+# autojoin = #lobby,#help
+# seenicks: snotice opers every time a user changes nick (off by default).
+# seenicks = yes
+# chancreate (alias announce_channels): snotice opers when a brand-new channel
+# is created (off by default).
+# chancreate = yes
+# --- oper on-connect (applied on successful OPER) ---
+# opermodes (alias oper_umodes): extra user modes set when a user opers up.
+# opermodes = +ws
+# operjoin: channels an oper auto-joins on oper-up (comma/space separated, repeatable).
+# operjoin = #opers
+
+# =============================================================================
+#  account registration (IRCv3 draft/account-registration -> HTTP accounts API)
+# =============================================================================
+# Bridges REGISTER / VERIFY to an HTTP backend (POST form-encoded + X-API-Key).
+# account_registration    = yes            # master switch (default no)
+# acctregister_registerurl = https://accounts.example/register   # required
+# acctregister_verifyurl   = https://accounts.example/verify     # required for VERIFY
+# acctregister_apikey      = CHANGE_THIS_API_KEY                  # sent as X-API-Key
+# acctregister_autologin      = yes         # log the user in on successful register (default yes)
+# acctregister_beforeconnect  = yes         # allow REGISTER before registration completes (default yes)
+# acctregister_emailrequired  = yes         # require an email address (default yes)
+# acctregister_requiretls     = yes         # only over TLS (default yes)
+# acctregister_ratecount      = 3           # max register attempts per IP ...
+# acctregister_ratetime       = 3600        # ... per this many seconds
+
+# =============================================================================
+#  human-verification gates at registration (anti-bot)
+# =============================================================================
+# --- recaptcha: hand an unverified user a token + URL; they solve it and send
+#     CAPTCHA <token>. JWT-only by default (no backend call needed). ---
+# recaptcha            = yes
+# recaptcha_secret     = CHANGE_THIS_HS256_SECRET   # signs the IP-bound token
+# recaptcha_url        = https://example.org/captcha?token=      # where to solve it
+# recaptcha_issuer     = echoIRCd                   # JWT issuer (default echoIRCd)
+# recaptcha_ttl        = 1800                        # token lifetime, secs (default 1800)
+# recaptcha_message    = Please verify you are human:
+# recaptcha_whitelistports = 6697                    # listener ports exempt (repeatable)
+# --- cloudflare_challenge: same idea via VERIFYCHALLENGE <token> ---
+# cloudflare_challenge = yes
+# cloudflare_secret    = CHANGE_THIS_HS256_SECRET
+# cloudflare_url       = https://example.org/challenge?token=
+# cloudflare_issuer    = echoIRCd
+# cloudflare_ttl       = 1800
+# cloudflare_message   = Solve the challenge:
+# cloudflare_whitelistports = 6697                   # (repeatable)
+
+# =============================================================================
+#  anti-spam / anti-drone
+# =============================================================================
+# --- antirandom: score random-looking nick/ident/realname (spam drones) ---
+# antirandom           = yes
+# antirandom_threshold = 10          # score at/above this acts (default 10)
+# antirandom_checkfull = yes         # also score ident + realname (default yes)
+# antirandom_action    = kill        # block | kill | gline | kline | zline
+# antirandom_duration  = 86400       # ban seconds for a *line action
+# antirandom_reason    = Random-looking connection rejected
+# antirandom_showfailed = no         # snotice opers on a hit (default no)
+# --- blockamsg: block mass /amsg and /ame (advertise/flood vector) ---
+# blockamsg          = yes
+# blockamsg_delay    = 3             # secs; same text to a different target list = block (default 3)
+# blockamsg_action   = block         # block | kill | gline | kline | zline
+# blockamsg_duration = 900           # ban seconds for a *line action (default 900)
+# --- connectban: z-line an IP range that opens too many connections ---
+# connectban            = yes
+# connectban_threshold  = 10         # connections from a range before it's banned (default 10)
+# connectban_duration   = 21600      # ban seconds (default 6h)
+# connectban_bootwait   = 120        # grace secs after startup (reconnect storm) (default 120)
+# connectban_gcinterval = 3600       # wipe the tally this often (default 3600)
+# connectban_ipv4cidr   = 32         # range width for IPv4 counting (default /32)
+# connectban_ipv6cidr   = 128        # range width for IPv6 counting (default /128)
+# connectban_banmessage = Too many connections from your address
+# --- hashident: replace ident with a stable opaque token per IP ---
+# hashident     = yes
+# hashident_key = CHANGE_THIS_SECRET # HMAC key; makes the mapping unforgeable
+
+# =============================================================================
+#  access restrictions
+# =============================================================================
+# --- restrictmsg: only opers/services may be PM'd by ordinary users ---
+# restrictmsg = yes
+# --- restrictchans: only opers may CREATE channels (all may still join) ---
+# restrictchans = yes
+# restrictchan  = #public-*          # glob whitelist ordinary users may create (repeatable)
+# --- restrictcommand: hold a command back from new/unregistered users ---
+# restrictcommand = LIST connectdelay=60 exemptidentified=yes exemptwebirc=yes exempttls=no exemptscore=24 reason="Please wait a bit."
+# --- disable: refuse commands to ordinary users (opers bypass); reply 421 ---
+# disabled_commands = KNOCK          # space-separated; repeatable
+# --- denychans: forbid joining channels matching a glob ---
+# badchan  = #evil* reason="Off-limits." redirect=#lobby allowopers=yes
+# goodchan = #evilgenius             # whitelist back out of a broad badchan (repeatable)
+# --- channames: forbid characters in NEW channel names ---
+# channames_deny = 　                # e.g. control codes / unwanted Unicode
+# --- maphide: hide LINKS / MAP from non-opers ---
+# maphide = yes
+# --- securelist: delay /LIST for new connections (defeats list-spam bots) ---
+# securelist                  = yes
+# securelist_waittime         = 60    # seconds connected before /LIST works (default 60)
+# securelist_exemptregistered = yes   # logged-in users are exempt (default yes)
+# securelist_exception        = *!*@trusted.example   # exempt host glob (repeatable)
+# securelist_showmsg          = yes   # tell the early lister to wait (default yes)
+# securelist_fakechans        = 5     # size of the throwaway fake list shown (default 5)
+# securelist_fakechanprefix   = #     # prefix for the fake channels
+# securelist_fakechantopic    = ...   # topic shown on the fake channels
+
+# =============================================================================
+#  extra features
+# =============================================================================
+# --- customtitle: /TITLE <name> <pass> grants a WHOIS title (+ optional vhost) ---
+# customtitle = staff s3cret staff.example.net Network Staff
+# --- randquote: greet each connecting user with a random line (repeatable) ---
+# randquote = "The best way out is always through." — Robert Frost
+# --- extjwt: /EXTJWT issues a signed token proving IRC identity to a service ---
+# extjwt_secret   = CHANGE_THIS_HS256_SECRET       # required to enable
+# extjwt_duration = 30                              # token lifetime, seconds
+# extjwt_service  = myservice CHANGE_THIS_SERVICE_SECRET   # per-service key (repeatable)
+# --- filehost: advertise a file-upload service + hand logged-in users a token ---
+# filehost_website      = https://files.example.net
+# filehost_jwt_secret   = CHANGE_THIS_HS256_SECRET
+# filehost_jwt_issuer   = echoIRCd
+# filehost_requiressl   = yes         # only issue upload tokens to TLS users (default yes)
+# filehost_token_expiry = 3600        # upload-token lifetime, secs (default 3600)
+# filehost_auth_message = Upload here:
