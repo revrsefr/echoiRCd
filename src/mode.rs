@@ -1273,7 +1273,14 @@ fn set_helpop(f: &mut UserFlags, v: bool) {
     f.helpop = v;
 }
 fn set_snomask(f: &mut UserFlags, v: bool) {
+    // the plain `+s`/`-s` path (services, or a client giving no mask) toggles the
+    // full default set; the client `+s <mask>` path in apply_user_modes refines it
     f.snomask = v;
+    f.snomask_cats = if v {
+        crate::users::DEFAULT_SNOMASK.to_string()
+    } else {
+        String::new()
+    };
 }
 
 /// An oper-only boolean flag (+H / +W / +h / +s): only an operator may **set** it;

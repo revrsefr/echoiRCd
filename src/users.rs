@@ -11,6 +11,12 @@ use crate::server::{Server, VERSION};
 use crate::socketengine::OutSink;
 use crate::Uid;
 
+/// Snomask category letters an oper subscribes to (the standard set): a announce,
+/// c connect, d dnsbl, f filter, g globops, j chancreate, k kill, l link, n nick,
+/// o oper, q quit, r rehash, t stats, u acctreg, v override, w gateway, x xline.
+/// Opers get all of them by default and narrow with `+s -c` etc.
+pub const DEFAULT_SNOMASK: &str = "acdfgjklnoqrtuvwx";
+
 /// User modes and session flags. Kept in one `Default` bag so adding a mode
 /// doesn't ripple through every `User { .. }` constructor.
 #[derive(Default)]
@@ -27,6 +33,7 @@ pub struct UserFlags {
     pub reg_only_pm: bool,    // +R (only accept PMs from logged-in users)
     pub ssl_pm: bool,         // +z (only accept PMs from TLS users)
     pub snomask: bool,        // +s (oper: receive server notices)
+    pub snomask_cats: String, // +s snomask category letters this oper is subscribed to
     pub callerid: bool,       // +g (only accept PMs from users on the ACCEPT list)
     pub showwhois: bool,      // +W (get a notice when someone WHOISes you)
     pub helpop: bool,         // +h (helpop: available for help; shown in WHOIS)
@@ -351,6 +358,7 @@ impl Server {
         if let Some(u) = self.users.get_mut(&uid) {
             u.flags.oper = true;
             u.flags.snomask = true; // opers get server notices by default
+            u.flags.snomask_cats = DEFAULT_SNOMASK.to_string(); // all categories
         }
         let nick = self
             .users
@@ -359,7 +367,7 @@ impl Server {
             .unwrap_or_default();
         self.numeric(uid, RPL_YOUREOPER, ":You are now an IRC operator");
         self.send(uid, format!(":{} MODE {nick} :+os", self.name));
-        self.snotice(&format!("{nick} is now an IRC operator"));
+        self.snotice_c('o', &format!("{nick} is now an IRC operator"));
         // operprefix: give this oper the ! prefix in every channel they're already in
         crate::modules::operprefix::grant_all(self, uid);
         // opermodes: extra umodes on oper-up
@@ -438,7 +446,7 @@ impl Server {
                 self.send(t, line.clone());
             }
             if self.conf_bool("seenicks", false) {
-                self.snotice(&format!("{old} is now known as {newnick}"));
+                self.snotice_c('n', &format!("{old} is now known as {newnick}"));
             }
             // WATCH/MONITOR: the old nick is now gone, the new one is here
             self.watch_notify_offline(&old);

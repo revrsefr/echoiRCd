@@ -77,7 +77,7 @@ fn act(s: &mut Server, uid: Uid, zone: &str, reply: Ipv4Addr) {
         None => return,
     };
     let action = s.dnsbl_action.clone();
-    s.snotice(&format!(
+    s.snotice_c('d', &format!(
         "DNSBL: {mask} is listed on {zone} ({reply}); action={action}"
     ));
     let reason = format!("{} (listed on {zone})", s.dnsbl_reason);

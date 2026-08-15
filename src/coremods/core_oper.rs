@@ -868,7 +868,7 @@ impl Command for NickLock {
             u.flags.nick_locked = true;
         }
         let by = oper_nick(s, uid);
-        s.snotice(&format!("{by} used NICKLOCK on {newnick}"));
+        s.snotice_c('v', &format!("{by} used NICKLOCK on {newnick}"));
         CmdResult::Ok
     }
 }
@@ -893,7 +893,7 @@ impl Command for NickUnlock {
             u.flags.nick_locked = false;
         }
         let by = oper_nick(s, uid);
-        s.snotice(&format!("{by} used NICKUNLOCK on {}", params[0]));
+        s.snotice_c('v', &format!("{by} used NICKUNLOCK on {}", params[0]));
         CmdResult::Ok
     }
 }
@@ -933,7 +933,7 @@ impl Command for Connect {
         let max_line = s.conf_num("max_line", crate::socketengine::DEFAULT_MAX_LINE);
         std::thread::spawn(move || crate::socketengine::connect_link(&addr, tx, counter, max_line));
         let by = oper_nick(s, uid);
-        s.snotice(&format!(
+        s.snotice_c('l', &format!(
             "{by} used CONNECT to {} ({}:{})",
             b.name, b.ip, b.port
         ));
@@ -996,7 +996,7 @@ impl Command for ChgHost {
         };
         s.change_host_ident(t, None, Some(&params[1]));
         let by = oper_nick(s, uid);
-        s.snotice(&format!(
+        s.snotice_c('v', &format!(
             "{by} used CHGHOST on {}: {}",
             params[0], params[1]
         ));
@@ -1048,7 +1048,7 @@ impl Command for ChgIdent {
         };
         s.change_host_ident(t, Some(&params[1]), None);
         let by = oper_nick(s, uid);
-        s.snotice(&format!(
+        s.snotice_c('v', &format!(
             "{by} used CHGIDENT on {}: {}",
             params[0], params[1]
         ));
@@ -1095,7 +1095,7 @@ impl Command for SaMode {
         let r = apply_mode(s, uid, params);
         s.mode_sudo = false;
         let by = oper_nick(s, uid);
-        s.snotice(&format!("{by} used SAMODE: {}", params.join(" ")));
+        s.snotice_c('v', &format!("{by} used SAMODE: {}", params.join(" ")));
         r
     }
 }
@@ -1134,7 +1134,7 @@ impl Command for SaTopic {
         s.to_channel(&key, &format!(":{prefix} TOPIC {chan} :{text}"), None);
         s.propagate_topic(uid, chan, &text);
         let by = oper_nick(s, uid);
-        s.snotice(&format!("{by} used SATOPIC on {chan}"));
+        s.snotice_c('v', &format!("{by} used SATOPIC on {chan}"));
         CmdResult::Ok
     }
 }
@@ -1195,7 +1195,7 @@ impl Command for SaKick {
         s.events
             .push_back(Hook::Part(tuid, key, "kicked".to_string()));
         let by = oper_nick(s, uid);
-        s.snotice(&format!("{by} used SAKICK on {victim} in {chan}"));
+        s.snotice_c('v', &format!("{by} used SAKICK on {victim} in {chan}"));
         CmdResult::Ok
     }
 }
@@ -1224,7 +1224,7 @@ impl Command for SaQuit {
         s.send(tuid, format!("ERROR :Closing link: (SAQUIT: {reason})"));
         s.remove_user(tuid, &format!("Quit: {reason}"));
         let by = oper_nick(s, uid);
-        s.snotice(&format!("{by} used SAQUIT on {}: {reason}", params[0]));
+        s.snotice_c('v', &format!("{by} used SAQUIT on {}: {reason}", params[0]));
         CmdResult::Ok
     }
 }
@@ -1260,7 +1260,7 @@ impl Command for ChgName {
         }
         s.notify_peers(t, &line, |c| c.setname);
         let by = oper_nick(s, uid);
-        s.snotice(&format!("{by} used CHGNAME on {}: {realname}", params[0]));
+        s.snotice_c('v', &format!("{by} used CHGNAME on {}: {realname}", params[0]));
         CmdResult::Ok
     }
 }
@@ -1317,7 +1317,7 @@ impl Command for ClearChan {
         }
         s.channels.retain(|_, c| c.keep_alive());
         let by = oper_nick(s, uid);
-        s.snotice(&format!("{by} used CLEARCHAN on {chan}"));
+        s.snotice_c('v', &format!("{by} used CLEARCHAN on {chan}"));
         CmdResult::Ok
     }
 }
@@ -1434,7 +1434,7 @@ impl Command for SwhoisCmd {
             }
         }
         let by = oper_nick(s, uid);
-        s.snotice(&format!("{by} used SWHOIS on {}: {text}", params[0]));
+        s.snotice_c('v', &format!("{by} used SWHOIS on {}: {text}", params[0]));
         CmdResult::Ok
     }
 }

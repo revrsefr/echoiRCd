@@ -847,7 +847,7 @@ impl Server {
                 .get(&uid)
                 .map(|u| u.nick.clone())
                 .unwrap_or_default();
-            self.snotice(&format!("{nick} used oper override to join {name}"));
+            self.snotice_c('v', &format!("{nick} used oper override to join {name}"));
         }
         let is_new = !self.channels.contains_key(&key);
         let ch = self
@@ -876,7 +876,7 @@ impl Server {
                 .get(&uid)
                 .map(|u| u.nick.clone())
                 .unwrap_or_default();
-            self.snotice(&format!("{who} created channel {name}"));
+            self.snotice_c('j', &format!("{who} created channel {name}"));
         }
 
         // JOIN broadcast — extended-join clients also get the account + realname

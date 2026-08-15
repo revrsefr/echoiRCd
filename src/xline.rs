@@ -261,7 +261,7 @@ impl Server {
             setter: setter.to_string(),
             expires: if duration == 0 { 0 } else { n + duration },
         });
-        self.snotice(&format!(
+        self.snotice_c('x', &format!(
             "{setter} added a {}-line on {mask}: {reason}",
             kind.tag()
         ));

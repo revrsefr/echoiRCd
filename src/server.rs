@@ -843,12 +843,19 @@ impl Server {
     }
 
     /// Send a server notice to every operator who has snomask (+s) on.
+    /// A server notice in the general `a` (announcement) category.
     pub fn snotice(&self, msg: &str) {
+        self.snotice_c('a', msg);
+    }
+
+    /// A server notice tagged with snomask category `cat` — only opers whose snomask
+    /// (`+s`) subscribes to that letter receive it. Logging tees are unconditional.
+    pub fn snotice_c(&self, cat: char, msg: &str) {
         self.log_push(msg);
         let opers: Vec<Uid> = self
             .users
             .iter()
-            .filter(|(_, u)| u.flags.oper && u.flags.snomask)
+            .filter(|(_, u)| u.flags.oper && u.flags.snomask_cats.contains(cat))
             .map(|(&u, _)| u)
             .collect();
         let jval = self.json_log_value(msg, &opers);

@@ -48,7 +48,7 @@ impl Module for Filter {
             Some(u) => (u.prefix(), u.addr.ip().to_string()),
             None => return ModResult::Deny,
         };
-        s.snotice(&format!(
+        s.snotice_c('f', &format!(
             "FILTER: {mask} matched a filter (action={action}): {reason}"
         ));
         match action.as_str() {
@@ -171,7 +171,7 @@ impl Command for FilterCmd {
                         duration,
                         reason,
                     });
-                    s.snotice(&format!("{nick} added FILTER {pattern} (action={action})"));
+                    s.snotice_c('f', &format!("{nick} added FILTER {pattern} (action={action})"));
                 }
             }
         }

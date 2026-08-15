@@ -98,6 +98,7 @@ pub const RPL_WHOISBOT: u16 = 335; // "is a bot" (umode +B)
 pub const RPL_WHOISACCOUNT: u16 = 330; // "<nick> <account> :is logged in as"
 pub const RPL_WHOISREGNICK: u16 = 307; // "is a registered nick" (identified to an account)
 pub const RPL_WHOISMODES: u16 = 379; // oper/self-only: "is using modes +<umodes>"
+pub const RPL_SNOMASKIS: u16 = 8; // "+<mask> :Server notice mask" after a +s change
 pub const ERR_NEEDREGGEDNICK: u16 = 477; // chan +R/+M — must be logged into an account
 pub const RPL_WHOISHOST: u16 = 378; // oper-only: real host/ip behind a cloak
 pub const RPL_WHOISSECURE: u16 = 671; // "is using a secure connection" (sslinfo)

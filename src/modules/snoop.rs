@@ -18,7 +18,7 @@ impl Module for Snoop {
             .map(|u| (u.nick.clone(), u.ident.clone(), u.host.clone()));
         if let Some((nick, ident, host)) = info {
             eprintln!("[snoop] connect {nick} ({ident}@{host})");
-            srv.snotice(&format!("Client connecting: {nick} ({ident}@{host})"));
+            srv.snotice_c('c', &format!("Client connecting: {nick} ({ident}@{host})"));
         }
     }
     fn on_join(&mut self, srv: &mut Server, uid: Uid, chan: &str) {
@@ -30,7 +30,7 @@ impl Module for Snoop {
         let nick = srv.users.get(&uid).map(|u| u.nick.clone());
         eprintln!("[snoop] quit uid={uid} ({reason})");
         if let Some(nick) = nick {
-            srv.snotice(&format!("Client exiting: {nick} ({reason})"));
+            srv.snotice_c('q', &format!("Client exiting: {nick} ({reason})"));
         }
     }
 }

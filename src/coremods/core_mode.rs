@@ -236,6 +236,68 @@ pub fn svs_set_chan_modes(s: &mut Server, target: &str, modestring: &str, args: 
     true
 }
 
+/// Apply a client `+s`/`-s` snomask change. Oper-only. `+s` with a mask edits the
+/// subscribed categories (`+cq` adds, `-c` removes, `*` all); `+s` with no mask
+/// subscribes to everything; `-s` clears it. Emits `RPL_SNOMASKIS` (008) and returns
+/// whether the `s` mode char should appear in the MODE echo.
+fn apply_snomask(s: &mut Server, uid: Uid, adding: bool, param: Option<&str>) -> bool {
+    if !s.is_oper(uid) {
+        s.numeric(
+            uid,
+            crate::numeric::ERR_NOPRIVILEGES,
+            ":Permission denied - only operators may set a server notice mask",
+        );
+        return false;
+    }
+    let mut cats: std::collections::BTreeSet<char> = s
+        .users
+        .get(&uid)
+        .map(|u| u.flags.snomask_cats.chars().collect())
+        .unwrap_or_default();
+    let all = || crate::users::DEFAULT_SNOMASK.chars().collect::<std::collections::BTreeSet<char>>();
+    if !adding {
+        cats.clear();
+    } else {
+        match param {
+            None => cats = all(),
+            Some(p) => {
+                let mut sign = '+';
+                for c in p.chars() {
+                    match c {
+                        '+' => sign = '+',
+                        '-' => sign = '-',
+                        '*' => cats = if sign == '+' { all() } else { Default::default() },
+                        c if crate::users::DEFAULT_SNOMASK.contains(c) => {
+                            if sign == '+' {
+                                cats.insert(c);
+                            } else {
+                                cats.remove(&c);
+                            }
+                        }
+                        _ => {} // ignore unknown snomask letters
+                    }
+                }
+            }
+        }
+    }
+    let mask: String = cats.iter().collect();
+    let on = !mask.is_empty();
+    if let Some(u) = s.users.get_mut(&uid) {
+        u.flags.snomask = on;
+        u.flags.snomask_cats = mask.clone();
+    }
+    s.numeric(
+        uid,
+        crate::numeric::RPL_SNOMASKIS,
+        &format!("+{mask} :Server notice mask"),
+    );
+    if adding {
+        on
+    } else {
+        true
+    }
+}
+
 /// User modes: dispatched to the [`crate::mode`] `UserMode` handler objects.
 fn apply_user_modes(s: &mut Server, uid: Uid, target: &str, params: &[String]) -> CmdResult {
     let me = s
@@ -264,12 +326,29 @@ fn apply_user_modes(s: &mut Server, uid: Uid, target: &str, params: &[String]) -
     let mut sign = '+';
     let mut applied = String::new();
     let mut last = ' ';
+    let mut argi = 2usize; // params[2..] are mode arguments (the +s snomask mask)
     for c in modestring.chars() {
         if c == '+' || c == '-' {
             sign = c;
             continue;
         }
         let adding = sign == '+';
+        // +s is a parametric snomask mode: it consumes the following mask argument
+        if c == 's' {
+            let param = if adding {
+                let p = params.get(argi).cloned();
+                if p.is_some() {
+                    argi += 1;
+                }
+                p
+            } else {
+                None
+            };
+            if apply_snomask(s, uid, adding, param.as_deref()) {
+                emit(&mut applied, &mut last, sign, c);
+            }
+            continue;
+        }
         let Some(handler) = user_mode(c) else {
             s.numeric(
                 uid,

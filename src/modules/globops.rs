@@ -28,7 +28,7 @@ impl Command for GlobopsCmd {
             return CmdResult::Fail;
         }
         let nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
-        s.snotice(&format!("GLOBOPS from {nick}: {}", params.join(" ")));
+        s.snotice_c('g', &format!("GLOBOPS from {nick}: {}", params.join(" ")));
         CmdResult::Ok
     }
 }
