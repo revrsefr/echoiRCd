@@ -284,13 +284,20 @@ impl Command for Authenticate {
                     s.numeric(uid, ERR_SASLABORTED, ":SASL authentication aborted");
                     CmdResult::Ok
                 } else if arg.eq_ignore_ascii_case("PLAIN") {
+                    if !have_services {
+                        s.numeric(
+                            uid,
+                            ERR_SASLFAIL,
+                            ":SASL authentication failed (services are not available)",
+                        );
+                        return CmdResult::Fail;
+                    }
                     if let Some(u) = s.users.get_mut(&uid) {
                         u.sasl_mech = Some("PLAIN".to_string());
                     }
-                    if have_services {
-                        s.sasl_relay(uid, "S PLAIN"); // start the exchange at services
-                    }
-                    s.send(uid, "AUTHENTICATE +".to_string());
+                    // start the exchange at services; its `C` challenge is relayed
+                    // back to the client as the `AUTHENTICATE +` prompt
+                    s.sasl_relay(uid, "S PLAIN");
                     CmdResult::Ok
                 } else if arg.eq_ignore_ascii_case("EXTERNAL") {
                     // CertFP: only works on TLS with a client cert; the fingerprint
@@ -301,8 +308,9 @@ impl Command for Authenticate {
                             if let Some(u) = s.users.get_mut(&uid) {
                                 u.sasl_mech = Some("EXTERNAL".to_string());
                             }
+                            // services replies with a `C` challenge we relay as the
+                            // client's `AUTHENTICATE +` prompt
                             s.sasl_relay(uid, &format!("S EXTERNAL {fp}"));
-                            s.send(uid, "AUTHENTICATE +".to_string());
                             CmdResult::Ok
                         }
                         _ => {

@@ -758,8 +758,11 @@ impl Server {
             .map(|sv| sv.via)
     }
 
-    /// Relay one SASL step for local client `uid` to the services server:
-    /// `:<our-sid> SASL <client-uuid> <rest>`. No-op if SASL services aren't linked.
+    /// Relay one SASL step for local client `uid` to the services server, wrapped
+    /// as `:<our-sid> ENCAP <svc> SASL <client-uuid> * <mode> [data...]`. `rest` is
+    /// the mode letter and its data (e.g. `S PLAIN`, `C <b64>`). The agent field is
+    /// `*` — services accept it, so we needn't track their agent id. No-op with no
+    /// SASL services linked.
     pub fn sasl_relay(&self, uid: Uid, rest: &str) {
         let (Some(via), Some(uuid)) = (
             self.sasl_link(),
@@ -767,33 +770,43 @@ impl Server {
         ) else {
             return;
         };
-        self.link_out(via, format!(":{} SASL {uuid} {rest}", self.sid));
+        let mask = self
+            .servers
+            .values()
+            .find(|s| s.via == via)
+            .map(|s| s.sid.clone())
+            .unwrap_or_else(|| "*".to_string());
+        self.link_out(via, format!(":{} ENCAP {mask} SASL {uuid} * {rest}", self.sid));
     }
 
-    /// A SASL message from services: `:<svcsid> SASL <client-uuid> <type> …`.
+    /// A SASL step from services, unwrapped from its ENCAP: params are
+    /// `<agent> <client-uuid> <mode> [data...]`.
     ///   `C <data>` → relay a server challenge to the client as `AUTHENTICATE`;
-    ///   `D S [account]` → success (log in + 900/903); `D <other>` → fail (904).
+    ///   `D S` → success (the account was set by a preceding `METADATA accountname`,
+    ///   so we emit 900/903 for it); `D <other>` → fail (904).
     fn link_sasl(&mut self, from: Uid, msg: &Message) {
-        if msg.params.len() < 2 {
+        if msg.params.len() < 3 {
             return;
         }
-        let Some(&uid) = self.uuid_local.get(&msg.params[0]) else {
+        let client = msg.params[1].clone();
+        let Some(&uid) = self.uuid_local.get(&client) else {
             // not our client — route toward the server that owns them
-            self.forward_to_target(&msg.params[0], msg, from);
+            self.forward_to_target(&client, msg, from);
             return;
         };
-        match msg.params[1].as_str() {
+        match msg.params[2].as_str() {
             "C" => {
-                if let Some(data) = msg.params.get(2) {
+                if let Some(data) = msg.params.get(3) {
                     self.send(uid, format!("AUTHENTICATE {data}"));
                 }
             }
             "D" => {
-                let ok = msg.params.get(2).map(|t| t == "S").unwrap_or(false);
-                let account = msg.params.get(3).cloned().unwrap_or_default();
-                if ok && !account.is_empty() {
-                    self.set_login(uid, &account);
-                }
+                let ok = msg.params.get(3).map(|t| t == "S").unwrap_or(false);
+                let account = self
+                    .users
+                    .get(&uid)
+                    .and_then(|u| u.account.clone())
+                    .unwrap_or_default();
                 self.sasl_done(uid, ok, &account);
                 if let Some(u) = self.users.get_mut(&uid) {
                     u.sasl_mech = None;
