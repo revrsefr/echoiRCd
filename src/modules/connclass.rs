@@ -386,6 +386,18 @@ pub fn on_register(s: &mut Server, uid: Uid) -> AuthOutcome {
     else {
         return AuthOutcome::Proceed;
     };
+    // enforce per-IP clone caps here too: a class matched only by a host mask isn't
+    // picked at connect, so `assign` never got to check them
+    if let Some(max) = class.localmax {
+        if local_clones(s, &ip, &class.name, uid) >= max {
+            return AuthOutcome::Reject("Too many connections from your address".into());
+        }
+    }
+    if let Some(max) = class.globalmax {
+        if global_clones(s, &ip, uid) >= max {
+            return AuthOutcome::Reject("Too many connections from your address".into());
+        }
+    }
     // cheap cert check before the (possibly slow) password verify
     if class.ssl_trusted && !has_cert {
         return AuthOutcome::Reject("Your connection class requires a client certificate".into());

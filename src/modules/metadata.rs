@@ -144,10 +144,22 @@ impl Command for MetadataCmd {
                     return CmdResult::Fail;
                 };
                 let value = params.get(3).cloned(); // no value => delete the key
+                let maxval = s.conf_num("metadata_maxvalue", 512usize);
+                let maxkeys = s.conf_num("metadata_maxkeys", 32usize);
                 {
                     let st = s.ext.get_or_insert_with::<MetaStore>(MetaStore::default);
                     match &value {
                         Some(v) => {
+                            // bound value length and per-target key count so a client
+                            // can't grow the store without limit
+                            let cur = st.0.get(&key);
+                            let overlong = v.len() > maxval;
+                            let too_many = cur.map(|m| m.len() >= maxkeys && !m.contains_key(&mkey))
+                                .unwrap_or(false);
+                            if overlong || too_many {
+                                s.fail(uid, "METADATA", "KEY_INVALID", "value too long or too many keys");
+                                return CmdResult::Fail;
+                            }
                             st.0.entry(key.clone())
                                 .or_default()
                                 .insert(mkey.clone(), v.clone());

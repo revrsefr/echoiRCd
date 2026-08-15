@@ -50,6 +50,24 @@ fn file_type(filename: &str) -> &'static str {
     }
 }
 
+/// Escape a string for embedding in a JSON string literal (the tag carries JSON,
+/// so a `"`/`\` in the url or filename would otherwise break it).
+fn json_esc(v: &str) -> String {
+    let mut o = String::with_capacity(v.len());
+    for c in v.chars() {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            '\n' => o.push_str("\\n"),
+            '\r' => o.push_str("\\r"),
+            '\t' => o.push_str("\\t"),
+            c if (c as u32) < 0x20 => o.push_str(&format!("\\u{:04x}", c as u32)),
+            c => o.push(c),
+        }
+    }
+    o
+}
+
 /// IRCv3 message-tag value escape (JSON is full of spaces, which would split the line).
 fn escape_tag(v: &str) -> String {
     let mut out = String::with_capacity(v.len());
@@ -114,8 +132,8 @@ impl Module for FileHost {
             let filename = &url[files_prefix.len().min(url.len())..];
             let meta = format!(
                 "{{\"url\":\"{}\",\"filename\":\"{}\",\"type\":\"{}\"}}",
-                url,
-                filename,
+                json_esc(url),
+                json_esc(filename),
                 file_type(filename)
             );
             // fold the metadata onto this message's relayed tag block (message-tags

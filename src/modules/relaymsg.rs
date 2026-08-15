@@ -56,7 +56,7 @@ impl Command for RelayMsg {
             );
             return CmdResult::Fail;
         }
-        if s.find_nick(nick).is_some() {
+        if s.find_nick(nick).is_some() || s.remote_nick.contains_key(&nick.to_ascii_lowercase()) {
             return bad(s, "RELAYMSG spoofed nick is already in use");
         }
         if nick.chars().any(|c| FORBIDDEN.contains(c)) {

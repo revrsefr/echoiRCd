@@ -42,6 +42,23 @@ fn json_arr(chars: impl IntoIterator<Item = char>) -> String {
     format!("[{}]", items.join(","))
 }
 
+/// Escape a string for embedding in a JSON string literal.
+fn json_esc(s: &str) -> String {
+    let mut o = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            '\n' => o.push_str("\\n"),
+            '\r' => o.push_str("\\r"),
+            '\t' => o.push_str("\\t"),
+            c if (c as u32) < 0x20 => o.push_str(&format!("\\u{:04x}", c as u32)),
+            c => o.push(c),
+        }
+    }
+    o
+}
+
 pub fn commands() -> Vec<Box<dyn Command>> {
     vec![Box::new(ExtJwt)]
 }
@@ -106,15 +123,19 @@ impl Command for ExtJwt {
                     v
                 })
                 .unwrap_or_default();
-            chan_claims = format!(",\"channel\":\"{target}\",\"cmodes\":{}", json_arr(cmodes));
+            chan_claims = format!(
+                ",\"channel\":\"{}\",\"cmodes\":{}",
+                json_esc(&target),
+                json_arr(cmodes)
+            );
         }
 
         let claims = format!(
             "{{\"exp\":{},\"iss\":\"{}\",\"sub\":\"{}\",\"account\":\"{}\",\"umodes\":{}{}}}",
             now() + duration,
-            s.name,
-            nick,
-            account,
+            json_esc(&s.name),
+            json_esc(&nick),
+            json_esc(&account),
             umodes,
             chan_claims
         );

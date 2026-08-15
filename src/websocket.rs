@@ -326,6 +326,13 @@ fn io_loop<S: WsStream>(
                         Ok(Some((frame, consumed))) => {
                             acc.drain(..consumed);
                             match frame.opcode {
+                                // RFC 6455 §5.5: control frames must be ≤125 bytes and
+                                // never fragmented — drop the connection otherwise
+                                OP_CLOSE | OP_PING | OP_PONG
+                                    if !frame.fin || frame.payload.len() > 125 =>
+                                {
+                                    return
+                                }
                                 OP_CLOSE => return,
                                 OP_PING => {
                                     let _ = stream.write_all(&encode(OP_PONG, &frame.payload));

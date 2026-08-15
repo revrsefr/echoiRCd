@@ -79,18 +79,25 @@ impl Server {
     /// Mint the next network-wide UID for a local user: our SID + 6 base-26 chars
     /// (e.g. `0AAAAAAAB`).
     pub fn next_uuid(&mut self) -> String {
-        let mut x = self.uuid_counter;
-        self.uuid_counter += 1;
-        let mut suffix = [b'A'; 6];
-        for c in suffix.iter_mut().rev() {
-            *c = b'A' + (x % 26) as u8;
-            x /= 26;
+        loop {
+            let mut x = self.uuid_counter;
+            self.uuid_counter += 1;
+            let mut suffix = [b'A'; 6];
+            for c in suffix.iter_mut().rev() {
+                *c = b'A' + (x % 26) as u8;
+                x /= 26;
+            }
+            let uuid = format!(
+                "{}{}",
+                self.sid,
+                std::str::from_utf8(&suffix).unwrap_or("AAAAAA")
+            );
+            // after 26^6 mints the counter wraps and could re-issue a still-live id;
+            // skip any that's in use so uuids stay unique
+            if !self.uuid_local.contains_key(&uuid) && !self.remote_users.contains_key(&uuid) {
+                return uuid;
+            }
         }
-        format!(
-            "{}{}",
-            self.sid,
-            std::str::from_utf8(&suffix).unwrap_or("AAAAAA")
-        )
     }
 
     /// Register a new server-link connection. An **outbound** link introduces
@@ -966,6 +973,9 @@ impl Server {
                 .map(|u| u.nick.clone())
                 .unwrap_or_default();
             self.send(dst, format!(":{prefix} {cmd} {nick} :{text}"));
+        } else {
+            // a remote target reached via another link (multi-hop) — forward onward
+            self.forward_to_target(&target, msg, via);
         }
     }
 

@@ -134,7 +134,17 @@ pub fn handle(s: &mut Server, action: &str, params: &str) -> Result<String, RpcE
             let uid = resolve(s, params).ok_or_else(|| RpcError::not_found("no such user"))?;
             let oper = json::get_str(params, "oper").or_else(|| json::get_str(params, "type"));
             match oper {
-                Some(name) if !name.is_empty() => s.oper_up(uid),
+                Some(name) if !name.is_empty() => {
+                    // apply the named oper block's level; reject an unknown name rather
+                    // than silently opering with defaults
+                    match s.opers.iter().find(|o| o.0 == name).map(|o| o.2) {
+                        Some(level) => {
+                            s.oper_up(uid);
+                            crate::modules::operlevels::set(s, uid, level);
+                        }
+                        None => return Err(RpcError::invalid_params("no such oper block")),
+                    }
+                }
                 _ => svs_set_user_modes(s, uid, "-o"), // de-oper
             }
             Ok(obj(&[("result", "true".into())]))

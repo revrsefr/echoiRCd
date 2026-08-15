@@ -99,7 +99,13 @@ pub fn cloak_host(key: &str, host: &str) -> String {
         format!("{alpha}.{beta}.{gamma}{IP_SUFFIX}")
     } else {
         let parts: Vec<&str> = host.split('.').filter(|p| !p.is_empty()).collect();
-        if parts.len() >= 3 {
+        // reveal the registered domain suffix only for a real hostname (its TLD has a
+        // letter); a numeric dotted string that slipped past the IP parsers is fully
+        // cloaked so no octets leak in cleartext
+        let real_host = parts
+            .last()
+            .is_some_and(|t| t.bytes().any(|b| b.is_ascii_alphabetic()));
+        if parts.len() >= 3 && real_host {
             let suffix = parts[parts.len() - 2..].join(".");
             format!("{}.{suffix}", label(key, host, 8))
         } else {

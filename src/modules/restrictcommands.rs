@@ -147,8 +147,9 @@ impl Module for RestrictCommands {
                 return ModResult::Passthru;
             }
         }
-        // connect-delay: allowed once connected long enough
-        if r.connectdelay > 0 && now().saturating_sub(signon) >= r.connectdelay {
+        // connect-delay: allowed once connected long enough (0 = no delay, so the
+        // command is allowed immediately)
+        if now().saturating_sub(signon) >= r.connectdelay {
             return ModResult::Passthru;
         }
 

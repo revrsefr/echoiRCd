@@ -716,17 +716,22 @@ impl Server {
         // config-overridable (see modules::customprefix)
         let include_oper = self.conf_bool("operprefix", false) || self.conf_bool("ojoin", false);
         let prefix = crate::modules::customprefix::isupport(include_oper);
-        let mut lines = vec![format!(
+        let mut tokens: Vec<String> = format!(
             "CHANTYPES=# PREFIX={prefix} CHANMODES=beIgXw,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnprstuz EXTBAN=,Gbcgjmnrsy WATCH={maxwatch} MONITOR={maxmon} SILENCE={maxsil} CALLERID=g WHOX CHATHISTORY={chathist} MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN={maxnick} CHANNELLEN={maxchan} NETWORK={}",
             self.network
-        )];
+        )
+        .split(' ')
+        .map(String::from)
+        .collect();
         if let Some(tok) = crate::modules::network_icon::isupport(self) {
-            lines.push(tok);
+            tokens.push(tok);
         }
         if let Some(tok) = crate::modules::filehost::isupport(self) {
-            lines.push(tok);
+            tokens.push(tok);
         }
-        lines
+        // at most 13 tokens per 005 line (the RFC-suggested cap) so strict clients
+        // don't truncate trailing tokens
+        tokens.chunks(13).map(|c| c.join(" ")).collect()
     }
 
     /// Emit the ISUPPORT numerics to `uid`. When `batched` (the client negotiated
