@@ -292,14 +292,20 @@ impl Command for Whois {
                 &format!("{nick} :is a registered nick"),
             );
         }
-        // 379: the user's active modes — visible to opers and to the user themselves
+        // 379: the user's active modes — visible to opers and to the user themselves.
+        // When they carry a snomask (+s), it's appended as a second token.
         if is_self || asker_oper {
-            let modes = s
+            let (modes, sno) = s
                 .users
                 .get(&tuid)
-                .map(|u| u.flags.umodes())
+                .map(|u| (u.flags.umodes(), u.flags.snomask_cats.clone()))
                 .unwrap_or_default();
-            s.numeric(uid, RPL_WHOISMODES, &format!("{nick} :is using modes {modes}"));
+            let line = if sno.is_empty() {
+                format!("{nick} :is using modes {modes}")
+            } else {
+                format!("{nick} :is using modes {modes} +{sno}")
+            };
+            s.numeric(uid, RPL_WHOISMODES, &line);
         }
         // 330: logged in to a services account
         if let Some(acct) = &account {
