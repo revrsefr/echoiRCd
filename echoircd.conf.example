@@ -421,6 +421,8 @@ amu_target    = both
 # connectban_ipv4cidr   = 32         # range width for IPv4 counting (default /32)
 # connectban_ipv6cidr   = 128        # range width for IPv6 counting (default /128)
 # connectban_banmessage = Too many connections from your address
+# connectban_exempt     = 10.0.0.0/8   # never ban this glob/CIDR (repeatable);
+#                                       # loopback (127.0.0.0/8, ::1) is always exempt
 # --- hashident: replace ident with a stable opaque token per IP ---
 # hashident     = yes
 # hashident_key = CHANGE_THIS_SECRET # HMAC key; makes the mapping unforgeable

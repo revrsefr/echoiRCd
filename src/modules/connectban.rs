@@ -67,10 +67,23 @@ fn range_of(ip: IpAddr, v4cidr: u8, v6cidr: u8) -> (String, String) {
     }
 }
 
+/// Whether `ip` matches a configured `connectban_exempt` glob/CIDR (repeatable).
+fn connectban_exempt(s: &Server, ip: IpAddr) -> bool {
+    let ipstr = ip.to_string();
+    s.conf_all("connectban_exempt")
+        .iter()
+        .any(|m| crate::modules::connclass::ip_matches(m, &ipstr))
+}
+
 /// Record a new connection from `ip`, z-lining its range if it crosses the limit.
 /// No-op when connectban is disabled or still inside the boot-grace window.
 pub fn on_connect(s: &mut Server, ip: IpAddr) {
     if !s.conf_bool("connectban", false) {
+        return;
+    }
+    // never connect-ban loopback (local services, bridges, admin tooling all dial in
+    // over 127.0.0.1 / ::1) or an admin-configured exempt range
+    if ip.is_loopback() || connectban_exempt(s, ip) {
         return;
     }
     let threshold = s.conf_num("connectban_threshold", 10u32).max(2);

@@ -24,6 +24,10 @@ fn cfg(s: &Server) -> Option<(u32, u64)> {
 /// Record a connection from `ip`; returns true when it exceeds the limit (the
 /// caller should refuse it). No-op → false when connflood is unconfigured.
 pub fn over_limit(s: &mut Server, ip: IpAddr) -> bool {
+    // loopback (local services / bridges / admin) is never connection-throttled
+    if ip.is_loopback() {
+        return false;
+    }
     let Some((max, secs)) = cfg(s) else {
         return false;
     };
