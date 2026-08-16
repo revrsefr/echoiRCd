@@ -47,6 +47,19 @@ oper = admin CHANGE_THIS_PASSWORD
 # Changing it re-cloaks everyone.
 cloak_key  = CHANGE_THIS_TO_A_LONG_RANDOM_HEX_STRING
 
+# cloak_method — how +x cloaks are built. Repeatable/ordered: the first method
+# that applies to a user wins. Default (unset) = hmac-sha256. Methods:
+#   hmac-sha256  keyed, subnet-preserving host hash (the default)
+#   account      logged-in users show <cloak_account_prefix>/<account>
+#   fingerprint  TLS clients show <cloak_cert_prefix>/<hash of their cert>
+#   static       everyone shows the fixed cloak_static_host
+# e.g. account cloak for logged-in users, host hash for everyone else:
+# cloak_method = account
+# cloak_method = hmac-sha256
+# cloak_account_prefix = account          # default: account
+# cloak_cert_prefix    = cert             # default: cert
+# cloak_static_host    = users.example.net
+
 # reverse-DNS clients on connect (the "*** Looking up your hostname..." notices).
 # on (default) performs the lookup and reports the result; off skips it (bare IP).
 resolve_hosts = on
