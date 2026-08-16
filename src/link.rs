@@ -167,6 +167,8 @@ impl Server {
             "NICK" if registered => self.link_nick_recv(uid, msg),
             "QUIT" if registered => self.link_quit_recv(uid, msg),
             "KILL" if registered => self.link_kill_recv(uid, msg),
+            "ADDLINE" if registered => self.link_addline_recv(uid, msg),
+            "DELLINE" if registered => self.link_delline_recv(uid, msg),
             "PRIVMSG" if registered => self.link_message_recv(uid, msg, false),
             "NOTICE" if registered => self.link_message_recv(uid, msg, true),
             "JOIN" if registered => self.link_join_recv(uid, msg),
@@ -324,6 +326,7 @@ impl Server {
         self.link_out(uid, format!("BURST {}", now()));
         self.burst_users(uid);
         self.burst_channels(uid);
+        self.burst_xlines(uid);
         self.link_out(uid, "ENDBURST".to_string());
         eprintln!("[link] linked {name} ({sid}) — {desc}");
     }
@@ -1069,6 +1072,73 @@ impl Server {
         }
     }
 
+    /// `:<src> ADDLINE <type> <mask> <setter> <settime> <duration> :<reason>` — a
+    /// network ban set on a peer (e.g. a services akill). Apply and relay onward.
+    fn link_addline_recv(&mut self, via: Uid, msg: &Message) {
+        if msg.params.len() < 6 {
+            return;
+        }
+        let Some(kind) = crate::xline::XKind::from_tag(&msg.params[0]) else {
+            return;
+        };
+        let duration: u64 = msg.params[4].parse().unwrap_or(0);
+        self.add_xline(kind, &msg.params[1], duration, &msg.params[2], &msg.params[5]);
+        self.propagate(&msg.to_wire(), Some(via));
+    }
+
+    /// `:<src> DELLINE <type> <mask>` — remove a network ban set on a peer.
+    fn link_delline_recv(&mut self, via: Uid, msg: &Message) {
+        if msg.params.len() < 2 {
+            return;
+        }
+        let Some(kind) = crate::xline::XKind::from_tag(&msg.params[0]) else {
+            return;
+        };
+        if self.remove_xline(kind, &msg.params[1]) {
+            self.propagate(&msg.to_wire(), Some(via));
+        }
+    }
+
+    /// Announce a locally-set network ban to peers as ADDLINE.
+    pub fn propagate_addline(&self, kind: &str, mask: &str, setter: &str, duration: u64, reason: &str) {
+        self.propagate(
+            &format!(":{} ADDLINE {kind} {mask} {setter} {} {duration} :{reason}", self.sid, now()),
+            None,
+        );
+    }
+
+    /// Announce removal of a locally-set network ban to peers as DELLINE.
+    pub fn propagate_delline(&self, kind: &str, mask: &str) {
+        self.propagate(&format!(":{} DELLINE {kind} {mask}", self.sid), None);
+    }
+
+    /// Burst our current x-lines to a freshly-linked peer (SVSHOLD keeps its own path).
+    fn burst_xlines(&self, link_uid: Uid) {
+        for x in &self.xlines {
+            if matches!(x.kind, crate::xline::XKind::Svshold) {
+                continue;
+            }
+            let dur = if x.expires == 0 {
+                0
+            } else {
+                x.expires.saturating_sub(now())
+            };
+            self.link_out(
+                link_uid,
+                format!(
+                    ":{} ADDLINE {} {} {} {} {} :{}",
+                    self.sid,
+                    x.kind.tag(),
+                    x.mask,
+                    x.setter,
+                    now(),
+                    dur,
+                    x.reason
+                ),
+            );
+        }
+    }
+
     fn link_message_recv(&mut self, via: Uid, msg: &Message, notice: bool) {
         // :<srcuuid> PRIVMSG <#chan|dstuuid> :<text>
         let cmd = if notice { "NOTICE" } else { "PRIVMSG" };
@@ -1644,6 +1714,18 @@ impl Server {
         }
         let topic = msg.params.last().cloned().unwrap_or_default();
         let ts = msg.params[2].parse().unwrap_or_else(|_| now());
+        // keep whichever topic was set later: drop an FTOPIC older than the one we hold.
+        if let Some(cur_ts) = self
+            .channels
+            .get(&key)
+            .and_then(|c| c.topic.as_ref())
+            .map(|t| t.ts)
+        {
+            if ts < cur_ts {
+                self.propagate(&msg.to_wire(), Some(via));
+                return;
+            }
+        }
         // an explicit setter mask sits at param[3] when present (>=5 params); else
         // fall back to the source's display name
         let setter = if msg.params.len() >= 5 {
@@ -1695,6 +1777,17 @@ impl Server {
         let key = chan.to_ascii_lowercase();
         if !self.channels.contains_key(&key) {
             return;
+        }
+        // FMODE timestamp arbitration: a change stamped NEWER than our channel TS lost
+        // the timestamp war and is dropped (services stamp ts 1, so theirs always win).
+        if msg.command == "FMODE" {
+            if let Some(ts) = msg.params.get(1).and_then(|t| t.parse::<u64>().ok()) {
+                let ours = self.channels.get(&key).map(|c| c.created).unwrap_or(0);
+                if ts > ours {
+                    self.propagate(&msg.to_wire(), Some(via));
+                    return;
+                }
+            }
         }
         let Some(modestring) = msg.params.get(mode_idx).cloned() else {
             return;
@@ -1890,13 +1983,29 @@ impl Server {
         let ts: u64 = msg.params[1].parse().unwrap_or_else(|_| now());
         let modes = msg.params[2].clone();
         let memberlist = msg.params[3].clone();
-        let is_new = !self.channels.contains_key(&key);
+        // TS arbitration (lower wins). Fresh channel or equal TS: adopt the remote
+        // modes, members keep their status. Incoming TS OLDER than ours → we lost:
+        // adopt it, drop our modes and de-status every member. Incoming TS NEWER →
+        // we won: its members join stripped of status.
+        let our_ts = self.channels.get(&key).map(|c| c.created);
+        let remote_wins = our_ts.is_some_and(|ours| ts < ours);
+        let we_win = our_ts.is_some_and(|ours| ts > ours);
+        let keep_status = !we_win;
         {
             let ch = self
                 .channels
                 .entry(key.clone())
                 .or_insert_with(|| Channel::new(&chan));
-            if is_new {
+            if our_ts.is_none() || remote_wins {
+                if remote_wins {
+                    ch.modes = ChanModes::default();
+                    for m in ch.members.values_mut() {
+                        m.clear_status();
+                    }
+                    for m in ch.rmembers.values_mut() {
+                        m.clear_status();
+                    }
+                }
                 ch.created = ts;
                 let mut sign = '+';
                 for c in modes.chars() {
@@ -1915,8 +2024,10 @@ impl Server {
                 continue; // our own user, or one we don't know yet
             }
             let mut m = Member::default();
-            for pc in letters.chars() {
-                m.set_prefix(pc, true);
+            if keep_status {
+                for pc in letters.chars() {
+                    m.set_prefix(pc, true);
+                }
             }
             adds.push((uuid, m));
         }

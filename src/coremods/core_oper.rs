@@ -664,6 +664,7 @@ fn do_xline(s: &mut Server, uid: Uid, params: &[String], kind: XKind) -> CmdResu
         .unwrap_or_default();
     if params.len() < 2 {
         let word = if s.remove_xline(kind, &mask) {
+            s.propagate_delline(kind.tag(), &mask);
             "removed"
         } else {
             "not found"
@@ -684,6 +685,7 @@ fn do_xline(s: &mut Server, uid: Uid, params: &[String], kind: XKind) -> CmdResu
         .cloned()
         .unwrap_or_else(|| "No reason given".to_string());
     s.add_xline(kind, &mask, dur, &nick, &reason);
+    s.propagate_addline(kind.tag(), &mask, &nick, dur, &reason);
     CmdResult::Ok
 }
 
@@ -808,6 +810,7 @@ impl Command for Rline {
             .unwrap_or_default();
         if params.len() < 2 {
             let word = if s.remove_xline(XKind::Rline, &pattern) {
+                s.propagate_delline("R", &pattern);
                 "removed"
             } else {
                 "not found"
@@ -831,6 +834,7 @@ impl Command for Rline {
             .cloned()
             .unwrap_or_else(|| "No reason given".to_string());
         s.add_xline(XKind::Rline, &pattern, dur, &nick, &reason);
+        s.propagate_addline("R", &pattern, &nick, dur, &reason);
         s.enforce_rline(&pattern, &reason);
         CmdResult::Ok
     }
