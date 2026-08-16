@@ -1817,4 +1817,39 @@ mod tests {
         assert!(!valid_sid("0A")); // too short
         assert!(!valid_sid("0ABC")); // too long
     }
+
+    // A services bot IJOINing an existing channel with a status token (e.g. "ao")
+    // must join holding those prefix modes. Regression: an early S2S build accepted
+    // the IJOIN but ignored the token, so BotServ bots joined bare and had to be
+    // opped by hand.
+    #[test]
+    fn ijoin_applies_status_modes() {
+        use crate::config::Config;
+        use std::sync::atomic::AtomicU64;
+        use std::sync::{mpsc, Arc};
+        let (tx, _rx) = mpsc::channel();
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+        // a services bot the network already knows about
+        s.remote_users.insert(
+            "42SB00000".to_string(),
+            RemoteUser {
+                uuid: "42SB00000".to_string(),
+                nick: "echoIRCd".into(),
+                ident: "echo".into(),
+                host: "services".into(),
+                realname: "bot".into(),
+                account: None,
+                ip: String::new(),
+                modes: "iHkB".into(),
+                sid: "42S".into(),
+                via: 1,
+            },
+        );
+        // echo joins it to an existing channel as protected admin + op (+ao)
+        let msg = crate::message::parse(":42SB00000 IJOIN #echoircd 16 1 ao").unwrap();
+        s.link_ijoin_recv(1, &msg);
+        let m = &s.channels["#echoircd"].rmembers["42SB00000"];
+        assert!(m.admin, "bot should hold +a (&) from the IJOIN status token");
+        assert!(m.op, "bot should hold +o (@) from the IJOIN status token");
+    }
 }
