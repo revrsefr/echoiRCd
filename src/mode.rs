@@ -85,6 +85,7 @@ static CHAN_MODES: &[&(dyn ChanMode + Sync)] = &[
     &INVEX,
     &KEY,
     &LIMIT,
+    &REGISTERED_CHAN,
     &MODERATED,
     &NOEXTERNAL,
     &TOPICLOCK,
@@ -434,6 +435,44 @@ impl ChanMode for OperFlagChan {
         }
         if let Some(c) = s.channels.get_mut(key) {
             (self.set)(&mut c.modes, adding);
+        }
+        Applied::Yes(None)
+    }
+}
+
+// --- +r registered (services-only) ------------------------------------------
+
+/// `+r` — a registered channel. Set only by services (under `mode_sudo`, e.g. a
+/// ChanServ FMODE); a client that tries it gets a clean "services-only" rejection
+/// instead of "unknown mode char".
+struct RegisteredChan;
+static REGISTERED_CHAN: RegisteredChan = RegisteredChan;
+impl ChanMode for RegisteredChan {
+    fn letter(&self) -> char {
+        'r'
+    }
+    fn wants_param(&self, _adding: bool) -> bool {
+        false
+    }
+    fn apply(
+        &self,
+        s: &mut Server,
+        chan: &str,
+        key: &str,
+        uid: Uid,
+        adding: bool,
+        _param: Option<&str>,
+    ) -> Applied {
+        if !s.mode_sudo {
+            s.numeric(
+                uid,
+                ERR_NOPRIVILEGES,
+                &format!("{chan} :Channel mode +r may only be set by services"),
+            );
+            return Applied::No;
+        }
+        if let Some(c) = s.channels.get_mut(key) {
+            c.modes.registered = adding;
         }
         Applied::Yes(None)
     }
@@ -1439,7 +1478,7 @@ mod tests {
 
     #[test]
     fn registry_covers_all_channel_modes() {
-        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuBQAPJUdKXwD".chars() {
+        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuBQAPJUdKXwDr".chars() {
             assert!(chan_mode(c).is_some(), "missing handler for +{c}");
         }
         assert!(chan_mode('y').is_none());
