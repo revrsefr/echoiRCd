@@ -168,6 +168,7 @@ impl Server {
             "QUIT" if registered => self.link_quit_recv(uid, msg),
             "KILL" if registered => self.link_kill_recv(uid, msg),
             "SAVE" if registered => self.link_save_recv(uid, msg),
+            "INVITE" if registered => self.link_invite_recv(uid, msg),
             "ADDLINE" if registered => self.link_addline_recv(uid, msg),
             "DELLINE" if registered => self.link_delline_recv(uid, msg),
             "PRIVMSG" if registered => self.link_message_recv(uid, msg, false),
@@ -1138,6 +1139,37 @@ impl Server {
     pub fn route_kill(&self, killer: &str, target: &str, reason: &str) {
         if let Some(v) = self.link_toward(target) {
             self.link_out(v, format!(":{killer} KILL {target} :{reason}"));
+        }
+    }
+
+    /// Route an INVITE toward the server that owns a remote `target` uuid.
+    pub fn route_invite(&self, inviter: &str, target: &str, chan: &str) {
+        if let Some(v) = self.link_toward(target) {
+            self.link_out(v, format!(":{inviter} INVITE {target} {chan}"));
+        }
+    }
+
+    /// `:<src> INVITE <target> <chan>` — deliver an invite to a local target (record
+    /// it so they bypass +i, and notify them), or forward toward a remote one.
+    fn link_invite_recv(&mut self, via: Uid, msg: &Message) {
+        let Some(src) = msg.source.clone() else {
+            return;
+        };
+        let (Some(target), Some(chan)) =
+            (msg.params.first().cloned(), msg.params.get(1).cloned())
+        else {
+            return;
+        };
+        if let Some(&luid) = self.uuid_local.get(&target) {
+            let key = chan.to_ascii_lowercase();
+            if let Some(ch) = self.channels.get_mut(&key) {
+                ch.invites.insert(luid);
+            }
+            let prefix = self.uuid_prefix(&src).unwrap_or_else(|| src.clone());
+            let nick = self.users.get(&luid).map(|u| u.nick.clone()).unwrap_or_default();
+            self.send(luid, format!(":{prefix} INVITE {nick} :{chan}"));
+        } else {
+            self.forward_to_target(&target, msg, via);
         }
     }
 

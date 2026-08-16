@@ -281,6 +281,18 @@ impl Command for Invite {
             return CmdResult::Fail;
         }
         let Some(tuid) = s.find_nick(tnick) else {
+            // remote target: route the invite to the server that owns it
+            if let Some((tuuid, _)) = s.find_remote(tnick) {
+                let iuuid = s.users[&uid].uuid.clone();
+                s.route_invite(&iuuid, &tuuid, chan);
+                let rnick = s
+                    .remote_users
+                    .get(&tuuid)
+                    .map(|r| r.nick.clone())
+                    .unwrap_or_else(|| tnick.to_string());
+                s.numeric(uid, RPL_INVITING, &format!("{rnick} {chan}"));
+                return CmdResult::Ok;
+            }
             s.numeric(
                 uid,
                 ERR_NOSUCHNICK,
