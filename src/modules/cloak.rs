@@ -33,17 +33,72 @@ impl Module for Cloak {
 
     /// Compute the cloak once, at connect, and cloak the user by default (+x).
     fn on_user_connect(&mut self, srv: &mut Server, uid: Uid) {
-        let Some(key) = srv.cloak_key.clone() else {
-            return; // no key configured: cloaking disabled
+        let Some(cloak) = compute_cloak(srv, uid) else {
+            return; // cloaking disabled / no method produced a result
         };
-        let Some(host) = srv.users.get(&uid).map(|u| u.host.clone()) else {
-            return;
-        };
-        let cloak = cloak_host(&key, &host);
         if let Some(u) = srv.users.get_mut(&uid) {
             u.cloak = cloak;
             u.flags.cloak = true; // cloaked by default; -x is oper-only
         }
+    }
+}
+
+/// Compute a user's cloak from the ordered `cloak_method` config (first that
+/// applies wins); with none configured, the keyed host cloak. Methods:
+///   account       `<cloak_account_prefix>/<account>` for logged-in users
+///   fingerprint   `<cloak_cert_prefix>/<hash>` for TLS clients with a cert
+///   static        the fixed `cloak_static_host`
+///   hmac-sha256   the keyed, subnet-preserving host cloak (the default)
+/// A method that doesn't apply (e.g. `account` for a user who isn't logged in)
+/// falls through to the next; the keyed host cloak is the final fallback.
+pub fn compute_cloak(srv: &Server, uid: Uid) -> Option<String> {
+    let u = srv.users.get(&uid)?;
+    let configured = srv.conf_all("cloak_method");
+    let methods: Vec<&str> = if configured.is_empty() {
+        vec!["hmac-sha256"]
+    } else {
+        configured.iter().map(|s| s.as_str()).collect()
+    };
+    for m in methods {
+        match m {
+            "account" => {
+                if let Some(acct) = &u.account {
+                    let prefix = srv.conf("cloak_account_prefix").unwrap_or("account");
+                    return Some(format!("{prefix}/{}", sanitize_label(acct)));
+                }
+            }
+            "fingerprint" | "certfp" => {
+                if let (Some(key), Some(fp)) = (srv.cloak_key.as_deref(), u.certfp.as_deref()) {
+                    let prefix = srv.conf("cloak_cert_prefix").unwrap_or("cert");
+                    return Some(format!("{prefix}/{}", label(key, fp, 10)));
+                }
+            }
+            "static" => {
+                if let Some(h) = srv.conf("cloak_static_host").filter(|h| !h.is_empty()) {
+                    return Some(h.to_string());
+                }
+            }
+            _ => {
+                let key = srv.cloak_key.as_deref()?;
+                return Some(cloak_host(key, &u.host));
+            }
+        }
+    }
+    // configured methods all fell through (e.g. account-only, not logged in)
+    let key = srv.cloak_key.as_deref()?;
+    Some(cloak_host(key, &u.host))
+}
+
+/// Turn a value into a host-safe label: letters/digits/`-`/`.` kept, else `-`.
+fn sanitize_label(s: &str) -> String {
+    let out: String = s
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '.' { c } else { '-' })
+        .collect();
+    if out.is_empty() {
+        "unknown".to_string()
+    } else {
+        out
     }
 }
 
@@ -117,6 +172,14 @@ pub fn cloak_host(key: &str, host: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanitize_label_is_host_safe() {
+        assert_eq!(sanitize_label("Reverse"), "Reverse");
+        assert_eq!(sanitize_label("a b!c@d"), "a-b-c-d");
+        assert_eq!(sanitize_label("na.me-1"), "na.me-1");
+        assert_eq!(sanitize_label(""), "unknown");
+    }
 
     #[test]
     fn v4_cloak_is_deterministic_and_hides_the_ip() {
