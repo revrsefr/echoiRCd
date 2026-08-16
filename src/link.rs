@@ -931,6 +931,16 @@ impl Server {
         }
         let sid = msg.source.clone().unwrap_or_default();
         let uuid = msg.params[0].clone();
+        // reject a malformed or duplicate UID instead of corrupting the routing
+        // tables: the uuid is 9 chars carrying the announcing server's 3-char SID,
+        // and must not already be present.
+        if sid.len() != 3
+            || uuid.len() != 9
+            || !uuid.starts_with(&sid)
+            || self.remote_users.contains_key(&uuid)
+        {
+            return;
+        }
         let nick = msg.params[2].clone();
         let host = msg.params[4].clone(); // displayed host
         let ident = msg.params[6].clone(); // displayed ident
