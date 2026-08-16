@@ -982,6 +982,12 @@ impl Server {
         self.propagate(&msg.to_wire(), Some(via));
     }
 
+    /// Whether a remote source uuid is genuinely reached through link `via` — guards
+    /// against a peer spoofing a user that lives behind a different link.
+    fn sourced_via(&self, uuid: &str, via: Uid) -> bool {
+        self.remote_users.get(uuid).map(|ru| ru.via) == Some(via)
+    }
+
     fn link_nick_recv(&mut self, via: Uid, msg: &Message) {
         // :<uuid> NICK <newnick> [<ts>]
         let Some(uuid) = msg.source.clone() else {
@@ -990,6 +996,9 @@ impl Server {
         let Some(newnick) = msg.params.first().cloned() else {
             return;
         };
+        if !self.sourced_via(&uuid, via) {
+            return;
+        }
         // collision with a local user: kill the local holder (same policy as an
         // incoming UID clash) so the network converges to one owner for the nick
         if let Some(luid) = self.find_nick(&newnick) {
@@ -1016,6 +1025,9 @@ impl Server {
         let Some(uuid) = msg.source.clone() else {
             return;
         };
+        if !self.sourced_via(&uuid, via) {
+            return;
+        }
         let reason = msg.params.first().cloned().unwrap_or_default();
         self.drop_remote_user(&uuid, &reason);
         self.propagate(&format!(":{uuid} QUIT :{reason}"), Some(via));
@@ -1242,6 +1254,9 @@ impl Server {
         let Some(uuid) = msg.source.clone() else {
             return;
         };
+        if !self.sourced_via(&uuid, via) {
+            return;
+        }
         let Some(chan) = msg.params.first().cloned() else {
             return;
         };
