@@ -224,13 +224,28 @@ impl Command for Whois {
         };
         let chans: Vec<String> = keys
             .iter()
-            .filter_map(|k| s.channels.get(k).map(|c| c.name.clone()))
+            .filter_map(|k| s.channels.get(k))
+            .filter(|c| {
+                // a +s/+p channel is shown only to the target itself, an oper, or a
+                // fellow member — never leaked to an outside asker.
+                is_self
+                    || asker_oper
+                    || (!c.modes.secret && !c.modes.private)
+                    || c.members.contains_key(&uid)
+            })
+            .map(|c| {
+                let pfx = c.members.get(&tuid).map(|m| m.prefix_char()).unwrap_or("");
+                format!("{pfx}{}", c.name)
+            })
             .collect();
         s.numeric(
             uid,
             RPL_WHOISUSER,
             &format!("{nick} {ident} {disp} * :{realname}"),
         );
+        if let Some(away) = s.users.get(&tuid).and_then(|u| u.flags.away.clone()) {
+            s.numeric(uid, RPL_AWAY, &format!("{nick} :{away}"));
+        }
         if bot {
             s.numeric(uid, RPL_WHOISBOT, &format!("{nick} :is a bot"));
         }
@@ -434,7 +449,20 @@ impl Command for Who {
                 None => Vec::new(),
             }
         } else if let Some(tuid) = s.find_nick(target) {
-            vec![(tuid, "*".to_string(), String::new())]
+            // hide a +i (invisible) user from a WHO by someone who shares no channel
+            // with them (self and opers always see them).
+            let hidden = s.users.get(&tuid).map(|u| u.flags.invisible).unwrap_or(false)
+                && tuid != uid
+                && !asker_oper
+                && !s
+                    .channels
+                    .values()
+                    .any(|c| c.members.contains_key(&uid) && c.members.contains_key(&tuid));
+            if hidden {
+                Vec::new()
+            } else {
+                vec![(tuid, "*".to_string(), String::new())]
+            }
         } else {
             Vec::new()
         };

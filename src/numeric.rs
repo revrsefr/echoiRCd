@@ -139,6 +139,7 @@ pub const ERR_CHANNELISFULL: u16 = 471;
 pub const ERR_UNKNOWNMODE: u16 = 472;
 pub const ERR_INVITEONLYCHAN: u16 = 473;
 pub const ERR_BADCHANNELKEY: u16 = 475;
+pub const ERR_BANLISTFULL: u16 = 478; // +b/+e/+I list at its per-channel cap
 pub const ERR_CHANOPRIVSNEEDED: u16 = 482;
 pub const ERR_SECUREONLYCHAN: u16 = 489; // can't join a +z channel without TLS
 pub const ERR_ALLMUSTSSL: u16 = 490; // can't set +z while a member isn't on TLS

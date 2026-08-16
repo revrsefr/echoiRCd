@@ -1047,10 +1047,18 @@ impl Server {
                 names.push(' ');
             }
         }
+        // visibility symbol: @ secret (+s), * private (+p), = public
+        let vis = if ch.modes.secret {
+            '@'
+        } else if ch.modes.private {
+            '*'
+        } else {
+            '='
+        };
         self.numeric(
             uid,
             RPL_NAMREPLY,
-            &format!("= {} :{}", ch.name, names.trim_end()),
+            &format!("{vis} {} :{}", ch.name, names.trim_end()),
         );
         self.numeric(
             uid,
@@ -1179,6 +1187,7 @@ impl Server {
     /// +j: record a join attempt on `key`; true if joins are (now) locked out.
     pub fn joinflood_check(&mut self, key: &str) -> bool {
         let n = now();
+        let dur = self.conf_num("joinflood_duration", 60u64);
         let Some(ch) = self.channels.get_mut(key) else {
             return false;
         };
@@ -1191,7 +1200,7 @@ impl Server {
         ch.joinflood_hits.retain(|&t| n.saturating_sub(t) < f.secs);
         ch.joinflood_hits.push(n);
         if ch.joinflood_hits.len() as u32 > f.count {
-            ch.joinflood_until = n + 60; // lock the channel for 60s
+            ch.joinflood_until = n + dur; // lock joins for the configured window
             ch.joinflood_hits.clear();
             return true;
         }
@@ -1202,6 +1211,7 @@ impl Server {
     /// is (now) locked out — the caller denies the change if so. Opers exempt.
     pub fn nickflood_blocked(&mut self, uid: Uid) -> Option<String> {
         let n = now();
+        let dur = self.conf_num("nickflood_duration", 60u64);
         let keys: Vec<String> = self
             .users
             .get(&uid)
@@ -1222,7 +1232,7 @@ impl Server {
             ch.nickflood_hits.retain(|&t| n.saturating_sub(t) < f.secs);
             ch.nickflood_hits.push(n);
             if ch.nickflood_hits.len() as u32 > f.count {
-                ch.nickflood_until = n + 60;
+                ch.nickflood_until = n + dur;
                 ch.nickflood_hits.clear();
                 blocked.get_or_insert_with(|| ch.name.clone());
             }

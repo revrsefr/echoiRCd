@@ -161,20 +161,29 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
     };
     if target.starts_with('#') {
         let key = target.to_ascii_lowercase();
-        let member = s
+        let (member, no_external) = s
             .channels
             .get(&key)
-            .map(|c| c.members.contains_key(&uid))
-            .unwrap_or(false);
+            .map(|c| (c.members.contains_key(&uid), c.modes.no_external))
+            .unwrap_or((false, true));
         if !member {
-            if !notice {
-                s.numeric(
-                    uid,
-                    ERR_CANNOTSENDTOCHAN,
-                    &format!("{target} :Cannot send to channel"),
-                );
+            // +n (default): only members may message the channel. With -n an external
+            // user may — unless banned (+b, not +e-excepted), so -n can't evade a ban.
+            let banned = s
+                .channels
+                .get(&key)
+                .map(|c| s.ban_list_hit(uid, &c.bans) && !s.ban_list_hit(uid, &c.excepts))
+                .unwrap_or(true);
+            if no_external || banned {
+                if !notice {
+                    s.numeric(
+                        uid,
+                        ERR_CANNOTSENDTOCHAN,
+                        &format!("{target} :Cannot send to channel"),
+                    );
+                }
+                return CmdResult::Fail;
             }
-            return CmdResult::Fail;
         }
         // +U opmoderated — an unprivileged user's message isn't blocked; it's routed
         // to channel ops only (below). It also overrides +m's block for that purpose.

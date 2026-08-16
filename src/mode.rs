@@ -499,7 +499,9 @@ impl ChanMode for Key {
         param: Option<&str>,
     ) -> Applied {
         if adding {
-            let Some(k) = param else {
+            // a key is one non-empty token: reject space/comma/':'/empty, else the
+            // MODE/FMODE wire line splits and peers parse only the first word.
+            let Some(k) = param.filter(|k| !k.is_empty() && !k.contains([' ', ',', ':'])) else {
                 return Applied::No;
             };
             if let Some(c) = s.channels.get_mut(key) {
@@ -536,7 +538,8 @@ impl ChanMode for Limit {
         param: Option<&str>,
     ) -> Applied {
         if adding {
-            let Some(n) = param.and_then(|p| p.parse::<u32>().ok()) else {
+            // reject +l 0 and non-numeric: a zero limit would seal the channel.
+            let Some(n) = param.and_then(|p| p.parse::<u32>().ok()).filter(|&n| n > 0) else {
                 return Applied::No;
             };
             if let Some(c) = s.channels.get_mut(key) {
@@ -763,17 +766,31 @@ impl ChanMode for ListMode {
                 .get(&uid)
                 .map(|u| u.nick.clone())
                 .unwrap_or_default();
+            let sudo = s.mode_sudo;
+            let maxlist = s.conf_num("maxbans", 100usize);
+            let mut full = false;
             if let Some(c) = s.channels.get_mut(key) {
                 let list = self.kind.list_mut(c);
-                if list.iter().any(|b| b.mask == mask) {
+                // dedup case-insensitively: glob_match lowercases at match time, so
+                // `*!*@Host` and `*!*@host` catch the same users — store only one.
+                if list.iter().any(|b| b.mask.eq_ignore_ascii_case(&mask)) {
                     return Applied::No; // already present
                 }
-                list.push(Ban {
-                    mask: mask.clone(),
-                    setter,
-                    ts: now(),
-                    expires: None,
-                });
+                // cap the list for local users; a burst / services set bypasses it.
+                if !sudo && list.len() >= maxlist {
+                    full = true;
+                } else {
+                    list.push(Ban {
+                        mask: mask.clone(),
+                        setter,
+                        ts: now(),
+                        expires: None,
+                    });
+                }
+            }
+            if full {
+                s.numeric(uid, ERR_BANLISTFULL, &format!("{chan} {mask} :Channel list is full"));
+                return Applied::No;
             }
             Applied::Yes(Some(mask))
         } else {
@@ -781,7 +798,7 @@ impl ChanMode for ListMode {
             if let Some(c) = s.channels.get_mut(key) {
                 let list = self.kind.list_mut(c);
                 let before = list.len();
-                list.retain(|b| b.mask != mask);
+                list.retain(|b| !b.mask.eq_ignore_ascii_case(&mask));
                 removed = list.len() < before;
             }
             if removed {
