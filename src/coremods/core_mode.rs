@@ -101,7 +101,10 @@ pub fn apply_mode(s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
             .chars()
             .filter(|c| *c != '+' && *c != '-')
             .all(|c| chan_mode(c).is_some_and(|h| h.is_list()));
-    if !pure_list_query && s.rank(uid, &key) < RANK_HALFOP {
+    // Viewing autoop (+w), exemptchanops (+X) or filter (+g) exposes trusted
+    // host/pattern lists, so require half-op to read them (public ban lists stay open).
+    let sensitive_view = pure_list_query && modestring.chars().any(|c| matches!(c, 'w' | 'X' | 'g'));
+    if (!pure_list_query || sensitive_view) && s.rank(uid, &key) < RANK_HALFOP {
         s.numeric(
             uid,
             ERR_CHANOPRIVSNEEDED,
