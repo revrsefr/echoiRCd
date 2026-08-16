@@ -808,6 +808,11 @@ impl Server {
             return;
         };
         if key == "accountname" {
+            // account login is a services authority: ignore it from an ordinary peer
+            // (each hop re-checks, so forwarding an unauthorised one stays harmless).
+            if !self.source_is_service(msg) {
+                return;
+            }
             if value.is_empty() || value == "*" {
                 self.logout(tuid);
             } else {
