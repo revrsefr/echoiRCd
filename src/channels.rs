@@ -1019,7 +1019,7 @@ impl Server {
         // +u auditorium: a non-op viewer only sees ops (plus themselves)
         let hide =
             ch.modes.auditorium && ch.members.get(&uid).map(|m| m.rank()).unwrap_or(0) < RANK_OP;
-        let mut names = String::new();
+        let mut toks: Vec<String> = Vec::new();
         for (m, flags) in &ch.members {
             if hide && *m != uid && flags.rank() < RANK_OP {
                 continue;
@@ -1034,10 +1034,8 @@ impl Server {
                 flags.prefix_char().to_string()
             };
             if let Some(u) = self.users.get(m) {
-                names.push_str(&p);
                 let shown = if uhost { u.prefix() } else { u.nick.clone() };
-                names.push_str(&shown);
-                names.push(' ');
+                toks.push(format!("{p}{shown}"));
             }
         }
         // remote members (users on linked servers)
@@ -1051,10 +1049,8 @@ impl Server {
                 } else {
                     mem.prefix_char().to_string()
                 };
-                names.push_str(&p);
                 let shown = if uhost { ru.prefix() } else { ru.nick.clone() };
-                names.push_str(&shown);
-                names.push(' ');
+                toks.push(format!("{p}{shown}"));
             }
         }
         // visibility symbol: @ secret (+s), * private (+p), = public
@@ -1065,11 +1061,23 @@ impl Server {
         } else {
             '='
         };
-        self.numeric(
-            uid,
-            RPL_NAMREPLY,
-            &format!("{vis} {} :{}", ch.name, names.trim_end()),
-        );
+        // fold members across multiple 353 lines so a big channel stays under 512 bytes
+        let askern = self.users.get(&uid).map(|u| u.nick.len()).unwrap_or(1);
+        let budget = 500usize.saturating_sub(self.name.len() + askern + ch.name.len() + 12);
+        let mut line = String::new();
+        for t in &toks {
+            if !line.is_empty() && line.len() + 1 + t.len() > budget {
+                self.numeric(uid, RPL_NAMREPLY, &format!("{vis} {} :{line}", ch.name));
+                line.clear();
+            }
+            if !line.is_empty() {
+                line.push(' ');
+            }
+            line.push_str(t);
+        }
+        if !line.is_empty() {
+            self.numeric(uid, RPL_NAMREPLY, &format!("{vis} {} :{line}", ch.name));
+        }
         self.numeric(
             uid,
             RPL_ENDOFNAMES,
