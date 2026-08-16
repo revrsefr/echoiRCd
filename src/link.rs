@@ -167,6 +167,7 @@ impl Server {
             "NICK" if registered => self.link_nick_recv(uid, msg),
             "QUIT" if registered => self.link_quit_recv(uid, msg),
             "KILL" if registered => self.link_kill_recv(uid, msg),
+            "SAVE" if registered => self.link_save_recv(uid, msg),
             "ADDLINE" if registered => self.link_addline_recv(uid, msg),
             "DELLINE" if registered => self.link_delline_recv(uid, msg),
             "PRIVMSG" if registered => self.link_message_recv(uid, msg, false),
@@ -945,7 +946,7 @@ impl Server {
         {
             return;
         }
-        let nick = msg.params[2].clone();
+        let mut nick = msg.params[2].clone();
         let host = msg.params[4].clone(); // displayed host
         let ident = msg.params[6].clone(); // displayed ident
         let ip = msg.params[7].clone();
@@ -955,12 +956,14 @@ impl Server {
             .map(|m| m.trim_start_matches('+').to_string())
             .unwrap_or_default();
         let realname = msg.params.last().cloned().unwrap_or_default();
-        // nick collision: a local holder is killed (both sides do this, so both
-        // vanish deterministically); an existing remote holder simply wins.
+        // nick collision with a local user: resolve by timestamp, force-renaming the
+        // loser to its UUID rather than killing anyone.
         if let Some(luid) = self.find_nick(&nick) {
-            self.send(luid, "ERROR :Closing link: Nick collision".to_string());
-            self.remove_user(luid, "Nick collision");
-            return;
+            let nickts: u64 = msg.params[1].parse().unwrap_or_else(|_| now());
+            let rsvc = self.server_is_service(&sid);
+            if self.resolve_collision(via, luid, nickts, &ident, &ip, &uuid, rsvc) {
+                nick = uuid.clone(); // the incoming user lost: introduce it under its UUID
+            }
         }
         if self.remote_nick.contains_key(&nick.to_ascii_lowercase()) {
             return;
@@ -992,6 +995,64 @@ impl Server {
         self.remote_users.get(uuid).map(|ru| ru.via) == Some(via)
     }
 
+    /// Resolve a nick collision between local user `luid` and an incoming remote
+    /// user by timestamp: same user@ip → the OLDER changes; else the NEWER changes;
+    /// equal TS → both. The loser is force-renamed to its UUID — locally right here
+    /// (with the normal NICK propagation), remotely via a SAVE back to the source.
+    /// Returns true if the REMOTE user must take its UUID.
+    fn resolve_collision(
+        &mut self,
+        via: Uid,
+        luid: Uid,
+        remote_ts: u64,
+        remote_user: &str,
+        remote_ip: &str,
+        remote_uuid: &str,
+        remote_is_service: bool,
+    ) -> bool {
+        let (local_ts, local_user, local_ip, local_uuid) = match self.users.get(&luid) {
+            Some(u) => (
+                u.nick_ts,
+                u.ident.clone(),
+                u.addr.ip().to_string(),
+                u.uuid.clone(),
+            ),
+            None => return true,
+        };
+        let same = local_user == remote_user && local_ip == remote_ip;
+        // a network service always keeps its nick; the local user is the one to yield
+        let (change_local, change_remote) = if remote_is_service {
+            (true, false)
+        } else {
+            collision_decision(local_ts, remote_ts, same)
+        };
+        if change_local {
+            self.set_nick(luid, &local_uuid);
+        }
+        if change_remote {
+            self.link_out(via, format!(":{} SAVE {} {}", self.sid, remote_uuid, remote_ts));
+        }
+        change_remote
+    }
+
+    /// `:<src> SAVE <uuid> <ts>` — force our local user to its UUID if the ts still
+    /// matches (it lost a collision elsewhere), or forward toward a remote target.
+    fn link_save_recv(&mut self, via: Uid, msg: &Message) {
+        let (Some(target), Some(ts)) = (msg.params.first().cloned(), msg.params.get(1).cloned())
+        else {
+            return;
+        };
+        let ts: u64 = ts.parse().unwrap_or(0);
+        if let Some(&luid) = self.uuid_local.get(&target) {
+            if self.users.get(&luid).map(|u| u.nick_ts) == Some(ts) {
+                let uuid = self.users[&luid].uuid.clone();
+                self.set_nick(luid, &uuid);
+            }
+        } else {
+            self.forward_to_target(&target, msg, via);
+        }
+    }
+
     fn link_nick_recv(&mut self, via: Uid, msg: &Message) {
         // :<uuid> NICK <newnick> [<ts>]
         let Some(uuid) = msg.source.clone() else {
@@ -1003,11 +1064,19 @@ impl Server {
         if !self.sourced_via(&uuid, via) {
             return;
         }
-        // collision with a local user: kill the local holder (same policy as an
-        // incoming UID clash) so the network converges to one owner for the nick
+        // collision with a local user: resolve by timestamp (force-rename the loser
+        // to its UUID) rather than killing.
         if let Some(luid) = self.find_nick(&newnick) {
-            self.send(luid, "ERROR :Closing link: Nick collision".to_string());
-            self.remove_user(luid, "Nick collision");
+            let remote_ts = msg.params.get(1).and_then(|t| t.parse().ok()).unwrap_or_else(now);
+            let (ruser, rip) = self
+                .remote_users
+                .get(&uuid)
+                .map(|r| (r.ident.clone(), r.ip.clone()))
+                .unwrap_or_default();
+            let rsvc = self.uuid_is_service(&uuid);
+            if self.resolve_collision(via, luid, remote_ts, &ruser, &rip, &uuid, rsvc) {
+                return; // remote lost: it keeps its old nick; a SAVE will move it to UUID
+            }
         }
         let old = match self.remote_users.get_mut(&uuid) {
             Some(ru) => {
@@ -2044,6 +2113,18 @@ impl Server {
     }
 }
 
+/// Nick-collision outcome `(change_local, change_remote)` by timestamp: same
+/// user@ip → the older nick changes; different → the newer changes; equal → both.
+fn collision_decision(local_ts: u64, remote_ts: u64, same_person: bool) -> (bool, bool) {
+    if remote_ts == local_ts {
+        (true, true)
+    } else if (same_person && remote_ts < local_ts) || (!same_person && remote_ts > local_ts) {
+        (false, true)
+    } else {
+        (true, false)
+    }
+}
+
 /// Split a bursted member token `ov,0AAAAAAAB` (with an optional `:membid`
 /// suffix) into its status mode letters and the bare uuid.
 fn split_member(tok: &str) -> (String, String) {
@@ -2055,6 +2136,19 @@ fn split_member(tok: &str) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nick_collision_timestamp_rules() {
+        // equal TS → both change
+        assert_eq!(collision_decision(100, 100, true), (true, true));
+        assert_eq!(collision_decision(100, 100, false), (true, true));
+        // same user@ip (reconnect): the OLDER nick changes
+        assert_eq!(collision_decision(200, 100, true), (false, true)); // remote older → remote
+        assert_eq!(collision_decision(100, 200, true), (true, false)); // local older → local
+        // different user@ip: the NEWER nick changes
+        assert_eq!(collision_decision(100, 200, false), (false, true)); // remote newer → remote
+        assert_eq!(collision_decision(200, 100, false), (true, false)); // local newer → local
+    }
 
     #[test]
     fn sid_validation() {

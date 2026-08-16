@@ -300,6 +300,7 @@ pub struct User {
     pub certfp: Option<String>, // TLS client-cert fingerprint (SASL EXTERNAL / CertFP)
     pub account: Option<String>, // logged-in account name (set by services)
     pub signon: u64,   // unix secs at registration (WHOIS 317)
+    pub nick_ts: u64,  // unix secs the current nick was taken (nick-collision arbitration)
     pub addr: SocketAddr,
     pub port: u16,     // listener port the client connected to (connectclass port=, ident)
     pub registered: bool,
@@ -450,6 +451,7 @@ impl Server {
         self.nick_index.insert(newnick.to_ascii_lowercase(), uid);
         if let Some(u) = self.users.get_mut(&uid) {
             u.nick = newnick.to_string();
+            u.nick_ts = crate::server::now();
         }
         if registered {
             let line = format!(":{prefix} NICK :{newnick}");
