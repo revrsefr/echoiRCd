@@ -19,6 +19,9 @@ bind       = 0.0.0.0:6667
 bind_tls   = 0.0.0.0:6697
 tls_cert   = ./tls/cert.pem
 tls_key    = ./tls/key.pem
+# The cert is re-read on REHASH, so a renewed cert applies without a restart.
+# SNI: serve a different cert for a given hostname. Repeatable.
+# tls_sni  = irc.example.net ./tls/example.crt ./tls/example.key
 
 motd = Welcome to echoIRCd — a from-scratch IRC daemon in Rust.
 motd = Edit the MOTD in your echoircd.conf.
