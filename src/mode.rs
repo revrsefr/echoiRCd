@@ -1165,6 +1165,7 @@ static USER_MODES: &[&(dyn UserMode + Sync)] = &[
     &HIDEOPER,
     &REGDEAF,
     &REGISTERED,
+    &SERVPROTECT,
     &SSLPM,
     &SNOMASK,
     &CALLERID,
@@ -1403,6 +1404,26 @@ impl UserMode for RegisteredMode {
     }
     fn apply(&self, _s: &mut Server, _uid: Uid, _adding: bool) -> bool {
         false // services-managed; not user-settable
+    }
+}
+
+/// `+k` — servprotect. Set only by a linked server / services (under `mode_sudo`);
+/// a client can never toggle it. Marks the user as protected from KILL/KICK/SA*.
+struct ServProtect;
+static SERVPROTECT: ServProtect = ServProtect;
+impl UserMode for ServProtect {
+    fn letter(&self) -> char {
+        'k'
+    }
+    fn apply(&self, s: &mut Server, uid: Uid, adding: bool) -> bool {
+        if !s.mode_sudo {
+            return false; // server/services-only
+        }
+        if let Some(u) = s.users.get_mut(&uid) {
+            u.flags.servprotect = adding;
+            return true;
+        }
+        false
     }
 }
 

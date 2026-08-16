@@ -39,6 +39,7 @@ pub struct UserFlags {
     pub helpop: bool,         // +h (helpop: available for help; shown in WHOIS)
     pub deny_uncommon: bool,  // +c (only users sharing a channel may PM you)
     pub nick_locked: bool,    // NICKLOCK: services/oper holds this nick (no self-change)
+    pub servprotect: bool,    // +k (services-only: can't be KILLed/KICKed/SA-commanded)
     pub via_webirc: bool,     // connected through a WEBIRC gateway (securitygroups)
     pub via_websocket: bool,  // connected over the WebSocket transport (ws://, wss://)
     pub away: Option<String>, // AWAY message, if set
@@ -61,6 +62,9 @@ impl UserFlags {
         }
         if self.bot {
             s.push('B');
+        }
+        if self.servprotect {
+            s.push('k');
         }
         if self.deaf {
             s.push('D');
@@ -353,6 +357,27 @@ impl Server {
         self.users.get(&uid).map(|u| u.flags.oper).unwrap_or(false)
     }
 
+    /// Whether the user `uid` is servprotected (+k) — a service that must not be
+    /// KILLed / KICKed / SA-commanded.
+    pub fn uid_servprotected(&self, uid: Uid) -> bool {
+        self.users
+            .get(&uid)
+            .map(|u| u.flags.servprotect)
+            .unwrap_or(false)
+    }
+
+    /// Whether the nick `n` (local user or a remote services pseudo-client) is
+    /// servprotected (+k). Remote users carry their modes as a letter string.
+    pub fn nick_servprotected(&self, n: &str) -> bool {
+        if let Some(uid) = self.find_nick(n) {
+            return self.uid_servprotected(uid);
+        }
+        self.find_remote(n)
+            .and_then(|(uuid, _)| self.remote_users.get(&uuid))
+            .map(|ru| ru.modes.contains('k'))
+            .unwrap_or(false)
+    }
+
     /// Grant IRC-operator status and tell the user.
     pub fn oper_up(&mut self, uid: Uid) {
         if let Some(u) = self.users.get_mut(&uid) {
@@ -485,7 +510,7 @@ impl Server {
             uid,
             RPL_MYINFO,
             &format!(
-                "{} echoircd-{VERSION} iowxsgBDIHrRzWhc qaohvbeIklimnpstzCTcSNORMfjFLgGuBQAPJUdKXwD",
+                "{} echoircd-{VERSION} iowxsgBkDIHrRzWhc qaohvbeIklimnpstzCTcSNORMfjFLgGuBQAPJUdKXwD",
                 self.name
             ),
         );

@@ -28,6 +28,7 @@ pub fn svs_set_user_modes(s: &mut Server, tuid: Uid, modestring: &str) {
     let mut sign = '+';
     let mut applied = String::new();
     let mut last = ' ';
+    s.mode_sudo = true; // services authority — allows server-only modes like +k
     for c in modestring.chars() {
         if c == '+' || c == '-' {
             sign = c;
@@ -40,6 +41,7 @@ pub fn svs_set_user_modes(s: &mut Server, tuid: Uid, modestring: &str) {
             }
         }
     }
+    s.mode_sudo = false;
     if !applied.is_empty() {
         let nick = s
             .users

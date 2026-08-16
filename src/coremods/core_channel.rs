@@ -506,6 +506,15 @@ impl Command for Kick {
             );
             return CmdResult::Fail;
         }
+        // servprotect (+k): a network service can't be kicked
+        if s.uid_servprotected(tuid) {
+            s.numeric(
+                uid,
+                ERR_CHANOPRIVSNEEDED,
+                &format!("{chan} :You cannot kick a network service"),
+            );
+            return CmdResult::Fail;
+        }
         // can't kick someone who out-ranks you
         if s.rank(uid, &key) < s.rank(tuid, &key) {
             s.numeric(

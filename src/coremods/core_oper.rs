@@ -186,6 +186,11 @@ impl Command for Kill {
             );
             return CmdResult::Fail;
         };
+        // servprotect (+k): a network service can't be killed
+        if s.uid_servprotected(tuid) {
+            s.numeric(uid, ERR_NOPRIVILEGES, ":You cannot KILL a network service");
+            return CmdResult::Fail;
+        }
         // operlevels: a lower-level oper can't KILL a higher-level oper
         if let Some(reason) = crate::modules::operlevels::deny_kill(s, uid, tuid) {
             s.numeric(uid, ERR_NOPRIVILEGES, &format!(":{reason}"));
@@ -417,6 +422,7 @@ impl Command for SaNick {
             );
             return CmdResult::Fail;
         };
+        if s.uid_servprotected(tuid) { s.numeric(uid, ERR_NOPRIVILEGES, ":Cannot use an SA command on a network service"); return CmdResult::Fail; }
         let newnick = &params[1];
         if !valid_nick(newnick, s.conf_num("maxnick", 30usize)) {
             s.numeric(
@@ -1174,6 +1180,10 @@ impl Command for SaKick {
             );
             return CmdResult::Fail;
         }
+        if s.uid_servprotected(tuid) {
+            s.numeric(uid, ERR_NOPRIVILEGES, ":Cannot use an SA command on a network service");
+            return CmdResult::Fail;
+        }
         let reason = params
             .get(2)
             .cloned()
@@ -1221,6 +1231,7 @@ impl Command for SaQuit {
             .get(1)
             .cloned()
             .unwrap_or_else(|| "Services forced quit".to_string());
+        if s.uid_servprotected(tuid) { s.numeric(uid, ERR_NOPRIVILEGES, ":Cannot use an SA command on a network service"); return CmdResult::Fail; }
         s.send(tuid, format!("ERROR :Closing link: (SAQUIT: {reason})"));
         s.remove_user(tuid, &format!("Quit: {reason}"));
         let by = oper_nick(s, uid);
