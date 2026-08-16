@@ -176,13 +176,34 @@ impl Command for Cap {
                     u.cap_302 |= cap302;
                 }
                 let acctreg = crate::modules::account_registration::cap_tokens(s);
-                let payload = Caps::ls_line(
+                let mut payload = Caps::ls_line(
                     cap302,
                     secure,
                     &acctreg,
                     crate::modules::multiline::max_bytes(s),
                     crate::modules::multiline::max_lines(s),
                 );
+                // STS: advertise the TLS-upgrade policy to 302 clients (opt-in via
+                // sts_duration). On the plaintext port it names sts_port to move to;
+                // on a TLS connection it just pins the duration.
+                let sts_dur = s.conf_num("sts_duration", 0u64);
+                if cap302 && sts_dur > 0 {
+                    let preload = if s.conf_bool("sts_preload", false) {
+                        ",preload"
+                    } else {
+                        ""
+                    };
+                    if secure {
+                        payload.push_str(&format!(" sts=duration={sts_dur}{preload}"));
+                    } else {
+                        let sts_port = s.conf_num("sts_port", 0u16);
+                        if sts_port > 0 {
+                            payload.push_str(&format!(
+                                " sts=port={sts_port},duration={sts_dur}{preload}"
+                            ));
+                        }
+                    }
+                }
                 if !cap302 {
                     s.send(uid, format!(":{} CAP {who} LS :{payload}", s.name));
                 } else {
