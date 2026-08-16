@@ -37,6 +37,7 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(Cban),
         Box::new(Rline),
         Box::new(Connect),
+        Box::new(Squit),
         Box::new(ChgHost),
         Box::new(ChgIdent),
         Box::new(SetHost),
@@ -964,6 +965,36 @@ impl Command for Connect {
             "{by} used CONNECT to {} ({}:{})",
             b.name, b.ip, b.port
         ));
+        CmdResult::Ok
+    }
+}
+
+/// SQUIT <server> — disconnect a linked server (and everything behind it).
+struct Squit;
+impl Command for Squit {
+    fn name(&self) -> &'static str {
+        "SQUIT"
+    }
+    fn min_params(&self) -> usize {
+        1
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        if !require_oper(s, uid) {
+            return CmdResult::Fail;
+        }
+        let name = &params[0];
+        let Some(via) = s
+            .servers
+            .values()
+            .find(|sv| sv.name.eq_ignore_ascii_case(name))
+            .map(|sv| sv.via)
+        else {
+            s.numeric(uid, ERR_NOSUCHSERVER, &format!("{name} :No such server"));
+            return CmdResult::Fail;
+        };
+        let by = oper_nick(s, uid);
+        s.snotice_c('l', &format!("{by} used SQUIT on {name}"));
+        s.close_link(via, &format!("SQUIT from {by}"));
         CmdResult::Ok
     }
 }
