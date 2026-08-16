@@ -2132,9 +2132,20 @@ impl Server {
             }
             adds.push((uuid, m));
         }
-        if let Some(ch) = self.channels.get_mut(&key) {
-            for (uuid, m) in adds {
-                ch.rmembers.insert(uuid, m);
+        for (uuid, m) in adds {
+            let already = self
+                .channels
+                .get(&key)
+                .map(|c| c.rmembers.contains_key(&uuid))
+                .unwrap_or(false);
+            if let Some(ch) = self.channels.get_mut(&key) {
+                ch.rmembers.insert(uuid.clone(), m);
+            }
+            // announce the join to local members (a no-op for a brand-new channel)
+            if !already {
+                if let Some(prefix) = self.remote_users.get(&uuid).map(|r| r.prefix()) {
+                    self.to_channel(&key, &format!(":{prefix} JOIN {chan}"), None);
+                }
             }
         }
         let raw = format!(
