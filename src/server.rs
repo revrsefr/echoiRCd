@@ -268,6 +268,20 @@ impl Server {
         self.sasl_server = fresh.sasl_server;
         self.webirc = fresh.webirc;
         self.raw_config = fresh.raw;
+        // Re-evaluate which linked servers are services against the fresh
+        // `uline`/`sasl_server` config (like InspIRCd recomputing IsService on rehash).
+        let names: Vec<(String, String)> = self
+            .servers
+            .iter()
+            .map(|(sid, srv)| (sid.clone(), srv.name.clone()))
+            .collect();
+        for (sid, name) in names {
+            let (is_service, silent_service) = self.uline_match(&name);
+            if let Some(srv) = self.servers.get_mut(&sid) {
+                srv.is_service = is_service;
+                srv.silent_service = silent_service;
+            }
+        }
     }
 
     /// Remember an identity for WHOWAS (capped ring, newest first).

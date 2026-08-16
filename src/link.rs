@@ -45,6 +45,13 @@ pub struct RemoteServer {
     pub name: String,
     pub desc: String,
     pub via: Uid, // the local link uid it is reachable through
+    /// A services (U-lined) server: its name matches a `uline` config entry or the
+    /// configured `sasl_server`. Derived locally from OUR config at link/rehash time,
+    /// exactly like InspIRCd's `<services server=...>` — nothing on the wire declares
+    /// it. Every user on it is a network service.
+    pub is_service: bool,
+    /// `uline ... silent`: suppress this server's users' connect/quit server-notices.
+    pub silent_service: bool,
 }
 
 /// A user living on another server, reached via a link — not a local `User`.
@@ -170,17 +177,21 @@ impl Server {
             "FJOIN" if registered => self.link_fjoin_recv(uid, msg),
             "IJOIN" if registered => self.link_ijoin_recv(uid, msg),
             // services (SVS*) enforcement + account login, driven by a linked
-            // services pseudoserver (forwarded on if the target is on another server)
-            "SVSNICK" if registered => self.link_svsnick(uid, msg),
-            "SVSJOIN" if registered => self.link_svsjoin(uid, msg),
-            "SVSPART" if registered => self.link_svspart(uid, msg),
-            "SVSMODE" if registered => self.link_svsmode(uid, msg),
-            "SVSLOGIN" if registered => self.link_svslogin(uid, msg),
-            "SVSLOGOUT" if registered => self.link_svslogout(uid, msg),
-            "SVSHOLD" if registered => self.link_svshold(uid, msg),
-            "SVSTOPIC" if registered => self.link_svstopic(uid, msg),
-            "SVSOPER" if registered => self.link_svsoper(uid, msg),
-            "SVSCMODE" if registered => self.link_svscmode(uid, msg),
+            // services pseudoserver (forwarded on if the target is on another server).
+            // Like InspIRCd's m_services, these are honoured ONLY from a source on a
+            // U-lined services server — an ordinary peer's SVS* is ignored.
+            "SVSNICK" if registered && self.source_is_service(msg) => self.link_svsnick(uid, msg),
+            "SVSJOIN" if registered && self.source_is_service(msg) => self.link_svsjoin(uid, msg),
+            "SVSPART" if registered && self.source_is_service(msg) => self.link_svspart(uid, msg),
+            "SVSMODE" if registered && self.source_is_service(msg) => self.link_svsmode(uid, msg),
+            "SVSLOGIN" if registered && self.source_is_service(msg) => self.link_svslogin(uid, msg),
+            "SVSLOGOUT" if registered && self.source_is_service(msg) => {
+                self.link_svslogout(uid, msg)
+            }
+            "SVSHOLD" if registered && self.source_is_service(msg) => self.link_svshold(uid, msg),
+            "SVSTOPIC" if registered && self.source_is_service(msg) => self.link_svstopic(uid, msg),
+            "SVSOPER" if registered && self.source_is_service(msg) => self.link_svsoper(uid, msg),
+            "SVSCMODE" if registered && self.source_is_service(msg) => self.link_svscmode(uid, msg),
             "ENCAP" if registered => self.link_encap(uid, msg),
             "METADATA" if registered => self.link_metadata(uid, msg),
             "SASL" if registered => self.link_sasl(uid, msg),
@@ -204,6 +215,52 @@ impl Server {
     }
 
     /// Handle the `SERVER <name> <password> <sid> :<desc>` handshake line.
+    /// Whether a server NAME is a services (U-lined) server, and whether it is
+    /// "silent". A name matches if it is the configured `sasl_server` (a SASL
+    /// provider is a service) or appears as a `uline = <name> [silent]` entry.
+    /// Case-insensitive, matching InspIRCd's `<services server=...>` by name.
+    pub fn uline_match(&self, name: &str) -> (bool, bool) {
+        if !self.sasl_server.is_empty() && name.eq_ignore_ascii_case(&self.sasl_server) {
+            return (true, false);
+        }
+        for line in self.conf_all("uline") {
+            let mut it = line.split_whitespace();
+            if it.next().is_some_and(|n| n.eq_ignore_ascii_case(name)) {
+                return (true, it.any(|t| t.eq_ignore_ascii_case("silent")));
+            }
+        }
+        (false, false)
+    }
+
+    /// Whether the server with this SID is a services (U-lined) server.
+    pub fn server_is_service(&self, sid: &str) -> bool {
+        self.servers.get(sid).is_some_and(|s| s.is_service)
+    }
+
+    /// Whether a message's source (a SID or a UUID whose first 3 chars are the SID)
+    /// originates on a services server — the authority gate for SVS* commands.
+    pub fn source_is_service(&self, msg: &Message) -> bool {
+        let Some(src) = msg.source.as_deref() else {
+            return false;
+        };
+        self.server_is_service(src.get(..3).unwrap_or(src))
+    }
+
+    /// Whether the remote user with this UUID lives on a services server. Local
+    /// users are never services (they are on us, and a server is not its own uline).
+    pub fn uuid_is_service(&self, uuid: &str) -> bool {
+        self.remote_users
+            .get(uuid)
+            .is_some_and(|ru| self.server_is_service(&ru.sid))
+    }
+
+    /// Whether the user reachable by this nick is a network service.
+    pub fn nick_is_service(&self, nick: &str) -> bool {
+        self.remote_nick
+            .get(&nick.to_ascii_lowercase())
+            .is_some_and(|uuid| self.uuid_is_service(uuid))
+    }
+
     fn link_server(&mut self, uid: Uid, msg: &Message) {
         if msg.params.len() < 4 {
             self.reject_link(uid, "Not enough SERVER parameters");
@@ -234,6 +291,7 @@ impl Server {
             l.sid = Some(sid.clone());
             l.name = Some(name.clone());
         }
+        let (is_service, silent_service) = self.uline_match(&name);
         self.servers.insert(
             sid.clone(),
             RemoteServer {
@@ -241,8 +299,13 @@ impl Server {
                 name: name.clone(),
                 desc: desc.clone(),
                 via: uid,
+                is_service,
+                silent_service,
             },
         );
+        if is_service {
+            eprintln!("[link] {name} ({sid}) is a services (U-lined) server");
+        }
         // if we accepted (inbound) we still owe them our SERVER line
         if !already_sent {
             self.link_out(
@@ -961,13 +1024,19 @@ impl Server {
             if !self.channels.contains_key(&key) {
                 return;
             }
-            let line = format!(":{prefix} {cmd} {target} :{text}");
+            let base = format!(":{prefix} {cmd} {target} :{text}");
+            // reverse.im/service: tag messages from a network service so capable
+            // clients can badge them. Per-recipient (needs the message-tags cap).
+            let is_service = self.uuid_is_service(&src);
+            let tagged = format!("@reverse.im/service {base}");
             let members: Vec<Uid> = self.channels[&key].members.keys().copied().collect();
             for m in members {
                 if self.users.get(&m).map(|u| u.flags.deaf).unwrap_or(false) {
                     continue;
                 }
-                self.send(m, line.clone());
+                let want_tag = is_service
+                    && self.users.get(&m).map(|u| u.caps.message_tags).unwrap_or(false);
+                self.send(m, if want_tag { tagged.clone() } else { base.clone() });
             }
             // forward to the other links that have members in this channel
             for l in self.channel_link_targets(&key, Some(via)) {
@@ -979,7 +1048,10 @@ impl Server {
                 .get(&dst)
                 .map(|u| u.nick.clone())
                 .unwrap_or_default();
-            self.send(dst, format!(":{prefix} {cmd} {nick} :{text}"));
+            let want_tag = self.uuid_is_service(&src)
+                && self.users.get(&dst).map(|u| u.caps.message_tags).unwrap_or(false);
+            let tag = if want_tag { "@reverse.im/service " } else { "" };
+            self.send(dst, format!("{tag}:{prefix} {cmd} {nick} :{text}"));
         } else {
             // a remote target reached via another link (multi-hop) — forward onward
             self.forward_to_target(&target, msg, via);
@@ -1851,5 +1923,50 @@ mod tests {
         let m = &s.channels["#echoircd"].rmembers["42SB00000"];
         assert!(m.admin, "bot should hold +a (&) from the IJOIN status token");
         assert!(m.op, "bot should hold +o (@) from the IJOIN status token");
+    }
+
+    // A server is a service iff its NAME matches the sasl_server or a `uline` config
+    // entry (case-insensitive); `silent` is honoured. Mirrors InspIRCd IsService.
+    #[test]
+    fn uline_recognises_services_server() {
+        use crate::config::Config;
+        use std::sync::atomic::AtomicU64;
+        use std::sync::{mpsc, Arc};
+        let (tx, _rx) = mpsc::channel();
+        let mut cfg = Config::default();
+        cfg.sasl_server = "services.example.net".to_string();
+        cfg.raw
+            .entry("uline".to_string())
+            .or_default()
+            .push("other.example.net silent".to_string());
+        let s = Server::new(cfg, tx, Arc::new(AtomicU64::new(1)));
+        assert_eq!(s.uline_match("services.example.net"), (true, false)); // sasl_server ⇒ implicit uline
+        assert_eq!(s.uline_match("OTHER.example.net"), (true, true)); // explicit, silent, case-insensitive
+        assert_eq!(s.uline_match("hub.example.net"), (false, false)); // an ordinary peer
+    }
+
+    // SVS* authority: only a source on a U-lined services server counts.
+    #[test]
+    fn svs_source_must_be_a_service() {
+        use crate::config::Config;
+        use std::sync::atomic::AtomicU64;
+        use std::sync::{mpsc, Arc};
+        let (tx, _rx) = mpsc::channel();
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+        let mk = |sid: &str, is_service: bool| RemoteServer {
+            sid: sid.to_string(),
+            name: format!("{sid}.example.net"),
+            desc: String::new(),
+            via: 1,
+            is_service,
+            silent_service: false,
+        };
+        s.servers.insert("42S".into(), mk("42S", true));
+        s.servers.insert("10H".into(), mk("10H", false));
+        // from a service pseudo-client (uuid → sid 42S) and from the service SID itself
+        assert!(s.source_is_service(&crate::message::parse(":42SB00000 SVSMODE 0AAAAAAAB +r").unwrap()));
+        assert!(s.source_is_service(&crate::message::parse(":42S SVSJOIN 0AAAAAAAB #c").unwrap()));
+        // from an ordinary peer: rejected
+        assert!(!s.source_is_service(&crate::message::parse(":10HAAAAAA SVSNICK 0AAAAAAAB g").unwrap()));
     }
 }

@@ -76,9 +76,12 @@ impl Command for Links {
             RPL_LINKS,
             &format!("{} {} :0 {}", s.name, s.name, s.server_desc),
         );
+        // hideservices: services (U-lined) servers are hidden from non-opers.
+        let hide_svc = s.conf_bool("hideservices", false) && !s.is_oper(uid);
         let mut rows: Vec<(String, String)> = s
             .servers
             .values()
+            .filter(|sv| !(hide_svc && sv.is_service))
             .map(|sv| (sv.name.clone(), sv.desc.clone()))
             .collect();
         rows.sort();
@@ -123,6 +126,15 @@ impl Command for Whois {
                         RPL_WHOISSERVER,
                         &format!("{} {srv} :remote user", ru.nick),
                     );
+                    // 313: a user on a U-lined services server is "a network service"
+                    // (InspIRCd reworks the oper line the same way for services).
+                    if s.server_is_service(&ru.sid) {
+                        s.numeric(
+                            uid,
+                            RPL_WHOISOPERATOR,
+                            &format!("{} :is a network service", ru.nick),
+                        );
+                    }
                     if let Some(a) = &ru.account {
                         s.numeric(
                             uid,

@@ -304,7 +304,14 @@ impl Command for Map {
             RPL_MAP,
             &format!("{} ({} users)", s.name, s.users.len()),
         );
-        let mut peers: Vec<String> = s.servers.values().map(|sv| sv.name.clone()).collect();
+        // hideservices: services (U-lined) servers are hidden from non-opers.
+        let hide_svc = s.conf_bool("hideservices", false) && !s.is_oper(uid);
+        let mut peers: Vec<String> = s
+            .servers
+            .values()
+            .filter(|sv| !(hide_svc && sv.is_service))
+            .map(|sv| sv.name.clone())
+            .collect();
         peers.sort();
         for name in peers {
             s.numeric(uid, RPL_MAP, &format!("`- {name}"));
