@@ -503,6 +503,33 @@ impl Command for Kick {
             return CmdResult::Fail;
         }
         let Some(tuid) = s.find_nick(victim) else {
+            // remote victim: route the kick to its server and drop our view of it
+            if let Some((vuuid, _)) = s.find_remote(victim) {
+                if s.channels[&key].rmembers.contains_key(&vuuid) {
+                    if s.nick_servprotected(victim) {
+                        s.numeric(
+                            uid,
+                            ERR_CHANOPRIVSNEEDED,
+                            &format!("{chan} :You cannot kick a network service"),
+                        );
+                        return CmdResult::Fail;
+                    }
+                    let kicker = s.users[&uid].nick.clone();
+                    let reason = params.get(2).cloned().unwrap_or(kicker);
+                    let prefix = s.users[&uid].prefix();
+                    let vnick = s
+                        .remote_users
+                        .get(&vuuid)
+                        .map(|r| r.nick.clone())
+                        .unwrap_or_else(|| victim.to_string());
+                    s.to_channel(&key, &format!(":{prefix} KICK {chan} {vnick} :{reason}"), None);
+                    s.propagate_kick(uid, chan, victim, &reason);
+                    if let Some(ch) = s.channels.get_mut(&key) {
+                        ch.rmembers.remove(&vuuid);
+                    }
+                    return CmdResult::Ok;
+                }
+            }
             s.numeric(
                 uid,
                 ERR_NOSUCHNICK,
