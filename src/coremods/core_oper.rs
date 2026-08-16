@@ -179,6 +179,16 @@ impl Command for Kill {
             .cloned()
             .unwrap_or_else(|| "Killed".to_string());
         let Some(tuid) = s.find_nick(target) else {
+            // remote target: route the KILL toward the server that owns it
+            if let Some((uuid, _)) = s.find_remote(target) {
+                let (killer_uuid, killer) = s
+                    .users
+                    .get(&uid)
+                    .map(|u| (u.uuid.clone(), u.nick.clone()))
+                    .unwrap_or_default();
+                s.route_kill(&killer_uuid, &uuid, &format!("{killer} ({reason})"));
+                return CmdResult::Ok;
+            }
             s.numeric(
                 uid,
                 ERR_NOSUCHNICK,

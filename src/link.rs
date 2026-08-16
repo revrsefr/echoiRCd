@@ -166,6 +166,7 @@ impl Server {
             "UID" if registered => self.link_uid_recv(uid, msg),
             "NICK" if registered => self.link_nick_recv(uid, msg),
             "QUIT" if registered => self.link_quit_recv(uid, msg),
+            "KILL" if registered => self.link_kill_recv(uid, msg),
             "PRIVMSG" if registered => self.link_message_recv(uid, msg, false),
             "NOTICE" if registered => self.link_message_recv(uid, msg, true),
             "JOIN" if registered => self.link_join_recv(uid, msg),
@@ -1031,6 +1032,41 @@ impl Server {
         let reason = msg.params.first().cloned().unwrap_or_default();
         self.drop_remote_user(&uuid, &reason);
         self.propagate(&format!(":{uuid} QUIT :{reason}"), Some(via));
+    }
+
+    /// `:<src> KILL <target> :<reason>` — a services/oper kill from a peer. A local
+    /// target is notified and removed (its QUIT tells the rest of the tree); a
+    /// remote target is routed one hop onward.
+    fn link_kill_recv(&mut self, via: Uid, msg: &Message) {
+        let Some(src) = msg.source.clone() else {
+            return;
+        };
+        let (Some(target), Some(reason)) =
+            (msg.params.first().cloned(), msg.params.get(1).cloned())
+        else {
+            return;
+        };
+        match self.link_local_target(&target) {
+            Some(tuid) => {
+                let from = self
+                    .uuid_prefix(&src)
+                    .or_else(|| self.servers.get(&src).map(|sv| sv.name.clone()))
+                    .unwrap_or_else(|| src.clone());
+                let nick = self.users.get(&tuid).map(|u| u.nick.clone()).unwrap_or_default();
+                self.send(tuid, format!(":{from} KILL {nick} :{reason}"));
+                self.remove_user(tuid, &format!("Killed ({reason})"));
+            }
+            None => {
+                self.forward_to_target(&target, msg, via);
+            }
+        }
+    }
+
+    /// Route a KILL toward the server that owns a remote `target` uuid.
+    pub fn route_kill(&self, killer: &str, target: &str, reason: &str) {
+        if let Some(v) = self.link_toward(target) {
+            self.link_out(v, format!(":{killer} KILL {target} :{reason}"));
+        }
     }
 
     fn link_message_recv(&mut self, via: Uid, msg: &Message, notice: bool) {
