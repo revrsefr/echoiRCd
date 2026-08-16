@@ -258,11 +258,23 @@ impl Command for Whois {
         }
         // +I hides the channel list from everyone but the user themselves + opers
         if !chans.is_empty() && (is_self || asker_oper || !hidechans) {
-            s.numeric(
-                uid,
-                RPL_WHOISCHANNELS,
-                &format!("{nick} :{}", chans.join(" ")),
-            );
+            // fold across multiple 319 lines so a user in many channels stays under 512
+            let askern = s.users.get(&uid).map(|u| u.nick.len()).unwrap_or(1);
+            let budget = 500usize.saturating_sub(s.name.len() + askern + nick.len() + 12);
+            let mut line = String::new();
+            for c in &chans {
+                if !line.is_empty() && line.len() + 1 + c.len() > budget {
+                    s.numeric(uid, RPL_WHOISCHANNELS, &format!("{nick} :{line}"));
+                    line.clear();
+                }
+                if !line.is_empty() {
+                    line.push(' ');
+                }
+                line.push_str(c);
+            }
+            if !line.is_empty() {
+                s.numeric(uid, RPL_WHOISCHANNELS, &format!("{nick} :{line}"));
+            }
         }
         // 313: is an IRC operator (hidden by +H unless the asker is an oper)
         if oper && (!hideoper || asker_oper) {
