@@ -1025,10 +1025,10 @@ impl Server {
                 return;
             }
             let base = format!(":{prefix} {cmd} {target} :{text}");
-            // reverse.im/service: tag messages from a network service so capable
+            // echo/services: tag messages from a network service so capable
             // clients can badge them. Per-recipient (needs the message-tags cap).
             let is_service = self.uuid_is_service(&src);
-            let tagged = format!("@reverse.im/service {base}");
+            let tagged = format!("@echo/services {base}");
             let members: Vec<Uid> = self.channels[&key].members.keys().copied().collect();
             for m in members {
                 if self.users.get(&m).map(|u| u.flags.deaf).unwrap_or(false) {
@@ -1050,7 +1050,7 @@ impl Server {
                 .unwrap_or_default();
             let want_tag = self.uuid_is_service(&src)
                 && self.users.get(&dst).map(|u| u.caps.message_tags).unwrap_or(false);
-            let tag = if want_tag { "@reverse.im/service " } else { "" };
+            let tag = if want_tag { "@echo/services " } else { "" };
             self.send(dst, format!("{tag}:{prefix} {cmd} {nick} :{text}"));
         } else {
             // a remote target reached via another link (multi-hop) — forward onward
