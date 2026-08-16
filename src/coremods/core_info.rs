@@ -127,7 +127,7 @@ impl Command for Whois {
                         &format!("{} {srv} :remote user", ru.nick),
                     );
                     // 313: a user on a U-lined services server is "a network service"
-                    // (InspIRCd reworks the oper line the same way for services).
+                    // — its oper line reads as a service, not an operator.
                     if s.server_is_service(&ru.sid) {
                         s.numeric(
                             uid,

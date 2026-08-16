@@ -1,5 +1,5 @@
-//! customprefix — reconfigure the channel prefix tiers *and* define brand-new ones,
-//! like InspIRCd's m_customprefix. Two forms, one line each:
+//! customprefix — reconfigure the channel prefix tiers *and* define brand-new ones.
+//! Two forms, one line each:
 //!
 //! ```text
 //! # reconfigure a built-in tier (oper founder admin op halfop voice):

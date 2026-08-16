@@ -47,7 +47,7 @@ pub struct RemoteServer {
     pub via: Uid, // the local link uid it is reachable through
     /// A services (U-lined) server: its name matches a `uline` config entry or the
     /// configured `sasl_server`. Derived locally from OUR config at link/rehash time,
-    /// exactly like InspIRCd's `<services server=...>` — nothing on the wire declares
+    /// matched by server name; nothing on the wire declares
     /// it. Every user on it is a network service.
     pub is_service: bool,
     /// `uline ... silent`: suppress this server's users' connect/quit server-notices.
@@ -178,7 +178,7 @@ impl Server {
             "IJOIN" if registered => self.link_ijoin_recv(uid, msg),
             // services (SVS*) enforcement + account login, driven by a linked
             // services pseudoserver (forwarded on if the target is on another server).
-            // Like InspIRCd's m_services, these are honoured ONLY from a source on a
+            // They are honoured ONLY from a source on a
             // U-lined services server — an ordinary peer's SVS* is ignored.
             "SVSNICK" if registered && self.source_is_service(msg) => self.link_svsnick(uid, msg),
             "SVSJOIN" if registered && self.source_is_service(msg) => self.link_svsjoin(uid, msg),
@@ -218,7 +218,7 @@ impl Server {
     /// Whether a server NAME is a services (U-lined) server, and whether it is
     /// "silent". A name matches if it is the configured `sasl_server` (a SASL
     /// provider is a service) or appears as a `uline = <name> [silent]` entry.
-    /// Case-insensitive, matching InspIRCd's `<services server=...>` by name.
+    /// Case-insensitive, matched by server name.
     pub fn uline_match(&self, name: &str) -> (bool, bool) {
         if !self.sasl_server.is_empty() && name.eq_ignore_ascii_case(&self.sasl_server) {
             return (true, false);
@@ -1926,7 +1926,7 @@ mod tests {
     }
 
     // A server is a service iff its NAME matches the sasl_server or a `uline` config
-    // entry (case-insensitive); `silent` is honoured. Mirrors InspIRCd IsService.
+    // entry (case-insensitive); `silent` is honoured.
     #[test]
     fn uline_recognises_services_server() {
         use crate::config::Config;

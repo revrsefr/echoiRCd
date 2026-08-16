@@ -269,7 +269,7 @@ impl Server {
         self.webirc = fresh.webirc;
         self.raw_config = fresh.raw;
         // Re-evaluate which linked servers are services against the fresh
-        // `uline`/`sasl_server` config (like InspIRCd recomputing IsService on rehash).
+        // `uline`/`sasl_server` config (re-evaluated on every rehash).
         let names: Vec<(String, String)> = self
             .servers
             .iter()
