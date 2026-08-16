@@ -282,6 +282,13 @@ impl Server {
                 srv.silent_service = silent_service;
             }
         }
+        // reload TLS certs from disk so a renewed cert applies without a restart
+        // (no-op when TLS isn't configured).
+        if let Some(r) = crate::tls::TLS_RELOAD.get() {
+            if let Err(e) = r.reload() {
+                eprintln!("[rehash] TLS cert reload failed: {e}");
+            }
+        }
     }
 
     /// Remember an identity for WHOWAS (capped ring, newest first).

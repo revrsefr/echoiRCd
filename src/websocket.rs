@@ -173,7 +173,7 @@ pub fn maybe_start(cfg: &Config, core: Sender<Event>, counter: Arc<AtomicU64>) {
 
     if let Some(bind) = get("bind_wss").map(str::to_string) {
         match (get("tls_cert"), get("tls_key")) {
-            (Some(cert), Some(key)) => match OpensslBackend::new(cert, key) {
+            (Some(cert), Some(key)) => match OpensslBackend::new(cert, key, Vec::new()) {
                 Ok(backend) => match TcpListener::bind(&bind) {
                     Ok(l) => {
                         eprintln!("echoircd WebSocket (wss) on {bind} (openssl)");

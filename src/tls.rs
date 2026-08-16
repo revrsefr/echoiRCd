@@ -5,15 +5,29 @@
 //! This backend is openssl. An alternative backend (e.g. rustls) only has to
 //! implement these same two traits and it slots straight in.
 
+use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpStream};
+use std::sync::{Arc, OnceLock, RwLock};
 use std::time::Duration;
 
 use mio::net::TcpStream as MioStream;
 use openssl::hash::MessageDigest;
 use openssl::ssl::{
-    ErrorCode, Ssl, SslAcceptor, SslFiletype, SslMethod, SslMode, SslStream, SslVerifyMode,
+    ErrorCode, NameType, SniError, Ssl, SslAcceptor, SslAcceptorBuilder, SslContext, SslFiletype,
+    SslMethod, SslMode, SslStream, SslVerifyMode,
 };
+
+/// A hot-reloadable TLS certificate source (implemented by the openssl backend);
+/// the core calls [`reload`](CertReload::reload) on REHASH so a renewed cert is
+/// picked up without a restart.
+pub trait CertReload: Send + Sync {
+    fn reload(&self) -> io::Result<()>;
+}
+
+/// The process-wide TLS backend, set once at startup so REHASH can trigger a cert
+/// reload without threading a handle through the core thread.
+pub static TLS_RELOAD: OnceLock<Arc<dyn CertReload>> = OnceLock::new();
 
 /// A live TLS connection: read/write plaintext, tune the read timeout (the
 /// socket engine polls with one to interleave reads and queued writes), and shut
@@ -62,39 +76,104 @@ fn err<E: std::fmt::Display>(e: E) -> io::Error {
 
 // --- openssl backend --------------------------------------------------------
 
+/// A PEM certificate chain + private key on disk.
+struct CertPaths {
+    cert: String,
+    key: String,
+}
+
 pub struct OpensslBackend {
-    acceptor: SslAcceptor,
+    // Swapped atomically by `reload` so renewed certs apply without a restart; read
+    // only at connection-accept time (infrequent), so the lock is never hot.
+    acceptor: RwLock<SslAcceptor>,
+    primary: CertPaths,
+    sni: Vec<(String, CertPaths)>, // hostname -> cert/key (SNI)
+}
+
+/// Apply the common server settings to a builder: the cert/key, an always-accept
+/// client-cert request (for SASL EXTERNAL / CertFP; we never validate the chain —
+/// services match the fingerprint), and the non-blocking write modes the reactor needs.
+fn configure(b: &mut SslAcceptorBuilder, cert: &str, key: &str) -> io::Result<()> {
+    b.set_private_key_file(key, SslFiletype::PEM).map_err(err)?;
+    b.set_certificate_chain_file(cert).map_err(err)?;
+    b.check_private_key().map_err(err)?;
+    b.set_verify_callback(SslVerifyMode::PEER, |_valid, _ctx| true);
+    b.set_mode(SslMode::ENABLE_PARTIAL_WRITE | SslMode::ACCEPT_MOVING_WRITE_BUFFER);
+    Ok(())
+}
+
+/// A standalone configured context for one SNI hostname.
+fn build_ctx(cert: &str, key: &str) -> io::Result<SslContext> {
+    let mut b = SslAcceptor::mozilla_intermediate(SslMethod::tls()).map_err(err)?;
+    configure(&mut b, cert, key)?;
+    Ok(b.build().into_context())
+}
+
+/// Build the acceptor for the primary cert, with a servername callback that
+/// switches to a per-hostname context when the client's SNI matches an `sni` entry.
+fn build_acceptor(primary: &CertPaths, sni: &[(String, CertPaths)]) -> io::Result<SslAcceptor> {
+    let mut map: HashMap<String, SslContext> = HashMap::new();
+    for (host, cp) in sni {
+        map.insert(host.to_ascii_lowercase(), build_ctx(&cp.cert, &cp.key)?);
+    }
+    let mut b = SslAcceptor::mozilla_intermediate(SslMethod::tls()).map_err(err)?;
+    configure(&mut b, &primary.cert, &primary.key)?;
+    if !map.is_empty() {
+        b.set_servername_callback(move |ssl, _alert| {
+            if let Some(name) = ssl.servername(NameType::HOST_NAME) {
+                if let Some(ctx) = map.get(&name.to_ascii_lowercase()) {
+                    ssl.set_ssl_context(ctx).map_err(|_| SniError::ALERT_FATAL)?;
+                }
+            }
+            Ok(())
+        });
+    }
+    Ok(b.build())
 }
 
 impl OpensslBackend {
-    /// Build an acceptor from a PEM certificate chain + private key.
-    pub fn new(cert: &str, key: &str) -> io::Result<OpensslBackend> {
-        let mut b = SslAcceptor::mozilla_intermediate(SslMethod::tls()).map_err(err)?;
-        b.set_private_key_file(key, SslFiletype::PEM).map_err(err)?;
-        b.set_certificate_chain_file(cert).map_err(err)?;
-        b.check_private_key().map_err(err)?;
-        // Request (but don't require) a client cert so SASL EXTERNAL / CertFP can
-        // read its fingerprint. We never validate the chain — services match the
-        // fingerprint to an account — so the callback always accepts.
-        b.set_verify_callback(SslVerifyMode::PEER, |_valid, _ctx| true);
-        // The reactor drives writes non-blocking and may retry SSL_write with a moved
-        // or grown buffer after a WouldBlock; allow that and partial progress so a slow
-        // TLS reader can't wedge a worker.
-        b.set_mode(SslMode::ENABLE_PARTIAL_WRITE | SslMode::ACCEPT_MOVING_WRITE_BUFFER);
+    /// Build an acceptor from a PEM certificate chain + private key, with optional
+    /// per-hostname SNI certs `(hostname, cert, key)`.
+    pub fn new(cert: &str, key: &str, sni: Vec<(String, String, String)>) -> io::Result<OpensslBackend> {
+        let primary = CertPaths {
+            cert: cert.to_string(),
+            key: key.to_string(),
+        };
+        let sni: Vec<(String, CertPaths)> = sni
+            .into_iter()
+            .map(|(h, c, k)| (h, CertPaths { cert: c, key: k }))
+            .collect();
+        let acceptor = build_acceptor(&primary, &sni)?;
         Ok(OpensslBackend {
-            acceptor: b.build(),
+            acceptor: RwLock::new(acceptor),
+            primary,
+            sni,
         })
+    }
+
+    /// Rebuild the acceptor from the cert files on disk (renewed certs) and swap it
+    /// in; existing connections keep the context they handshook with.
+    pub fn reload(&self) -> io::Result<()> {
+        let fresh = build_acceptor(&self.primary, &self.sni)?;
+        *self.acceptor.write().unwrap() = fresh;
+        Ok(())
+    }
+}
+
+impl CertReload for OpensslBackend {
+    fn reload(&self) -> io::Result<()> {
+        OpensslBackend::reload(self)
     }
 }
 
 impl TlsBackend for OpensslBackend {
     fn accept(&self, sock: TcpStream) -> io::Result<Box<dyn TlsConn>> {
-        let stream = self.acceptor.accept(sock).map_err(err)?;
+        let stream = self.acceptor.read().unwrap().accept(sock).map_err(err)?;
         Ok(Box::new(OpensslConn(stream)))
     }
 
     fn start(&self, sock: MioStream) -> io::Result<Box<dyn TlsSession>> {
-        let ssl = Ssl::new(self.acceptor.context()).map_err(err)?;
+        let ssl = Ssl::new(self.acceptor.read().unwrap().context()).map_err(err)?;
         // handshake isn't driven here: SslStream::new just binds the socket; the
         // reactor calls accept() as the socket becomes readable/writable.
         let stream = SslStream::new(ssl, sock).map_err(err)?;

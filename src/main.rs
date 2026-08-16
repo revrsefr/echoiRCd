@@ -125,10 +125,31 @@ fn main() {
     // optional TLS listeners (bind_tls, repeatable + tls_cert + tls_key). A cert/bind
     // problem disables TLS but never takes the plaintext listeners down.
     if !cfg.bind_tls.is_empty() {
+        // per-hostname SNI certs: `tls_sni = <hostname> <cert> <key>` (repeatable)
+        let sni: Vec<(String, String, String)> = cfg
+            .raw
+            .get("tls_sni")
+            .map(|v| {
+                v.iter()
+                    .filter_map(|line| {
+                        let mut it = line.split_whitespace();
+                        match (it.next(), it.next(), it.next()) {
+                            (Some(h), Some(c), Some(k)) => {
+                                Some((h.to_string(), c.to_string(), k.to_string()))
+                            }
+                            _ => None,
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         match (&cfg.tls_cert, &cfg.tls_key) {
-            (Some(cert), Some(key)) => match OpensslBackend::new(cert, key) {
+            (Some(cert), Some(key)) => match OpensslBackend::new(cert, key, sni) {
                 Ok(backend) => {
-                    let backend: Arc<dyn TlsBackend> = Arc::new(backend);
+                    let backend = Arc::new(backend);
+                    // publish for REHASH-triggered cert reload
+                    let _ = echoircd::tls::TLS_RELOAD.set(backend.clone());
+                    let backend: Arc<dyn TlsBackend> = backend;
                     for bind_tls in &cfg.bind_tls {
                         match TcpListener::bind(bind_tls) {
                             Ok(tls_listener) => {
