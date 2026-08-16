@@ -176,20 +176,37 @@ impl Command for Cap {
                     u.cap_302 |= cap302;
                 }
                 let acctreg = crate::modules::account_registration::cap_tokens(s);
-                s.send(
-                    uid,
-                    format!(
-                        ":{} CAP {who} LS :{}",
-                        s.name,
-                        Caps::ls_line(
-                            cap302,
-                            secure,
-                            &acctreg,
-                            crate::modules::multiline::max_bytes(s),
-                            crate::modules::multiline::max_lines(s),
-                        )
-                    ),
+                let payload = Caps::ls_line(
+                    cap302,
+                    secure,
+                    &acctreg,
+                    crate::modules::multiline::max_bytes(s),
+                    crate::modules::multiline::max_lines(s),
                 );
+                if !cap302 {
+                    s.send(uid, format!(":{} CAP {who} LS :{payload}", s.name));
+                } else {
+                    // 302: fold the token list into ≤512-byte lines, all but the last
+                    // carrying the `*` continuation marker.
+                    let budget = 500usize.saturating_sub(s.name.len() + who.len() + 12);
+                    let mut chunks: Vec<String> = vec![String::new()];
+                    for t in payload.split(' ').filter(|t| !t.is_empty()) {
+                        let cur = chunks.last_mut().unwrap();
+                        if !cur.is_empty() && cur.len() + 1 + t.len() > budget {
+                            chunks.push(String::new());
+                        }
+                        let cur = chunks.last_mut().unwrap();
+                        if !cur.is_empty() {
+                            cur.push(' ');
+                        }
+                        cur.push_str(t);
+                    }
+                    let last = chunks.len() - 1;
+                    for (i, chunk) in chunks.iter().enumerate() {
+                        let more = if i < last { "* " } else { "" };
+                        s.send(uid, format!(":{} CAP {who} LS {more}:{chunk}", s.name));
+                    }
+                }
             }
             "REQ" => {
                 if let Some(u) = s.users.get_mut(&uid) {
