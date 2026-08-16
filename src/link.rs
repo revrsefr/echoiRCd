@@ -20,7 +20,7 @@ use std::net::{SocketAddr, TcpStream};
 
 use std::collections::HashSet;
 
-use crate::channels::{glob_match, Ban, Channel, Member, Topic};
+use crate::channels::{glob_match, Ban, ChanModes, Channel, Member, Topic};
 use crate::message::Message;
 use crate::server::{now, Server};
 use crate::socketengine::OutSink;
@@ -2104,6 +2104,44 @@ mod tests {
 
     // A server is a service iff its NAME matches the sasl_server or a `uline` config
     // entry (case-insensitive); `silent` is honoured.
+    // FJOIN timestamp arbitration: the lower channel TS wins. A member bursted with
+    // a NEWER TS than ours joins stripped of status; an OLDER TS wipes our side.
+    #[test]
+    fn fjoin_ts_arbitration_strips_losing_status() {
+        use crate::config::Config;
+        use std::sync::atomic::AtomicU64;
+        use std::sync::{mpsc, Arc};
+        let (tx, _rx) = mpsc::channel();
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+        s.remote_users.insert(
+            "42SAAAAAA".to_string(),
+            RemoteUser {
+                uuid: "42SAAAAAA".to_string(),
+                nick: "bob".into(),
+                ident: "b".into(),
+                host: "h".into(),
+                realname: "b".into(),
+                account: None,
+                ip: String::new(),
+                modes: String::new(),
+                sid: "42S".into(),
+                via: 1,
+            },
+        );
+        // we already hold #c at an OLD (winning) TS
+        s.channels.insert("#c".into(), {
+            let mut c = Channel::new("#c");
+            c.created = 1000;
+            c
+        });
+        // a peer bursts #c with a NEWER TS, opping bob — bob must join WITHOUT +o
+        let m = crate::message::parse(":42S FJOIN #c 2000 +nt :o,42SAAAAAA").unwrap();
+        s.link_fjoin_recv(1, &m);
+        let opped = s.channels["#c"].rmembers["42SAAAAAA"].op;
+        assert!(!opped, "a member bursted with a newer (losing) TS must be de-statused");
+        assert_eq!(s.channels["#c"].created, 1000, "our older TS is kept");
+    }
+
     #[test]
     fn uline_recognises_services_server() {
         use crate::config::Config;

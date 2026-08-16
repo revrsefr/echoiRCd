@@ -118,6 +118,16 @@ impl Member {
 
     /// Set/clear a prefix mode by its letter — built-in booleans or, for a
     /// config-defined letter, the custom-prefix set (used by the S2S mode applier).
+    /// Drop the standard status modes (q/a/o/h/v) — used when this side loses a
+    /// channel-timestamp war and every member must be de-statused.
+    pub fn clear_status(&mut self) {
+        self.owner = false;
+        self.admin = false;
+        self.op = false;
+        self.halfop = false;
+        self.voice = false;
+    }
+
     pub fn set_prefix(&mut self, letter: char, on: bool) {
         match letter {
             'y' => self.oprefix = on,
