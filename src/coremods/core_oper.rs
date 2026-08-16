@@ -679,11 +679,18 @@ fn do_xline(s: &mut Server, uid: Uid, params: &[String], kind: XKind) -> CmdResu
         );
         return CmdResult::Ok;
     }
-    let dur = parse_duration(&params[1]).unwrap_or(0);
-    let reason = params
-        .get(2)
-        .cloned()
-        .unwrap_or_else(|| "No reason given".to_string());
+    // <mask> <duration> :<reason>; tolerate the durationless form by taking an
+    // unparseable second token as the reason (permanent ban).
+    let (dur, reason) = match parse_duration(&params[1]) {
+        Some(d) => (
+            d,
+            params
+                .get(2)
+                .cloned()
+                .unwrap_or_else(|| "No reason given".to_string()),
+        ),
+        None => (0, params[1].clone()),
+    };
     s.add_xline(kind, &mask, dur, &nick, &reason);
     s.propagate_addline(kind.tag(), &mask, &nick, dur, &reason);
     CmdResult::Ok
