@@ -18,7 +18,77 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(Info),
         Box::new(Stats),
         Box::new(Map),
+        Box::new(Help),
     ]
+}
+
+/// HELP [topic] — built-in help: a short index, or detail for a command group.
+struct Help;
+impl Command for Help {
+    fn name(&self) -> &'static str {
+        "HELP"
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        let topic = params
+            .first()
+            .map(|t| t.to_ascii_uppercase())
+            .unwrap_or_default();
+        let (head, body): (&str, &[&str]) = match topic.as_str() {
+            "" => (
+                "*",
+                &[
+                    "Use HELP <topic> for detail. Topics: CHANNELS SERVICES OPER.",
+                    "Channels: JOIN PART TOPIC MODE KICK INVITE NAMES LIST WHO WHOIS.",
+                    "Messaging: PRIVMSG, NOTICE, and AWAY to mark yourself away.",
+                    "Accounts: authenticate with SASL, or message NickServ (/NS).",
+                ],
+            ),
+            "CHANNELS" => (
+                "CHANNELS",
+                &[
+                    "JOIN #chan [key]      join (or create) a channel",
+                    "PART #chan [:reason]  leave a channel",
+                    "MODE #chan [+modes]   view or set channel modes",
+                    "TOPIC #chan :text     set the topic (needs +t rights)",
+                    "KICK #chan nick       remove a user (needs op/halfop)",
+                    "INVITE nick #chan     invite a user to a channel",
+                ],
+            ),
+            "SERVICES" => (
+                "SERVICES",
+                &[
+                    "Register/identify with NickServ: /NS REGISTER, /NS IDENTIFY.",
+                    "Channel ownership via ChanServ: /CS REGISTER #chan.",
+                    "Aliases /NS /CS /MS /OS /BS /HS message the matching service.",
+                ],
+            ),
+            "OPER" => (
+                "OPER",
+                &[
+                    "OPER <name> <pass>    become an IRC operator",
+                    "KILL nick :reason     disconnect a user",
+                    "KLINE/GLINE/ZLINE     ban a mask (network bans propagate)",
+                    "SAMODE/SAJOIN/SAKICK  act with services authority",
+                    "REHASH                reload the config",
+                ],
+            ),
+            other => {
+                s.numeric(
+                    uid,
+                    RPL_HELPSTART,
+                    &format!("{other} :No help available for that topic"),
+                );
+                s.numeric(uid, RPL_ENDOFHELP, &format!("{other} :End of /HELP"));
+                return CmdResult::Ok;
+            }
+        };
+        s.numeric(uid, RPL_HELPSTART, &format!("{head} :{} help", s.name));
+        for line in body {
+            s.numeric(uid, RPL_HELPTXT, &format!("{head} :{line}"));
+        }
+        s.numeric(uid, RPL_ENDOFHELP, &format!("{head} :End of /HELP"));
+        CmdResult::Ok
+    }
 }
 
 struct List;
