@@ -119,6 +119,48 @@ fn apply_censor(body: &str, censor: &[(String, String)]) -> Option<String> {
     Some(out)
 }
 
+/// Whether a direct message from `uid` to `tuid` is blocked by the recipient's PM
+/// gates: +c commonchans, +R regdeaf, +z ssl-only, +g callerid (not on the ACCEPT
+/// list), or SILENCE. Used to subject TAGMSG to the same restrictions as
+/// PRIVMSG/NOTICE (else typing/reaction tags leak past a block or a SILENCE).
+fn dm_blocked(s: &Server, uid: Uid, tuid: Uid) -> bool {
+    if uid == tuid {
+        return false;
+    }
+    let (deny_uncommon, reg_only, ssl_only, callerid) = match s.users.get(&tuid) {
+        Some(u) => (
+            u.flags.deny_uncommon,
+            u.flags.reg_only_pm,
+            u.flags.ssl_pm,
+            u.flags.callerid,
+        ),
+        None => return true,
+    };
+    if deny_uncommon && !s.is_oper(uid) {
+        let common = match (s.users.get(&uid), s.users.get(&tuid)) {
+            (Some(a), Some(b)) => a.channels.intersection(&b.channels).next().is_some(),
+            _ => false,
+        };
+        if !common {
+            return true;
+        }
+    }
+    if reg_only && !s.is_logged_in(uid) {
+        return true;
+    }
+    if ssl_only && !s.users.get(&uid).map(|u| u.secure).unwrap_or(false) {
+        return true;
+    }
+    if callerid {
+        let sender_nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
+        if !s.is_accepted(tuid, &sender_nick) {
+            return true;
+        }
+    }
+    let prefix = s.users.get(&uid).map(|u| u.prefix()).unwrap_or_default();
+    s.is_silenced(tuid, &prefix)
+}
+
 /// Percentage of the ASCII letters in `t` that are uppercase, or `None` when there
 /// are too few letters to judge (so short shouts like "OK" aren't blocked). Used
 /// by the +B anticaps channel mode.
@@ -416,7 +458,11 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
         let line = format!(":{prefix} {cmd} {target} :{body}");
         let ctags = s.line_ctags.clone();
         let msgid = s.next_msgid(); // one id shared by every recipient of this message
-        record(s, &key, &prefix, cmd, target, &body, &msgid); // for CHATHISTORY
+        // Don't store a +U (opmoderated) ops-only message in CHATHISTORY / +H replay,
+        // else a non-op could retrieve what was withheld from them live.
+        if !op_only {
+            record(s, &key, &prefix, cmd, target, &body, &msgid); // for CHATHISTORY
+        }
         let members: Vec<Uid> = s
             .channels
             .get(&key)
@@ -721,6 +767,10 @@ impl Command for TagMsg {
                 }
             }
         } else if let Some(tuid) = s.find_nick(target) {
+            // TAGMSG obeys the same PM gates as PRIVMSG/NOTICE (+c/+R/+z/+g/SILENCE)
+            if dm_blocked(s, uid, tuid) {
+                return CmdResult::Ok;
+            }
             if s.users
                 .get(&tuid)
                 .map(|u| u.caps.message_tags)
