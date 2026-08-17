@@ -623,12 +623,13 @@ impl Ircd {
         if !self.server.users.contains_key(&uid) {
             return;
         }
-        let registered = self.server.users[&uid].registered;
-        if registered {
-            // fire the quit hook while the user still exists
-            for m in &mut self.modules {
-                m.on_user_quit(&mut self.server, uid, reason);
-            }
+        // Fire the quit hook while the user still exists — for EVERY user, registered
+        // or not. A client that disconnects mid-registration (e.g. a captcha bot held
+        // before registration) still has per-uid module state to reclaim, and Uids are
+        // never reused, so skipping this leaks one entry per such disconnect (which
+        // scales with exactly the hostile traffic the captcha/challenge modules target).
+        for m in &mut self.modules {
+            m.on_user_quit(&mut self.server, uid, reason);
         }
         self.server.remove_user(uid, reason);
     }
