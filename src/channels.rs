@@ -601,6 +601,10 @@ impl Server {
                 ch.bans.retain(|b| b.mask != mask);
             }
             self.to_channel(&key, &format!(":{} MODE {name} -b {mask}", self.name), None);
+            // Propagate the removal to linked servers, else they keep the ban
+            // forever (they stored the original +b without its expiry).
+            let sid = self.sid.clone();
+            self.propagate_chan_mode(&sid, &name, "-b", &[mask]);
         }
     }
 
@@ -808,9 +812,14 @@ impl Server {
                 }
             }
         }
-        // +l full — with +L redirect, bounce the user to the target instead (opers override)
+        // +l full — with +L redirect, bounce the user to the target instead (opers override).
+        // Count every member, local AND remote (services/other-server users), so the
+        // limit reflects the channel's real network-wide size like InspIRCd.
         if let Some(ch) = self.channels.get(&key) {
-            let full = ch.modes.limit.is_some_and(|l| ch.members.len() as u32 >= l);
+            let full = ch
+                .modes
+                .limit
+                .is_some_and(|l| (ch.members.len() + ch.rmembers.len()) as u32 >= l);
             let redirect = ch.modes.redirect.clone();
             if full && is_oper {
                 overrode = true;
