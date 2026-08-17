@@ -31,7 +31,9 @@ fn range_of(ip: IpAddr, v4cidr: u8, v6cidr: u8) -> (String, String) {
     match ip {
         IpAddr::V4(a) => {
             let o = a.octets();
-            let keep = (v4cidr / 8).min(4) as usize;
+            // byte-granular: keep at least one octet, so a sub-/8 config can never
+            // collapse the ban mask to "*" and z-line the entire network.
+            let keep = (v4cidr / 8).clamp(1, 4) as usize;
             match keep {
                 0 => ("v4:*".to_string(), "*".to_string()),
                 4 => (format!("v4:{}", a), a.to_string()),
