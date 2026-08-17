@@ -2551,4 +2551,94 @@ mod tests {
             ":services.example.net NOTICE alice :*** NickServ: welcome back"
         );
     }
+
+    // A services IRCv3 standard reply (ENCAP * SWSTDRPL, e.g. a failed NickServ
+    // IDENTIFY) must be re-emitted as a FAIL to a standard-replies client — not
+    // dropped. Regression: SWSTDRPL fell through on_link's `_ => {}`.
+    #[test]
+    fn services_standard_reply_reaches_the_client() {
+        use crate::config::Config;
+        use crate::extensible::Extensible;
+        use crate::users::{Caps, UserFlags};
+        use std::collections::HashSet;
+        use std::sync::atomic::AtomicU64;
+        use std::sync::{mpsc, Arc};
+
+        let (tx, _rx) = mpsc::channel();
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+        s.servers.insert(
+            "42S".into(),
+            RemoteServer {
+                sid: "42S".into(),
+                name: "services.example.net".into(),
+                desc: String::new(),
+                via: 1,
+                is_service: true,
+                silent_service: false,
+            },
+        );
+        let (utx, urx) = mpsc::channel();
+        let mut caps = Caps::default();
+        caps.standard_replies = true;
+        s.users.insert(
+            7,
+            User {
+                uid: 7,
+                uuid: "0AAAAAAAB".into(),
+                nick: "alice".into(),
+                ident: "a".into(),
+                realname: "a".into(),
+                host: "localhost".into(),
+                cloak: String::new(),
+                vhost: None,
+                secure: false,
+                certfp: None,
+                account: None,
+                signon: 0,
+                nick_ts: 0,
+                addr: "127.0.0.1:1".parse().unwrap(),
+                port: 6667,
+                registered: true,
+                dns_pending: false,
+                ident_pending: false,
+                auth_pending: false,
+                waitpong: None,
+                class: None,
+                pass: None,
+                deferred: Vec::new(),
+                cap: false,
+                cap_302: false,
+                caps,
+                sasl_mech: None,
+                channels: HashSet::new(),
+                watch: Vec::new(),
+                monitor: Vec::new(),
+                silence: Vec::new(),
+                accept: Vec::new(),
+                quitting: None,
+                flags: UserFlags::default(),
+                last_active: 0,
+                ping_sent: false,
+                ext: Extensible::default(),
+                out: OutSink::Thread(utx),
+                sock: None,
+            },
+        );
+        s.uuid_local.insert("0AAAAAAAB".into(), 7);
+
+        let msg = crate::message::parse(
+            ":42S SWSTDRPL 0AAAAAAAB * FAIL IDENTIFY ACCOUNT_NOT_REGISTERED :that account isn't registered",
+        )
+        .unwrap();
+        s.link_stdreply_recv(1, &msg);
+
+        let got = urx
+            .try_recv()
+            .expect("a services standard reply must reach the client, not be dropped");
+        let sname = s.name.clone();
+        assert_eq!(
+            got,
+            format!(":{sname} FAIL IDENTIFY ACCOUNT_NOT_REGISTERED :that account isn't registered")
+        );
+    }
 }
