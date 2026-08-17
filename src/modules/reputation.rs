@@ -135,14 +135,21 @@ impl Module for ReputationMod {
         self.since_bump += t;
         self.since_expire += t;
         self.since_save += t;
+        // Scores only ever change in bump_scores / expire_old, so persist right
+        // after each: the on-disk table then always reflects the live one, and a
+        // restart (however frequent) reloads the current scores instead of
+        // reverting to whatever the coarse periodic timer last happened to write.
         if self.since_bump >= dur(s, "reputation_bumpinterval", 300) {
             self.since_bump = 0;
             bump_scores(s);
+            save(s);
         }
         if self.since_expire >= dur(s, "reputation_expireinterval", 605) {
             self.since_expire = 0;
             expire_old(s);
+            save(s);
         }
+        // Backstop flush: guards any future mutation path that forgets to persist.
         if self.since_save >= dur(s, "reputation_saveinterval", 902) {
             self.since_save = 0;
             save(s);
