@@ -201,6 +201,9 @@ impl Server {
             "METADATA" if registered => self.link_metadata(uid, msg),
             "CHGHOST" if registered => self.link_chghost_recv(uid, msg),
             "CHGIDENT" if registered => self.link_chgident_recv(uid, msg),
+            "SWSTDRPL" if registered => self.link_stdreply_recv(uid, msg),
+            "OPERTYPE" if registered => self.link_opertype_recv(uid, msg),
+            "REDACT" if registered => self.link_redact_recv(uid, msg),
             "SASL" if registered => self.link_sasl(uid, msg),
             "BURST" => {
                 if let Some(l) = self.links.get_mut(&uid) {
@@ -423,6 +426,11 @@ impl Server {
         let mut v = vec![self.uid_line(u)];
         if let Some(acct) = &u.account {
             v.push(format!(":{} METADATA {} accountname :{acct}", self.sid, u.uuid));
+        }
+        // ssl_cert so services learn the client's TLS fingerprint (cert auto-login,
+        // fingerprint extbans). Flags `vsT` = valid/secure/trusted; no `E` (error).
+        if let Some(fp) = &u.certfp {
+            v.push(format!(":{} METADATA {} ssl_cert :vsT {fp}", self.sid, u.uuid));
         }
         v
     }
@@ -839,26 +847,118 @@ impl Server {
     /// `:src METADATA <target> <key> :<value>` — services sync metadata onto a
     /// user. We apply `accountname` (login/logout); other keys are accepted and
     /// ignored for now. Forwarded on if the target is remote.
+    /// `ENCAP * SWSTDRPL <client-uuid> <src|*> <FAIL|WARN|NOTE> <command|*> <code> :<text>`
+    /// — a services IRCv3 standard reply, re-emitted locally to the target client (or
+    /// forwarded on). Without this a `standard-replies` client sees no feedback when a
+    /// services command fails (e.g. a bad NickServ IDENTIFY).
+    fn link_stdreply_recv(&mut self, from: Uid, msg: &Message) {
+        if msg.params.len() < 5 {
+            return;
+        }
+        let to = msg.params[0].clone();
+        let Some(&dst) = self.uuid_local.get(&to) else {
+            self.forward_to_target(&to, msg, from);
+            return;
+        };
+        let (command, code) = (msg.params[3].clone(), msg.params[4].clone());
+        let text = msg.params.get(5).cloned().unwrap_or_default();
+        match msg.params[2].as_str() {
+            "WARN" => self.warn(dst, &command, &code, &text),
+            "NOTE" => self.note(dst, &command, &code, &text),
+            _ => self.fail(dst, &command, &code, &text),
+        }
+    }
+
+    /// `:<uuid> OPERTYPE :<type>` — a remote user opered up; reflect it on their modes
+    /// so the network's view of who is an operator stays consistent.
+    fn link_opertype_recv(&mut self, _from: Uid, msg: &Message) {
+        if let Some(src) = msg.source.as_deref() {
+            if let Some(ru) = self.remote_users.get_mut(src) {
+                if !ru.modes.contains('o') {
+                    ru.modes.push('o');
+                }
+            }
+        }
+    }
+
+    /// `:<uuid> REDACT <#chan> <msgid> [:reason]` — a services/remote message deletion:
+    /// relay it to local channel members who understand draft/message-redaction, drop it
+    /// from CHATHISTORY, and forward to other links with members there.
+    fn link_redact_recv(&mut self, via: Uid, msg: &Message) {
+        if msg.params.len() < 2 {
+            return;
+        }
+        let Some(src) = msg.source.clone() else {
+            return;
+        };
+        let (target, msgid) = (msg.params[0].clone(), msg.params[1].clone());
+        if !target.starts_with('#') {
+            return;
+        }
+        let key = target.to_ascii_lowercase();
+        let Some(prefix) = self
+            .uuid_prefix(&src)
+            .or_else(|| self.servers.get(&src).map(|s| s.name.clone()))
+        else {
+            return;
+        };
+        if self.channels.contains_key(&key) {
+            let line = match msg.params.get(2) {
+                Some(r) => format!(":{prefix} REDACT {target} {msgid} :{r}"),
+                None => format!(":{prefix} REDACT {target} {msgid}"),
+            };
+            let members: Vec<Uid> = self.channels[&key].members.keys().copied().collect();
+            for m in members {
+                if self.users.get(&m).map(|u| u.caps.message_redaction).unwrap_or(false) {
+                    self.send(m, line.clone());
+                }
+            }
+            for l in self.channel_link_targets(&key, Some(via)) {
+                self.link_out(l, msg.to_wire());
+            }
+        }
+        crate::modules::chathistory::forget(self, &key, &msgid);
+    }
+
     fn link_metadata(&mut self, from: Uid, msg: &Message) {
         if msg.params.len() < 3 {
             return;
         }
-        let (target, key, value) = (&msg.params[0], &msg.params[1], &msg.params[2]);
-        let Some(tuid) = self.link_local_target(target) else {
-            self.forward_to_target(target, msg, from);
+        let (target, key, value) = (
+            msg.params[0].clone(),
+            msg.params[1].clone(),
+            msg.params[2].clone(),
+        );
+        let Some(tuid) = self.link_local_target(&target) else {
+            self.forward_to_target(&target, msg, from);
             return;
         };
-        if key == "accountname" {
-            // account login is a services authority: ignore it from an ordinary peer
-            // (each hop re-checks, so forwarding an unauthorised one stays harmless).
-            if !self.source_is_service(msg) {
-                return;
+        // Metadata pushed onto a local user (login state, profile fields) is a
+        // services authority: ignore it from an ordinary peer. Each hop re-checks,
+        // so forwarding an unauthorised one stays harmless.
+        if !self.source_is_service(msg) {
+            return;
+        }
+        match key.as_str() {
+            "accountname" => {
+                if value.is_empty() || value == "*" {
+                    self.logout(tuid);
+                } else {
+                    self.set_login(tuid, &value);
+                }
             }
-            if value.is_empty() || value == "*" {
-                self.logout(tuid);
-            } else {
-                self.set_login(tuid, value);
+            // profile fields NickServ SET populates — surface them over metadata-2
+            "avatar" | "bio" | "pronouns" | "timezone" | "url" => {
+                let nick = self.users.get(&tuid).map(|u| u.nick.clone()).unwrap_or_default();
+                let setter = msg
+                    .source
+                    .as_deref()
+                    .and_then(|src| self.servers.get(src).map(|sv| sv.name.clone()))
+                    .unwrap_or_else(|| self.name.clone());
+                let v = (!value.is_empty()).then_some(value.as_str());
+                crate::modules::metadata::apply_user(self, tuid, &nick, &key, v, &setter);
             }
+            _ => {}
         }
     }
 

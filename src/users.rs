@@ -411,6 +411,13 @@ impl Server {
         for chan in chans {
             self.join(uid, &chan, None);
         }
+        // tell services / linked servers this user is now an operator, so services
+        // (OperServ etc.) can track and act on network operators.
+        if !self.links.is_empty() {
+            if let Some(uuid) = self.users.get(&uid).map(|u| u.uuid.clone()) {
+                self.propagate(&format!(":{uuid} OPERTYPE :IRC_Operator"), None);
+            }
+        }
     }
 
     /// Send a WALLOPS to every oper and every +w user.

@@ -220,6 +220,34 @@ impl Command for MetadataCmd {
     }
 }
 
+/// Apply a metadata key pushed onto a local user from services (or another server)
+/// and echo the change to that user if they negotiated the metadata cap. Backs the
+/// profile keys (avatar/bio/pronouns/timezone/url) that NickServ SET populates, so
+/// they surface over draft/metadata-2 instead of being dropped on the link.
+pub fn apply_user(s: &mut Server, uid: Uid, nick: &str, mkey: &str, value: Option<&str>, setter: &str) {
+    let sk = format!("u{uid}");
+    {
+        let st = s.ext.get_or_insert_with::<MetaStore>(MetaStore::default);
+        match value {
+            Some(v) => {
+                st.0.entry(sk).or_default().insert(mkey.to_string(), v.to_string());
+            }
+            None => {
+                if let Some(m) = st.0.get_mut(&sk) {
+                    m.remove(mkey);
+                }
+            }
+        }
+    }
+    if s.users.get(&uid).map(|u| u.caps.metadata).unwrap_or(false) {
+        let note = match value {
+            Some(v) => format!(":{setter} METADATA {nick} {mkey} * :{v}"),
+            None => format!(":{setter} METADATA {nick} {mkey} *"),
+        };
+        s.send(uid, note);
+    }
+}
+
 /// Where channel metadata is persisted (beside the config).
 fn db_path(s: &Server) -> String {
     format!("{}.metadata", s.conf_path)

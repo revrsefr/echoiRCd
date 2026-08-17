@@ -66,6 +66,16 @@ pub fn record(
     }
 }
 
+/// Drop a message from a conversation's history by msgid (a redaction), so replays
+/// don't resurrect it. Used by both the client REDACT command and an inbound S2S REDACT.
+pub fn forget(s: &mut Server, key: &str, msgid: &str) {
+    if let Some(h) = s.ext.get_mut::<History>() {
+        if let Some(buf) = h.0.get_mut(key) {
+            buf.retain(|m| m.msgid != msgid);
+        }
+    }
+}
+
 /// Canonical CHATHISTORY key for a DM between two nicks (order-independent; the
 /// `\0` prefix keeps it from ever colliding with a `#channel` key).
 pub fn dm_key(a: &str, b: &str) -> String {
