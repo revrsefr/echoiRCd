@@ -199,6 +199,8 @@ impl Server {
             "SVSCMODE" if registered && self.source_is_service(msg) => self.link_svscmode(uid, msg),
             "ENCAP" if registered => self.link_encap(uid, msg),
             "METADATA" if registered => self.link_metadata(uid, msg),
+            "CHGHOST" if registered => self.link_chghost_recv(uid, msg),
+            "CHGIDENT" if registered => self.link_chgident_recv(uid, msg),
             "SASL" if registered => self.link_sasl(uid, msg),
             "BURST" => {
                 if let Some(l) = self.links.get_mut(&uid) {
@@ -799,6 +801,39 @@ impl Server {
             .values()
             .find(|sv| sv.sid == mask || sv.name.eq_ignore_ascii_case(mask))
             .map(|sv| sv.via)
+    }
+
+    /// `:<src> CHGHOST <target> <newhost>` — a services vhost / oper host change
+    /// (arrives ENCAP'd to the target's server). Apply to a local target (which
+    /// propagates + hostcycles via `change_host_ident`), or forward toward a remote one.
+    fn link_chghost_recv(&mut self, from: Uid, msg: &Message) {
+        let (Some(target), Some(host)) =
+            (msg.params.first().cloned(), msg.params.get(1).cloned())
+        else {
+            return;
+        };
+        match self.link_local_target(&target) {
+            Some(tuid) => self.change_host_ident(tuid, None, Some(&host)),
+            None => {
+                self.forward_to_target(&target, msg, from);
+            }
+        }
+    }
+
+    /// `:<src> CHGIDENT <target> <newident>` — a services/oper ident change; the
+    /// `ident@host` form of a vhost arrives as a CHGIDENT then a CHGHOST.
+    fn link_chgident_recv(&mut self, from: Uid, msg: &Message) {
+        let (Some(target), Some(ident)) =
+            (msg.params.first().cloned(), msg.params.get(1).cloned())
+        else {
+            return;
+        };
+        match self.link_local_target(&target) {
+            Some(tuid) => self.change_host_ident(tuid, Some(&ident), None),
+            None => {
+                self.forward_to_target(&target, msg, from);
+            }
+        }
     }
 
     /// `:src METADATA <target> <key> :<value>` — services sync metadata onto a
