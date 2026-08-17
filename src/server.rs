@@ -1049,6 +1049,28 @@ impl Server {
     /// to the user, and sends RPL_HOSTHIDDEN (396) when the host changed. Local
     /// scope for now.
     pub fn change_host_ident(&mut self, uid: Uid, new_ident: Option<&str>, new_host: Option<&str>) {
+        self.change_host_ident_inner(uid, new_ident, new_host, true);
+    }
+
+    /// Like [`change_host_ident`] but does NOT propagate over S2S — for applying an
+    /// inbound CHGHOST/CHGIDENT (the link layer already relayed it; re-propagating
+    /// would echo it back toward its origin).
+    pub fn change_host_ident_quiet(
+        &mut self,
+        uid: Uid,
+        new_ident: Option<&str>,
+        new_host: Option<&str>,
+    ) {
+        self.change_host_ident_inner(uid, new_ident, new_host, false);
+    }
+
+    fn change_host_ident_inner(
+        &mut self,
+        uid: Uid,
+        new_ident: Option<&str>,
+        new_host: Option<&str>,
+        propagate: bool,
+    ) {
         let Some(u) = self.users.get(&uid) else {
             return;
         };
@@ -1076,6 +1098,18 @@ impl Server {
         self.notify_peers(uid, &line, |c| c.chghost);
         if aware {
             self.send(uid, line);
+        }
+        // propagate to linked servers so their view stays in sync (echoIRCd applies an
+        // inbound ENCAP CHGHOST/CHGIDENT; a peer that doesn't understand ENCAP ignores
+        // it). Skipped when applying an inbound change, so it isn't echoed to its origin.
+        if propagate && !self.links.is_empty() {
+            let (uuid, sid) = (self.users[&uid].uuid.clone(), self.sid.clone());
+            if let Some(i) = new_ident {
+                self.propagate(&format!(":{sid} ENCAP * CHGIDENT {uuid} {i}"), None);
+            }
+            if let Some(h) = new_host {
+                self.propagate(&format!(":{sid} ENCAP * CHGHOST {uuid} {h}"), None);
+            }
         }
         // hostcycle — clients WITHOUT the chghost cap only learn the new host via a
         // PART+JOIN, so cycle them through each shared channel (chghost peers already

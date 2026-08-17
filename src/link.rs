@@ -821,7 +821,7 @@ impl Server {
             return;
         };
         match self.link_local_target(&target) {
-            Some(tuid) => self.change_host_ident(tuid, None, Some(&host)),
+            Some(tuid) => self.change_host_ident_quiet(tuid, None, Some(&host)),
             None => {
                 self.forward_to_target(&target, msg, from);
             }
@@ -837,7 +837,7 @@ impl Server {
             return;
         };
         match self.link_local_target(&target) {
-            Some(tuid) => self.change_host_ident(tuid, Some(&ident), None),
+            Some(tuid) => self.change_host_ident_quiet(tuid, Some(&ident), None),
             None => {
                 self.forward_to_target(&target, msg, from);
             }
