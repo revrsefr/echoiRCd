@@ -446,15 +446,27 @@ impl Command for Who {
                 }
                 Some(ch) => {
                     let name = ch.name.clone();
+                    // Mirror NAMES visibility: a non-op viewer of a +u (auditorium)
+                    // channel sees only ops, and +D (delayjoin) members who haven't
+                    // revealed themselves are hidden from everyone but themselves —
+                    // otherwise WHO leaks members that JOIN/NAMES deliberately hide.
+                    let hide = ch.modes.auditorium
+                        && ch.members.get(&uid).map(|m| m.rank()).unwrap_or(0)
+                            < crate::channels::RANK_OP;
                     ch.members
                         .iter()
-                        .map(|(&m, mem)| {
+                        .filter_map(|(&m, mem)| {
+                            if m != uid
+                                && ((hide && mem.rank() < crate::channels::RANK_OP) || mem.hidden)
+                            {
+                                return None;
+                            }
                             let p = if multi {
                                 mem.all_prefixes()
                             } else {
                                 mem.prefix_char().to_string()
                             };
-                            (m, name.clone(), p)
+                            Some((m, name.clone(), p))
                         })
                         .collect()
                 }
