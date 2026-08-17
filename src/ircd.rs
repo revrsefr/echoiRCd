@@ -545,13 +545,19 @@ impl Ircd {
 
     fn complete_registration(&mut self, uid: Uid) {
         for m in &mut self.modules {
-            if m.on_user_register(&mut self.server, uid) == ModResult::Deny {
-                self.server.send(
-                    uid,
-                    "ERROR :Closing link (registration refused)".to_string(),
-                );
-                self.server.remove_user(uid, "Registration refused");
-                return;
+            match m.on_user_register(&mut self.server, uid) {
+                ModResult::Deny => {
+                    self.server.send(
+                        uid,
+                        "ERROR :Closing link (registration refused)".to_string(),
+                    );
+                    self.server.remove_user(uid, "Registration refused");
+                    return;
+                }
+                // a challenge is pending: keep the connection, don't welcome yet.
+                // A later command (the CAPTCHA/VERIFYCHALLENGE reply) re-runs this.
+                ModResult::Hold => return,
+                _ => {}
             }
         }
         // x-line: refuse a banned host / ip before welcoming

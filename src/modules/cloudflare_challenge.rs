@@ -93,7 +93,8 @@ impl Module for CloudflareChallenge {
             let msg = template.replace("{url}", &link);
             srv.send(uid, format!(":{} NOTICE {nick} :{msg}", srv.name));
         }
-        ModResult::Deny
+        // Hold the connection for the challenge (VERIFYCHALLENGE <token>), don't drop it.
+        ModResult::Hold
     }
 }
 

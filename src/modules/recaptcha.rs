@@ -103,7 +103,8 @@ impl Module for ReCaptcha {
             let msg = template.replace("{url}", &link);
             srv.send(uid, format!(":{} NOTICE {nick} :{msg}", srv.name));
         }
-        ModResult::Deny
+        // Hold the connection for the challenge (CAPTCHA <token>), don't tear it down.
+        ModResult::Hold
     }
 }
 

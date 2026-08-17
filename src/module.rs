@@ -15,6 +15,12 @@ pub enum ModResult {
     Passthru,
     Allow,
     Deny,
+    /// `on_user_register` only: hold the client in the pre-registration state (a
+    /// challenge is pending) without completing OR refusing the link. Registration
+    /// resumes on a later command once the hold clears (e.g. the client presents a
+    /// CAPTCHA/VERIFYCHALLENGE token). If they never do, the registration timeout
+    /// reaps them like any other stalled connection.
+    Hold,
 }
 
 /// A queued notify-event, drained by the core after each command.
