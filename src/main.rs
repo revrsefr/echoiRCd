@@ -171,6 +171,7 @@ fn main() {
                                         tls_proxy_trust,
                                         tls_reactors,
                                         tls_limiter,
+                                        handshake_timeout,
                                     )
                                 });
                             }
@@ -203,6 +204,7 @@ fn main() {
                         Vec::new(),
                         Vec::new(),
                         None,
+                        handshake_timeout,
                     )
                 });
             }

@@ -942,6 +942,7 @@ pub fn accept_loop(
     proxy_trust: Vec<String>,
     reactors: Vec<ReactorHandle>,
     limiter: Option<Arc<AcceptLimiter>>,
+    handshake_timeout: Option<Duration>,
 ) {
     let mut rr: usize = 0;
     for conn in listener.incoming() {
@@ -1019,7 +1020,17 @@ pub fn accept_loop(
                 let core_tx = core.clone();
                 let pt = proxy_trust.clone();
                 thread::spawn(move || {
-                    tls_conn(backend, stream, uid, addr, core_tx, link, max_line, pt)
+                    tls_conn(
+                        backend,
+                        stream,
+                        uid,
+                        addr,
+                        core_tx,
+                        link,
+                        max_line,
+                        pt,
+                        handshake_timeout,
+                    )
                 });
             }
         }
@@ -1121,6 +1132,7 @@ fn tls_conn(
     link: bool,
     max_line: usize,
     proxy_trust: Vec<String>,
+    handshake_timeout: Option<Duration>,
 ) {
     // Keep a raw handle so the core can force the socket shut later.
     let Ok(shutdown) = stream.try_clone() else {
@@ -1149,6 +1161,10 @@ fn tls_conn(
     } else {
         addr
     };
+    // Bound the blocking TLS handshake: a peer that stalls it would otherwise pin this
+    // thread + socket forever (no uid yet, so nothing else reaps it). Reset to TLS_POLL
+    // once the handshake completes (below), so it doesn't clip a live client's idle reads.
+    let _ = stream.set_read_timeout(handshake_timeout);
     let mut conn = match backend.accept(stream) {
         Ok(c) => c,
         Err(_) => {
