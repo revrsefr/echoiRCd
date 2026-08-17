@@ -23,12 +23,33 @@ use std::collections::HashMap;
 
 use crate::command::{CmdResult, Command};
 use crate::http::{json_str, urlencode};
+use crate::module::Module;
 use crate::server::{now, Server};
 use crate::Uid;
 
 /// Per-IP REGISTER attempt timestamps, for rate limiting. Stored in `Server.ext`.
 #[derive(Default)]
 struct RateState(HashMap<String, Vec<u64>>);
+
+/// Ticks the rate-limit table: prunes each IP's timestamps to the window and drops
+/// IPs with none left, so the map can't accumulate one entry per distinct IP that
+/// ever issued a REGISTER over the process lifetime.
+pub struct AcctRegGc;
+impl Module for AcctRegGc {
+    fn name(&self) -> &'static str {
+        "account_registration"
+    }
+    fn on_tick(&mut self, s: &mut Server) {
+        let window = s.conf_num("acctregister_ratetime", 3600u64);
+        let n = now();
+        if let Some(st) = s.ext.get_mut::<RateState>() {
+            st.0.retain(|_, hist| {
+                hist.retain(|&t| n.saturating_sub(t) < window);
+                !hist.is_empty()
+            });
+        }
+    }
+}
 
 fn enabled(s: &Server) -> bool {
     s.conf_bool("account_registration", false) && s.conf("acctregister_registerurl").is_some()
