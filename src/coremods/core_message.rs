@@ -648,8 +648,9 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
                 .get(&tuid)
                 .map(|u| u.nick.to_ascii_lowercase())
                 .unwrap_or_default();
+            let maxacc = s.conf_num("maxaccept", crate::watch::ACCEPT_MAX);
             if let Some(su) = s.users.get_mut(&uid) {
-                if !tnick.is_empty() && !su.accept.contains(&tnick) {
+                if !tnick.is_empty() && su.accept.len() < maxacc && !su.accept.contains(&tnick) {
                     su.accept.push(tnick);
                 }
             }
