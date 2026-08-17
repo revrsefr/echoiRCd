@@ -690,6 +690,12 @@ impl Server {
             for m in seen {
                 self.send(m, line.clone());
             }
+            // Scrub any pending +i invite for this user from channels they never joined
+            // (a member consumes their invite on join; a never-joined invite for a now-
+            // departed uid would otherwise linger forever on a persistent channel).
+            for ch in self.channels.values_mut() {
+                ch.invites.remove(&uid);
+            }
             self.channels.retain(|_, c| c.keep_alive());
             self.watch_notify_offline(&user.nick); // tell WATCH/MONITOR watchers
         }
