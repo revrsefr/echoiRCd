@@ -1278,6 +1278,28 @@ mod tests {
         Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)))
     }
 
+    // The tick purge reclaims per-member flood state of users who left, and +J
+    // rejoin-block entries whose window elapsed — the slow high-churn leak.
+    #[test]
+    fn purge_flood_state_reclaims_departed_and_expired() {
+        use crate::channels::{Channel, Member};
+        let mut s = srv();
+        let mut c = Channel::new("#c");
+        c.members.insert(1, Member::default()); // uid 1 is a current member
+        c.msgflood_hits.insert(1, vec![now()]); // member -> kept
+        c.msgflood_hits.insert(99, vec![now()]); // departed -> dropped
+        c.modes.kicknorejoin = Some(60);
+        c.recent_kicks.insert(99, now().saturating_sub(120)); // expired -> dropped
+        c.recent_kicks.insert(88, now()); // still within window -> kept
+        s.channels.insert("#c".into(), c);
+        s.purge_flood_state();
+        let ch = &s.channels["#c"];
+        assert!(ch.msgflood_hits.contains_key(&1));
+        assert!(!ch.msgflood_hits.contains_key(&99), "departed member's +f state dropped");
+        assert!(!ch.recent_kicks.contains_key(&99), "expired +J entry dropped");
+        assert!(ch.recent_kicks.contains_key(&88), "fresh +J entry kept");
+    }
+
     #[test]
     fn resolved_host_applied_only_when_configured() {
         let mut s = srv(); // use_resolved_host = true (default)

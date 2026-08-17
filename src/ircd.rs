@@ -639,6 +639,7 @@ impl Ircd {
         self.server.ping_links(); // keepalive on every server link
         self.server.purge_xlines(); // drop expired server bans
         self.server.purge_tbans(); // lift expired timed channel bans (TBAN)
+        self.server.purge_flood_state(); // reclaim per-member +f/+J state of departed users
         for m in &mut self.modules {
             m.on_tick(&mut self.server); // timer-driven modules (e.g. reputation)
         }

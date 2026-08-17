@@ -608,6 +608,28 @@ impl Server {
         }
     }
 
+    /// Drop per-member flood state left behind by users who have left a channel
+    /// (a slow leak on high-churn channels — Uids are never reused, so departed
+    /// entries never get overwritten), and +J rejoin-block entries whose window has
+    /// elapsed. Called from the background tick.
+    pub fn purge_flood_state(&mut self) {
+        let now = now();
+        for ch in self.channels.values_mut() {
+            // +f message-time counters only matter for current members
+            if !ch.msgflood_hits.is_empty() {
+                let members = &ch.members;
+                ch.msgflood_hits.retain(|uid, _| members.contains_key(uid));
+            }
+            // +J recent-kick timestamps only matter within the (current) rejoin-block
+            // window; once it's elapsed — or +J is off — the entry can't block anyone.
+            if !ch.recent_kicks.is_empty() {
+                let window = ch.modes.kicknorejoin.unwrap_or(0) as u64;
+                ch.recent_kicks
+                    .retain(|_, ts| window > 0 && now.saturating_sub(*ts) < window);
+            }
+        }
+    }
+
     /// Force `uid` out of `chan` (SAPART / SVSPART enforcement): announce the PART
     /// to the channel and to links, drop the membership, reap the channel if empty.
     /// No-op if the user isn't a member.
