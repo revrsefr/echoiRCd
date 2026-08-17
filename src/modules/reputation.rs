@@ -101,7 +101,10 @@ fn key_of(s: &Server, uid: Uid) -> Option<IpAddr> {
 }
 
 /// Whether `uid` is in at least one channel with `min` or more members (the
-/// `minchanmembers` gate — stops idle bots farming score alone).
+/// `minchanmembers` gate — stops idle bots farming score alone). Counts every
+/// member, local AND remote (services bots, users on other servers), matching
+/// the network-wide channel population — otherwise a user sharing a channel with
+/// only remote/services members never bumps and their score freezes.
 fn in_active_channel(s: &Server, uid: Uid, min: usize) -> bool {
     if min <= 1 {
         return true;
@@ -112,7 +115,7 @@ fn in_active_channel(s: &Server, uid: Uid, min: usize) -> bool {
             u.channels.iter().any(|k| {
                 s.channels
                     .get(k)
-                    .map(|c| c.members.len() >= min)
+                    .map(|c| c.members.len() + c.rmembers.len() >= min)
                     .unwrap_or(false)
             })
         })
@@ -332,5 +335,97 @@ pub fn load(s: &mut Server) {
                 store.0.insert(ip, Entry { score, last_seen });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::channels::{Channel, Member};
+    use crate::config::Config;
+    use crate::extensible::Extensible;
+    use crate::socketengine::OutSink;
+    use crate::users::{Caps, User, UserFlags};
+    use std::collections::HashSet;
+    use std::sync::atomic::AtomicU64;
+    use std::sync::{mpsc, Arc};
+
+    // The minchanmembers bump gate must count ALL members — local plus remote
+    // (services bots, users on other servers) — like InspIRCd's GetUsers().size().
+    // Regression: counting only local members froze the score of anyone sharing a
+    // channel with remote/services members (e.g. reverse + a bot in #echoircd).
+    #[test]
+    fn active_channel_counts_remote_members() {
+        let (tx, _rx) = mpsc::channel();
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+        let (utx, _urx) = mpsc::channel();
+        let mut chans = HashSet::new();
+        chans.insert("#echoircd".to_string());
+        s.users.insert(
+            1,
+            User {
+                uid: 1,
+                uuid: "0AAAAAAAB".into(),
+                nick: "reverse".into(),
+                ident: "r".into(),
+                realname: "r".into(),
+                host: "h".into(),
+                cloak: String::new(),
+                vhost: None,
+                secure: false,
+                certfp: None,
+                account: Some("reverse".into()),
+                signon: 0,
+                nick_ts: 0,
+                addr: "127.0.0.1:1".parse().unwrap(),
+                port: 6667,
+                registered: true,
+                dns_pending: false,
+                ident_pending: false,
+                auth_pending: false,
+                waitpong: None,
+                class: None,
+                pass: None,
+                deferred: Vec::new(),
+                cap: false,
+                cap_302: false,
+                caps: Caps::default(),
+                sasl_mech: None,
+                channels: chans,
+                watch: Vec::new(),
+                monitor: Vec::new(),
+                silence: Vec::new(),
+                accept: Vec::new(),
+                quitting: None,
+                flags: UserFlags::default(),
+                last_active: 0,
+                ping_sent: false,
+                ext: Extensible::default(),
+                out: OutSink::Thread(utx),
+                sock: None,
+            },
+        );
+        // #echoircd: 1 local (reverse) + 2 remote (a user + a services bot) = 3 total
+        let mut c = Channel::new("#echoircd");
+        c.members.insert(1, Member::default());
+        c.rmembers.insert("42SBOT0001".into(), Member::default());
+        c.rmembers.insert("10HUSER002".into(), Member::default());
+        s.channels.insert("#echoircd".into(), c);
+
+        assert!(
+            in_active_channel(&s, 1, 3),
+            "3 total members (1 local + 2 remote) must satisfy minchanmembers=3"
+        );
+
+        // drop one remote member -> 2 total -> below the gate
+        s.channels
+            .get_mut("#echoircd")
+            .unwrap()
+            .rmembers
+            .remove("10HUSER002");
+        assert!(
+            !in_active_channel(&s, 1, 3),
+            "2 total members must not satisfy minchanmembers=3"
+        );
     }
 }
