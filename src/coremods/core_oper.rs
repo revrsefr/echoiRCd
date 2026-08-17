@@ -443,8 +443,11 @@ impl Command for SaNick {
             );
             return CmdResult::Fail;
         }
-        if s.find_nick(newnick).is_some()
-            || s.remote_nick.contains_key(&newnick.to_ascii_lowercase())
+        // allow a case-only change: the in-use index would otherwise match the target itself
+        let cur = s.users.get(&tuid).map(|u| u.nick.clone()).unwrap_or_default();
+        if !newnick.eq_ignore_ascii_case(&cur)
+            && (s.find_nick(newnick).is_some()
+                || s.remote_nick.contains_key(&newnick.to_ascii_lowercase()))
         {
             s.numeric(
                 uid,
@@ -493,8 +496,11 @@ impl Command for SvsNick {
             );
             return CmdResult::Fail;
         }
-        if s.find_nick(newnick).is_some()
-            || s.remote_nick.contains_key(&newnick.to_ascii_lowercase())
+        // allow a case-only change: the in-use index would otherwise match the target itself
+        let cur = s.users.get(&tuid).map(|u| u.nick.clone()).unwrap_or_default();
+        if !newnick.eq_ignore_ascii_case(&cur)
+            && (s.find_nick(newnick).is_some()
+                || s.remote_nick.contains_key(&newnick.to_ascii_lowercase()))
         {
             s.numeric(
                 uid,
