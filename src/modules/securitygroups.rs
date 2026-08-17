@@ -35,6 +35,16 @@ struct SecGroup {
 }
 
 /// Parse the `securitygroup = <name> [criteria…]` config lines into groups.
+/// A "require X" flag: bare or `=yes` requires it; an explicit falsy value excludes it.
+fn flag_tri(v: Option<&str>) -> Tri {
+    match v {
+        Some(x) if matches!(x.to_ascii_lowercase().as_str(), "no" | "false" | "0" | "off") => {
+            Tri::No
+        }
+        _ => Tri::Yes,
+    }
+}
+
 fn parse_groups(s: &Server) -> Vec<SecGroup> {
     let mut out = Vec::new();
     for line in s
@@ -59,15 +69,17 @@ fn parse_groups(s: &Server) -> Vec<SecGroup> {
                 ("exclude", Some(m)) | ("exclude-mask", Some(m)) => {
                     g.exclude_masks.push(m.to_string())
                 }
-                ("tls", _) | ("tls-users", _) => g.tls = Tri::Yes,
+                // A bare flag (or `=yes`) requires it; an explicit `=no`/`false`/`0`/`off`
+                // excludes it — so `tls=no` means "not TLS", not "require TLS".
+                ("tls", v) | ("tls-users", v) => g.tls = flag_tri(v),
                 ("insecure", _) | ("exclude-tls", _) => g.tls = Tri::No,
-                ("account", _) | ("registered", _) => g.account = Tri::Yes,
+                ("account", v) | ("registered", v) => g.account = flag_tri(v),
                 ("unregistered", _) | ("exclude-account", _) => g.account = Tri::No,
-                ("oper", _) => g.oper = Tri::Yes,
+                ("oper", v) => g.oper = flag_tri(v),
                 ("exclude-oper", _) => g.oper = Tri::No,
-                ("bot", _) | ("bmode", _) => g.bot = Tri::Yes,
+                ("bot", v) | ("bmode", v) => g.bot = flag_tri(v),
                 ("exclude-bot", _) | ("exclude-bmode", _) => g.bot = Tri::No,
-                ("webirc", _) => g.webirc = Tri::Yes,
+                ("webirc", v) => g.webirc = flag_tri(v),
                 ("exclude-webirc", _) => g.webirc = Tri::No,
                 ("scoremin", Some(n)) => g.score_min = n.parse().ok(),
                 ("scoremax", Some(n)) => g.score_max = n.parse().ok(),
