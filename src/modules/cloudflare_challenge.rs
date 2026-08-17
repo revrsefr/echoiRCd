@@ -19,6 +19,11 @@ use crate::Uid;
 #[derive(Default)]
 struct Passed(HashSet<Uid>);
 
+/// uids already handed a challenge, so a held client sending extra commands doesn't
+/// get the challenge notice re-issued each time. In `Server.ext`.
+#[derive(Default)]
+struct Challenged(HashSet<Uid>);
+
 fn enabled(s: &Server) -> bool {
     s.conf_bool("cloudflare_challenge", false)
         && s.conf("cloudflare_secret").is_some_and(|v| !v.is_empty())
@@ -66,6 +71,9 @@ impl Module for CloudflareChallenge {
         if let Some(p) = s.ext.get_mut::<Passed>() {
             p.0.remove(&uid);
         }
+        if let Some(c) = s.ext.get_mut::<Challenged>() {
+            c.0.remove(&uid);
+        }
     }
 
     fn on_user_register(&mut self, srv: &mut Server, uid: Uid) -> ModResult {
@@ -75,6 +83,18 @@ impl Module for CloudflareChallenge {
         if passed(srv, uid) || port_whitelisted(srv, uid) {
             return ModResult::Passthru;
         }
+        // issue the challenge exactly once; later held attempts just keep holding
+        if srv
+            .ext
+            .get::<Challenged>()
+            .is_some_and(|c| c.0.contains(&uid))
+        {
+            return ModResult::Hold;
+        }
+        srv.ext
+            .get_or_insert_with::<Challenged>(Challenged::default)
+            .0
+            .insert(uid);
         let (nick, token) = (
             srv.users
                 .get(&uid)

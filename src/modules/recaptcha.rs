@@ -26,6 +26,11 @@ use crate::Uid;
 #[derive(Default)]
 struct Verified(HashSet<Uid>);
 
+/// The set of uids already handed a challenge, so a held client sending extra
+/// commands doesn't get the challenge notice re-issued each time. In `Server.ext`.
+#[derive(Default)]
+struct Challenged(HashSet<Uid>);
+
 fn enabled(s: &Server) -> bool {
     s.conf_bool("recaptcha", false)
         && s.conf("recaptcha_secret").is_some_and(|v| !v.is_empty())
@@ -75,6 +80,9 @@ impl Module for ReCaptcha {
         if let Some(v) = s.ext.get_mut::<Verified>() {
             v.0.remove(&uid);
         }
+        if let Some(c) = s.ext.get_mut::<Challenged>() {
+            c.0.remove(&uid);
+        }
     }
 
     fn on_user_register(&mut self, srv: &mut Server, uid: Uid) -> ModResult {
@@ -84,7 +92,19 @@ impl Module for ReCaptcha {
         if is_verified(srv, uid) || port_whitelisted(srv, uid) {
             return ModResult::Passthru;
         }
-        // hand out a challenge and refuse the link until they verify
+        // issue the challenge exactly once; later held attempts just keep holding
+        if srv
+            .ext
+            .get::<Challenged>()
+            .is_some_and(|c| c.0.contains(&uid))
+        {
+            return ModResult::Hold;
+        }
+        srv.ext
+            .get_or_insert_with::<Challenged>(Challenged::default)
+            .0
+            .insert(uid);
+        // hand out a challenge and hold the link until they verify
         let (nick, token) = (
             srv.users
                 .get(&uid)
