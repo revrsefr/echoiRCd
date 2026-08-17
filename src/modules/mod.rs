@@ -111,6 +111,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(autodrop::AutoDrop),
         Box::new(operprefix::OperPrefix),
         Box::new(permchannels::PermChannels::default()),
+        Box::new(chathistory::ChatHistoryGc),
     ]
 }
 

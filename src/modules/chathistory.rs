@@ -9,6 +9,7 @@ use std::collections::{HashMap, VecDeque};
 
 use crate::channels::RANK_HALFOP;
 use crate::command::{CmdResult, Command};
+use crate::module::Module;
 use crate::server::{iso_time, now, parse_iso, Server};
 use crate::Uid;
 
@@ -89,6 +90,30 @@ pub fn dm_key(a: &str, b: &str) -> String {
 
 pub fn commands() -> Vec<Box<dyn Command>> {
     vec![Box::new(ChatHistory), Box::new(Redact)]
+}
+
+/// Garbage-collects the history ring. Each conversation's buffer is count-capped, but
+/// the SET of conversation keys (every channel + DM pair that ever spoke) was never
+/// pruned — a slow leak over the process lifetime. On the tick, drop any conversation
+/// whose newest message is older than `chathistory_maxage` (default 7d; 0 disables).
+pub struct ChatHistoryGc;
+impl Module for ChatHistoryGc {
+    fn name(&self) -> &'static str {
+        "chathistory"
+    }
+    fn on_tick(&mut self, s: &mut Server) {
+        let maxage = s.conf_num("chathistory_maxage", 604800u64);
+        if maxage == 0 {
+            return;
+        }
+        let now = now();
+        if let Some(h) = s.ext.get_mut::<History>() {
+            h.0.retain(|_, buf| {
+                buf.back()
+                    .is_some_and(|m| now.saturating_sub(m.ts) < maxage)
+            });
+        }
+    }
 }
 
 /// CHATHISTORY — replay recent messages (draft/chathistory), leveraging BATCH.
@@ -387,5 +412,39 @@ impl Command for Redact {
             }
         }
         CmdResult::Ok
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use std::sync::atomic::AtomicU64;
+    use std::sync::{mpsc, Arc};
+
+    // The GC drops conversation keys whose newest message aged past chathistory_maxage
+    // (default 7d), so the key set can't grow forever with every distinct DM/channel.
+    #[test]
+    fn gc_drops_stale_conversation_keys() {
+        let (tx, _rx) = mpsc::channel();
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+        let n = now();
+        let msg = |ts| HistMsg {
+            ts,
+            msgid: "m".into(),
+            prefix: "p!u@h".into(),
+            verb: "PRIVMSG",
+            target: "#c".into(),
+            text: "hi".into(),
+        };
+        {
+            let h = s.ext.get_or_insert_with::<History>(History::default);
+            h.0.insert("#fresh".into(), VecDeque::from([msg(n)]));
+            h.0.insert("#stale".into(), VecDeque::from([msg(n.saturating_sub(700_000))]));
+        }
+        ChatHistoryGc.on_tick(&mut s);
+        let h = s.ext.get::<History>().unwrap();
+        assert!(h.0.contains_key("#fresh"), "recent conversation kept");
+        assert!(!h.0.contains_key("#stale"), "stale conversation GC'd");
     }
 }
