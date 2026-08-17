@@ -665,6 +665,12 @@ impl Server {
         // socket itself once the channel is empty.
         if !user.nick.is_empty() {
             self.nick_index.remove(&user.nick.to_ascii_lowercase());
+            // Scrub the departed nick from every +g callerid ACCEPT list, so a new
+            // user grabbing this nick can't inherit its acceptance and bypass a gate.
+            let low = user.nick.to_ascii_lowercase();
+            for u in self.users.values_mut() {
+                u.accept.retain(|n| n != &low);
+            }
         }
         if user.registered {
             let line = format!(":{} QUIT :{reason}", user.prefix());

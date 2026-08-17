@@ -460,6 +460,18 @@ impl Server {
             u.nick = newnick.to_string();
             u.nick_ts = crate::server::now();
         }
+        // Keep +g callerid ACCEPT lists in step: move the entry from the old nick to
+        // the new one, so the freed old nick can't be grabbed to bypass someone's gate.
+        let (oldlow, newlow) = (old.to_ascii_lowercase(), newnick.to_ascii_lowercase());
+        if !old.is_empty() && oldlow != newlow {
+            for u in self.users.values_mut() {
+                for n in u.accept.iter_mut() {
+                    if *n == oldlow {
+                        *n = newlow.clone();
+                    }
+                }
+            }
+        }
         if registered {
             let line = format!(":{prefix} NICK :{newnick}");
             let mut targets: HashSet<Uid> = HashSet::new();
