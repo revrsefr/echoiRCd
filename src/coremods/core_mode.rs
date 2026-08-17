@@ -176,6 +176,13 @@ pub fn apply_mode(s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         let src_uuid = s.users[&uid].uuid.clone();
         s.propagate_chan_mode(&src_uuid, target, &applied, &echoed);
     }
+    // A mode change may have removed the channel's last reason to exist while it has
+    // no members (e.g. -P / -r on an empty channel): destroy it now, as an empty
+    // channel is normally culled the moment its final member leaves.
+    let cull = s.channels.get(&key).is_some_and(|c| !c.keep_alive());
+    if cull {
+        s.channels.remove(&key);
+    }
     CmdResult::Ok
 }
 
