@@ -1285,9 +1285,17 @@ impl Server {
             return;
         }
         let (target, text) = (msg.params[0].clone(), msg.params[1].clone());
-        let Some(prefix) = self.uuid_prefix(&src) else {
+        // Usually a remote user, but services can source a NOTICE from the server
+        // itself — SET SNOTICE re-sources NickServ notices from the SID — so fall
+        // back to the server name instead of dropping the message.
+        let Some(prefix) = self
+            .uuid_prefix(&src)
+            .or_else(|| self.servers.get(&src).map(|s| s.name.clone()))
+        else {
             return;
         };
+        // A services user OR the services server itself counts as a service source.
+        let src_is_service = self.uuid_is_service(&src) || self.server_is_service(&src);
         if target.starts_with('#') {
             let key = target.to_ascii_lowercase();
             if !self.channels.contains_key(&key) {
@@ -1296,7 +1304,7 @@ impl Server {
             let base = format!(":{prefix} {cmd} {target} :{text}");
             // echo/services: tag messages from a network service so capable
             // clients can badge them. Per-recipient (needs the message-tags cap).
-            let is_service = self.uuid_is_service(&src);
+            let is_service = src_is_service;
             let tagged = format!("@echo/services {base}");
             let members: Vec<Uid> = self.channels[&key].members.keys().copied().collect();
             for m in members {
@@ -1317,7 +1325,7 @@ impl Server {
                 .get(&dst)
                 .map(|u| u.nick.clone())
                 .unwrap_or_default();
-            let want_tag = self.uuid_is_service(&src)
+            let want_tag = src_is_service
                 && self.users.get(&dst).map(|u| u.caps.message_tags).unwrap_or(false);
             let tag = if want_tag { "@echo/services " } else { "" };
             self.send(dst, format!("{tag}:{prefix} {cmd} {nick} :{text}"));
@@ -2355,5 +2363,92 @@ mod tests {
         assert!(s.source_is_service(&crate::message::parse(":42S SVSJOIN 0AAAAAAAB #c").unwrap()));
         // from an ordinary peer: rejected
         assert!(!s.source_is_service(&crate::message::parse(":10HAAAAAA SVSNICK 0AAAAAAAB g").unwrap()));
+    }
+
+    // A NOTICE re-sourced from the services server itself (SET SNOTICE ON re-sources
+    // NickServ notices from the SID, not the pseudoclient) must still reach the target
+    // user — shown as coming from the server name — instead of being dropped because
+    // the source isn't a user UUID. Regression: link_message_recv only resolved user
+    // sources, so server-sourced service notices were silently lost.
+    #[test]
+    fn server_sourced_notice_reaches_the_user() {
+        use crate::config::Config;
+        use crate::extensible::Extensible;
+        use crate::users::{Caps, UserFlags};
+        use std::collections::HashSet;
+        use std::sync::atomic::AtomicU64;
+        use std::sync::{mpsc, Arc};
+
+        let (tx, _rx) = mpsc::channel();
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+        s.servers.insert(
+            "42S".into(),
+            RemoteServer {
+                sid: "42S".into(),
+                name: "services.example.net".into(),
+                desc: String::new(),
+                via: 1,
+                is_service: true,
+                silent_service: false,
+            },
+        );
+        let (utx, urx) = mpsc::channel();
+        s.users.insert(
+            7,
+            User {
+                uid: 7,
+                uuid: "0AAAAAAAB".into(),
+                nick: "alice".into(),
+                ident: "a".into(),
+                realname: "a".into(),
+                host: "localhost".into(),
+                cloak: String::new(),
+                vhost: None,
+                secure: false,
+                certfp: None,
+                account: None,
+                signon: 0,
+                nick_ts: 0,
+                addr: "127.0.0.1:1".parse().unwrap(),
+                port: 6667,
+                registered: true,
+                dns_pending: false,
+                ident_pending: false,
+                auth_pending: false,
+                waitpong: None,
+                class: None,
+                pass: None,
+                deferred: Vec::new(),
+                cap: false,
+                cap_302: false,
+                caps: Caps::default(),
+                sasl_mech: None,
+                channels: HashSet::new(),
+                watch: Vec::new(),
+                monitor: Vec::new(),
+                silence: Vec::new(),
+                accept: Vec::new(),
+                quitting: None,
+                flags: UserFlags::default(),
+                last_active: 0,
+                ping_sent: false,
+                ext: Extensible::default(),
+                out: OutSink::Thread(utx),
+                sock: None,
+            },
+        );
+        s.uuid_local.insert("0AAAAAAAB".into(), 7);
+
+        let msg =
+            crate::message::parse(":42S NOTICE 0AAAAAAAB :*** NickServ: welcome back").unwrap();
+        s.link_message_recv(1, &msg, true);
+
+        let got = urx
+            .try_recv()
+            .expect("a server-sourced service notice must be delivered, not dropped");
+        assert_eq!(
+            got,
+            ":services.example.net NOTICE alice :*** NickServ: welcome back"
+        );
     }
 }
