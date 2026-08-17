@@ -27,10 +27,20 @@ impl Module for Snoop {
         }
     }
     fn on_user_quit(&mut self, srv: &mut Server, uid: Uid, reason: &str) {
-        let nick = srv.users.get(&uid).map(|u| u.nick.clone());
+        // Only announce clients that actually registered. A health/liveness probe — or
+        // any client that drops mid-handshake — never fired a connect notice, so it must
+        // not fire an exit notice either, else it spams the +q snomask on every probe.
+        // (on_user_quit itself still fires for unregistered users so modules reclaim
+        // their per-uid state; only this operator-facing notice is gated.)
+        let Some(nick) = srv
+            .users
+            .get(&uid)
+            .filter(|u| u.registered)
+            .map(|u| u.nick.clone())
+        else {
+            return;
+        };
         eprintln!("[snoop] quit uid={uid} ({reason})");
-        if let Some(nick) = nick {
-            srv.snotice_c('q', &format!("Client exiting: {nick} ({reason})"));
-        }
+        srv.snotice_c('q', &format!("Client exiting: {nick} ({reason})"));
     }
 }
