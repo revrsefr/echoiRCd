@@ -502,7 +502,7 @@ fn reactor_loop(
             let now = Instant::now();
             let mut expired = Vec::new();
             pending_hs.retain(|&(tok, dl)| match conns.get(&tok) {
-                Some(c) if c.handshaking => {
+                Some(c) if c.handshaking || c.proxy_pending => {
                     if now >= dl {
                         expired.push(tok);
                         false
@@ -510,7 +510,7 @@ fn reactor_loop(
                         true
                     }
                 }
-                _ => false, // handshake finished, or the conn is already gone
+                _ => false, // handshake/proxy-header done, or the conn is already gone
             });
             for tok in expired {
                 close_conn(&mut poll, &mut conns, tok, &core);
@@ -572,7 +572,10 @@ fn reactor_loop(
                                 pending_out: Some(out),
                             },
                         );
-                        if handshaking {
+                        // reap a stalled TLS handshake OR a proxy-pending conn that never
+                        // sends its PROXY header — neither has a uid yet, so nothing else
+                        // would ever time it out.
+                        if handshaking || a.via_proxy {
                             if let Some(d) = handshake_timeout {
                                 pending_hs.push((token, Instant::now() + d));
                             }
