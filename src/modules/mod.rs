@@ -53,6 +53,7 @@ pub mod ojoin;
 pub mod operlevels;
 pub mod operprefix;
 pub mod password_hash;
+pub mod permchannels;
 pub mod profilelink;
 pub mod randquote;
 pub mod realnameban;
@@ -109,6 +110,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(autoop::AutoOp),
         Box::new(autodrop::AutoDrop),
         Box::new(operprefix::OperPrefix),
+        Box::new(permchannels::PermChannels::default()),
     ]
 }
 

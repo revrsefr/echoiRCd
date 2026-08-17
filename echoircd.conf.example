@@ -235,6 +235,10 @@ amu_target    = both
 # reputationexpire = * 90d                 # any score decays after 90d
 # extban usage:  MODE #chan +b y:<100   (ban score below 100)   +b y:>500 (above 500)
 
+# --- permanent channels (+P): oper-only mode; the channel survives an empty
+#     member list AND a restart (its modes, topic, TS and ban lists are saved). ---
+# permchannels_database = permchannels.db  # default: <conf>.permchannels
+
 # --- whoisport: opers see the target's listener port in WHOIS (always on) ---
 # --- ircv3_network_icon: advertise a network icon via draft/ICON ISUPPORT ---
 # network_icon = https://example.org/icon.png
