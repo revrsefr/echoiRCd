@@ -239,6 +239,10 @@ amu_target    = both
 #     member list AND a restart (its modes, topic, TS and ban lists are saved). ---
 # permchannels_database = permchannels.db  # default: <conf>.permchannels
 
+# --- read markers (IRCv3 draft/read-marker): account-keyed "last read" positions
+#     are persisted so they survive a restart, not just reconnects. ---
+# markread_database = markread.db          # default: <conf>.markread
+
 # --- whoisport: opers see the target's listener port in WHOIS (always on) ---
 # --- ircv3_network_icon: advertise a network icon via draft/ICON ISUPPORT ---
 # network_icon = https://example.org/icon.png

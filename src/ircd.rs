@@ -132,6 +132,7 @@ impl Ircd {
         crate::modules::metadata::load(&mut server); // restore channel metadata
         crate::modules::reputation::load(&mut server); // restore per-IP reputation
         crate::modules::permchannels::load(&mut server); // recreate +P channels (pre-link)
+        crate::modules::markread::load(&mut server); // restore account-keyed read markers
         crate::modules::geoip::init(&mut server); // load the GeoIP database
         crate::modules::customprefix::init(&server); // load prefix config
         crate::mode::init_custom_prefixes(); // register any config-defined prefix modes
