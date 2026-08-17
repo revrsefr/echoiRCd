@@ -261,8 +261,8 @@ amu_target    = both
 # --- extbanbanlist: no config — adds the matching extban
 #     `b:<#channel>`, so `+b b:#staff` catches everyone banned in #staff (shares a
 #     ban list between channels).
-# --- relaymsg (draft/relaymsg): a member whose client negotiated the
-#     capability can /RELAYMSG <#chan> <nick> <text> to speak under a spoofed relay
+# --- relaymsg (draft/relaymsg): an OPERATOR whose client negotiated the capability
+#     and who is in the channel can /RELAYMSG <#chan> <nick> <text> to speak under a spoofed relay
 #     nick (for bridges). The nick must contain a separator and not collide.
 # relaymsg_separators = /
 # relaymsg_ident = relay
