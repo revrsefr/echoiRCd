@@ -272,7 +272,10 @@ impl Server {
     /// Remove an x-line by kind + mask; returns whether one was found.
     pub fn remove_xline(&mut self, kind: XKind, mask: &str) -> bool {
         let before = self.xlines.len();
-        self.xlines.retain(|x| !(x.kind == kind && x.mask == mask));
+        // case-insensitive: nick/host/channel masks match case-insensitively when
+        // enforced, so removal must too (e.g. remove `CBAN #foo` for a `#Foo` ban).
+        self.xlines
+            .retain(|x| !(x.kind == kind && x.mask.eq_ignore_ascii_case(mask)));
         let removed = self.xlines.len() < before;
         if removed {
             self.save_xlines();
