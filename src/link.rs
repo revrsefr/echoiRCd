@@ -1101,16 +1101,22 @@ impl Server {
                 nick = uuid.clone(); // the incoming user lost: introduce it under its UUID
             }
         }
+        // Collision with an existing REMOTE user: rename the incoming one to its UUID
+        // rather than silently dropping it — a drop would leave a routing ghost (the
+        // user recorded nowhere here yet never forwarded to our other peers, so its
+        // later JOIN/PRIVMSG/QUIT all fail our source guards). Full TS arbitration
+        // would need the peer's stored nick-TS, which RemoteUser doesn't carry.
         if self.remote_nick.contains_key(&nick.to_ascii_lowercase()) {
-            return;
+            nick = uuid.clone();
         }
+        let renamed = nick != msg.params[2];
         self.remote_nick
             .insert(nick.to_ascii_lowercase(), uuid.clone());
         self.remote_users.insert(
             uuid.clone(),
             RemoteUser {
                 uuid,
-                nick,
+                nick: nick.clone(),
                 ident,
                 host,
                 realname,
@@ -1121,8 +1127,25 @@ impl Server {
                 via,
             },
         );
-        // re-propagate verbatim to our other peers (keeps every field intact)
-        self.propagate(&msg.to_wire(), Some(via));
+        // Re-propagate to our other peers. If a collision renamed the loser, rewrite
+        // the nick in the forwarded UID so downstream learns the corrected nick and
+        // doesn't re-collide; otherwise forward verbatim.
+        if renamed {
+            let mut p = msg.params.clone();
+            p[2] = nick;
+            let fwd = Message {
+                source: msg.source.clone(),
+                command: msg.command.clone(),
+                params: p,
+                ctags: String::new(),
+                label: None,
+                batch: None,
+                concat: false,
+            };
+            self.propagate(&fwd.to_wire(), Some(via));
+        } else {
+            self.propagate(&msg.to_wire(), Some(via));
+        }
     }
 
     /// Whether a remote source uuid is genuinely reached through link `via` — guards
@@ -1585,9 +1608,19 @@ impl Server {
                 }
             }
         }
+        // If the channel is unknown (a desync/race), create it with the TS the IJOIN
+        // carries — not now() — so our fabricated instance doesn't later win a bogus
+        // TS war and propagate the wrong age.
+        let ijoin_ts: Option<u64> = msg.params.get(2).and_then(|t| t.parse().ok());
         self.channels
             .entry(key.clone())
-            .or_insert_with(|| Channel::new(&chan))
+            .or_insert_with(|| {
+                let mut c = Channel::new(&chan);
+                if let Some(ts) = ijoin_ts {
+                    c.created = ts;
+                }
+                c
+            })
             .rmembers
             .insert(uuid.clone(), m);
         let prefix = self
@@ -1958,6 +1991,18 @@ impl Server {
         }
         let topic = msg.params.last().cloned().unwrap_or_default();
         let ts = msg.params[2].parse().unwrap_or_else(|_| now());
+        // channel-TS guard: if our channel won the TS war (older/lower created TS),
+        // ignore a topic coming from an instance that lost it.
+        let chants: u64 = msg.params[1].parse().unwrap_or(0);
+        if self
+            .channels
+            .get(&key)
+            .map(|c| c.created)
+            .is_some_and(|ours| ours < chants)
+        {
+            self.propagate(&msg.to_wire(), Some(via));
+            return;
+        }
         // keep whichever topic was set later: drop an FTOPIC older than the one we hold.
         if let Some(cur_ts) = self
             .channels
@@ -2240,9 +2285,20 @@ impl Server {
                 .channels
                 .entry(key.clone())
                 .or_insert_with(|| Channel::new(&chan));
-            if our_ts.is_none() || remote_wins {
+            if !we_win {
+                // Fresh channel, we lost the TS war, or an equal-TS merge: adopt the
+                // remote channel modes. On a loss, first wipe OUR state — the boolean
+                // modes AND (previously missed) the list modes + topic — else a ban
+                // the winning side never had lingers here forever (split-brain).
                 if remote_wins {
                     ch.modes = ChanModes::default();
+                    ch.bans.clear();
+                    ch.excepts.clear();
+                    ch.invex.clear();
+                    ch.filters.clear();
+                    ch.exemptchanops.clear();
+                    ch.autoop.clear();
+                    ch.topic = None;
                     for m in ch.members.values_mut() {
                         m.clear_status();
                     }
@@ -2420,6 +2476,105 @@ mod tests {
         let opped = s.channels["#c"].rmembers["42SAAAAAA"].op;
         assert!(!opped, "a member bursted with a newer (losing) TS must be de-statused");
         assert_eq!(s.channels["#c"].created, 1000, "our older TS is kept");
+    }
+
+    fn bob_server() -> Server {
+        use crate::config::Config;
+        use std::sync::atomic::AtomicU64;
+        use std::sync::{mpsc, Arc};
+        let (tx, _rx) = mpsc::channel();
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+        s.remote_users.insert(
+            "42SAAAAAA".to_string(),
+            RemoteUser {
+                uuid: "42SAAAAAA".to_string(),
+                nick: "bob".into(),
+                ident: "b".into(),
+                host: "h".into(),
+                realname: "b".into(),
+                account: None,
+                ip: String::new(),
+                modes: String::new(),
+                sid: "42S".into(),
+                via: 1,
+            },
+        );
+        s
+    }
+
+    // Losing the FJOIN TS war must wipe our list modes (bans) and topic too — not just
+    // the boolean modes — else a ban the winning side never had lingers forever here.
+    #[test]
+    fn fjoin_loss_clears_lists_and_topic() {
+        use crate::channels::{Ban, Topic};
+        let mut s = bob_server();
+        s.channels.insert("#c".into(), {
+            let mut c = Channel::new("#c");
+            c.created = 2000; // we hold the NEWER (losing) TS
+            c.bans.push(Ban {
+                mask: "*!*@evil".into(),
+                setter: "me".into(),
+                ts: 0,
+                expires: None,
+            });
+            c.topic = Some(Topic {
+                text: "old".into(),
+                setter: "me".into(),
+                ts: 0,
+            });
+            c
+        });
+        let m = crate::message::parse(":42S FJOIN #c 1000 +mnt :o,42SAAAAAA").unwrap();
+        s.link_fjoin_recv(1, &m);
+        let ch = &s.channels["#c"];
+        assert_eq!(ch.created, 1000, "we adopt the winning TS");
+        assert!(ch.bans.is_empty(), "our ban must be wiped on losing the TS war");
+        assert!(ch.topic.is_none(), "our topic must be wiped on losing the TS war");
+        assert!(ch.modes.moderated, "the winner's +m is adopted");
+    }
+
+    // Equal-TS FJOIN must MERGE the remote channel modes, not drop them.
+    #[test]
+    fn fjoin_equal_ts_merges_modes() {
+        let mut s = bob_server();
+        s.channels.insert("#c".into(), {
+            let mut c = Channel::new("#c");
+            c.created = 1000;
+            c
+        });
+        let m = crate::message::parse(":42S FJOIN #c 1000 +m :o,42SAAAAAA").unwrap();
+        s.link_fjoin_recv(1, &m);
+        assert!(
+            s.channels["#c"].modes.moderated,
+            "an equal-TS FJOIN must merge the remote +m"
+        );
+        assert_eq!(s.channels["#c"].created, 1000);
+    }
+
+    // An FTOPIC from a channel instance that LOST the TS war (its chants > our created)
+    // must be ignored, even if its topic timestamp is newer.
+    #[test]
+    fn ftopic_dropped_when_our_channel_won_the_ts() {
+        use crate::channels::Topic;
+        let mut s = bob_server();
+        s.channels.insert("#c".into(), {
+            let mut c = Channel::new("#c");
+            c.created = 1000; // we won
+            c.topic = Some(Topic {
+                text: "ours".into(),
+                setter: "me".into(),
+                ts: 5,
+            });
+            c
+        });
+        // chants=2000 (their instance lost), topicts=9 (newer) — must still be ignored
+        let m = crate::message::parse(":42SAAAAAA FTOPIC #c 2000 9 bob :theirs").unwrap();
+        s.link_ftopic_recv(1, &m);
+        assert_eq!(
+            s.channels["#c"].topic.as_ref().unwrap().text,
+            "ours",
+            "a topic from a channel instance that lost the TS war must be dropped"
+        );
     }
 
     #[test]
