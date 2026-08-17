@@ -514,6 +514,20 @@ impl Command for Kick {
                         );
                         return CmdResult::Fail;
                     }
+                    // can't kick a remote member who out-ranks you (as for local victims)
+                    let vrank = s.channels[&key]
+                        .rmembers
+                        .get(&vuuid)
+                        .map(|m| m.rank())
+                        .unwrap_or(0);
+                    if s.rank(uid, &key) < vrank {
+                        s.numeric(
+                            uid,
+                            ERR_CHANOPRIVSNEEDED,
+                            &format!("{chan} :You cannot kick a user of higher rank"),
+                        );
+                        return CmdResult::Fail;
+                    }
                     let kicker = s.users[&uid].nick.clone();
                     let reason = params.get(2).cloned().unwrap_or(kicker);
                     let prefix = s.users[&uid].prefix();

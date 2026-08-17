@@ -182,6 +182,16 @@ impl Command for Kill {
         let Some(tuid) = s.find_nick(target) else {
             // remote target: route the KILL toward the server that owns it
             if let Some((uuid, _)) = s.find_remote(target) {
+                // servprotect (+k): a network service can't be killed, even remotely
+                let protected = s.uuid_is_service(&uuid)
+                    || s.remote_users
+                        .get(&uuid)
+                        .map(|r| r.modes.contains('k'))
+                        .unwrap_or(false);
+                if protected {
+                    s.numeric(uid, ERR_NOPRIVILEGES, ":You cannot KILL a network service");
+                    return CmdResult::Fail;
+                }
                 let (killer_uuid, killer) = s
                     .users
                     .get(&uid)
