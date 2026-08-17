@@ -132,6 +132,7 @@ pub const SUPPORTED_CAPS: &[&str] = &[
     "draft/extended-isupport",
     "reverse.im/filehost",
     "draft/relaymsg",
+    "draft/channel-rename",
     "cap-notify",
 ];
 
@@ -166,6 +167,7 @@ pub struct Caps {
     pub ext_isupport: bool,     // draft/extended-isupport — ISUPPORT command + batched 005
     pub filehost: bool,         // reverse.im/filehost — knows the file-host extension
     pub relaymsg: bool,         // draft/relaymsg — may use RELAYMSG (bridge relaying)
+    pub channel_rename: bool,   // draft/channel-rename — receives RENAME (else PART+JOIN)
     pub cap_notify: bool,
 }
 
@@ -234,6 +236,7 @@ impl Caps {
             "draft/extended-isupport" => self.ext_isupport,
             "reverse.im/filehost" => self.filehost,
             "draft/relaymsg" => self.relaymsg,
+            "draft/channel-rename" => self.channel_rename,
             "cap-notify" => self.cap_notify,
             _ => false,
         }
@@ -269,6 +272,7 @@ impl Caps {
             "draft/extended-isupport" => &mut self.ext_isupport,
             "reverse.im/filehost" => &mut self.filehost,
             "draft/relaymsg" => &mut self.relaymsg,
+            "draft/channel-rename" => &mut self.channel_rename,
             "cap-notify" => &mut self.cap_notify,
             _ => return false,
         };

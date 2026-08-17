@@ -970,6 +970,110 @@ impl Server {
         self.events.push_back(Hook::Join(uid, key));
     }
 
+    /// Rename channel `oldkey` (an existing lowercase key) to display name
+    /// `newname`, preserving all state — membership, modes, topic, bans, TS. The
+    /// channel object is rekeyed in the table and every local member's channel set
+    /// is moved with it. Local members are then notified: a `RENAME` line for
+    /// draft/channel-rename clients, a PART+JOIN(+topic+names) emulation for the
+    /// rest (skipped when only the casing changed, per the spec). `src_prefix` is
+    /// the nick!user@host — or server name — shown as the RENAME source. Returns
+    /// the new lowercase key, or `None` if the move couldn't be made. Callers
+    /// validate policy first (op rank, name validity, collision).
+    pub fn rename_channel(
+        &mut self,
+        oldkey: &str,
+        newname: &str,
+        src_prefix: &str,
+        reason: &str,
+    ) -> Option<String> {
+        let newkey = newname.to_ascii_lowercase();
+        let case_only = newkey.as_str() == oldkey;
+        if !self.channels.contains_key(oldkey) {
+            return None;
+        }
+        if !case_only && self.channels.contains_key(&newkey) {
+            return None;
+        }
+        let oldname = self.channels[oldkey].name.clone();
+        let members: Vec<Uid> = self.channels[oldkey].members.keys().copied().collect();
+        if case_only {
+            if let Some(ch) = self.channels.get_mut(oldkey) {
+                ch.name = newname.to_string();
+            }
+        } else {
+            let mut ch = self.channels.remove(oldkey).unwrap();
+            ch.name = newname.to_string();
+            self.channels.insert(newkey.clone(), ch);
+            for &m in &members {
+                if let Some(u) = self.users.get_mut(&m) {
+                    u.channels.remove(oldkey);
+                    u.channels.insert(newkey.clone());
+                }
+            }
+            self.rekey_channel_state(oldkey, &newkey);
+        }
+        let renline = format!(":{src_prefix} RENAME {oldname} {newname} :{reason}");
+        for &m in &members {
+            let has_cap = self
+                .users
+                .get(&m)
+                .map(|u| u.caps.channel_rename)
+                .unwrap_or(false);
+            if has_cap {
+                self.send(m, renline.clone());
+            } else if !case_only {
+                self.emulate_rename_join(m, &oldname, newname, &newkey, reason);
+            }
+            // case-only + no cap: the spec says the PART/JOIN fallback SHOULD NOT
+            // be used, so those clients simply keep the channel under its old case.
+        }
+        Some(newkey)
+    }
+
+    /// The PART-old + JOIN-new(+topic+names) fallback shown to one member that
+    /// lacks draft/channel-rename, so their client follows the channel across a
+    /// rename. Mirrors the JOIN broadcast (extended-join aware).
+    fn emulate_rename_join(&self, m: Uid, oldname: &str, newname: &str, newkey: &str, reason: &str) {
+        let Some(u) = self.users.get(&m) else {
+            return;
+        };
+        let prefix = u.prefix();
+        let joinline = if u.caps.extended_join {
+            let acct = u.account.clone().unwrap_or_else(|| "*".to_string());
+            format!(":{prefix} JOIN {newname} {acct} :{}", u.realname)
+        } else {
+            format!(":{prefix} JOIN {newname}")
+        };
+        let partline = if reason.is_empty() {
+            format!(":{prefix} PART {oldname}")
+        } else {
+            format!(":{prefix} PART {oldname} :{reason}")
+        };
+        self.send(m, partline);
+        self.send(m, joinline);
+        if let Some(t) = self.channels.get(newkey).and_then(|c| c.topic.as_ref()) {
+            let text = t.text.clone();
+            self.numeric(m, RPL_TOPIC, &format!("{newname} :{text}"));
+        }
+        self.send_names(m, newkey);
+    }
+
+    /// Move a channel's auxiliary, name-keyed module state (recorded history,
+    /// channel metadata) from `oldkey` to `newkey` on a rename, so a CHATHISTORY
+    /// replay or a metadata read still finds it under the new name.
+    fn rekey_channel_state(&mut self, oldkey: &str, newkey: &str) {
+        if let Some(h) = self.ext.get_mut::<crate::modules::chathistory::History>() {
+            if let Some(v) = h.0.remove(oldkey) {
+                h.0.insert(newkey.to_string(), v);
+            }
+        }
+        if let Some(store) = self.ext.get_mut::<crate::modules::metadata::MetaStore>() {
+            if let Some(v) = store.0.remove(oldkey) {
+                store.0.insert(newkey.to_string(), v);
+            }
+        }
+    }
+
     /// +H chanhistory: replay a channel's recent messages to a user who just
     /// joined — the last `<lines>` (within `<secs>`, 0 = no limit) from the store,
     /// wrapped in a `chathistory` batch for batch-capable clients.

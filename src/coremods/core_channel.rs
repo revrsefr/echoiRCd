@@ -1,6 +1,6 @@
 //! core_channel — channel membership commands: JOIN, PART, KICK, TOPIC, NAMES.
 
-use crate::channels::{normalize_ban_mask, Ban, Topic, RANK_HALFOP};
+use crate::channels::{normalize_ban_mask, valid_chan, Ban, Topic, RANK_HALFOP, RANK_OP};
 use crate::command::{CmdResult, Command};
 use crate::module::Hook;
 use crate::numeric::*;
@@ -12,6 +12,7 @@ pub fn commands() -> Vec<Box<dyn Command>> {
     vec![
         Box::new(Join),
         Box::new(Part),
+        Box::new(Rename),
         Box::new(Kick),
         Box::new(TopicCmd),
         Box::new(Names),
@@ -475,6 +476,112 @@ impl Command for Part {
             s.channels.retain(|_, c| c.keep_alive());
             s.events.push_back(Hook::Part(uid, key, reason.clone()));
         }
+        CmdResult::Ok
+    }
+}
+
+/// RENAME `<old-channel> <new-channel> [<reason>]` — IRCv3 `draft/channel-rename`.
+/// A channel operator renames a channel in place, keeping its membership, modes
+/// and topic. Members that negotiated the cap see a `RENAME`; the rest are moved
+/// with a PART/JOIN. Registered (+r) channels are managed by services, so a
+/// client can't rename them — ChanServ does that over S2S.
+struct Rename;
+impl Command for Rename {
+    fn name(&self) -> &'static str {
+        "RENAME"
+    }
+    fn min_params(&self) -> usize {
+        2
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        let (old, new) = (&params[0], &params[1]);
+        let reason = params.get(2).cloned().unwrap_or_default();
+        let oldkey = old.to_ascii_lowercase();
+        let newkey = new.to_ascii_lowercase();
+        let case_only = oldkey == newkey;
+        if !s.channels.contains_key(&oldkey) {
+            s.numeric(uid, ERR_NOSUCHCHANNEL, &format!("{old} :No such channel"));
+            return CmdResult::Fail;
+        }
+        if !s.is_member(uid, &oldkey) {
+            s.numeric(
+                uid,
+                ERR_NOTONCHANNEL,
+                &format!("{old} :You're not on that channel"),
+            );
+            return CmdResult::Fail;
+        }
+        let is_oper = s.is_oper(uid);
+        if s.rank(uid, &oldkey) < RANK_OP && !is_oper {
+            s.numeric(
+                uid,
+                ERR_CHANOPRIVSNEEDED,
+                &format!("{old} :You're not a channel operator"),
+            );
+            return CmdResult::Fail;
+        }
+        // A registered channel's name is owned by services; renaming it moves the
+        // registration, which only ChanServ (founder-authorised) may do.
+        if s.channels[&oldkey].modes.registered && !is_oper {
+            s.fail(
+                uid,
+                "RENAME",
+                "CANNOT_RENAME",
+                "This channel is registered — ask ChanServ to rename it.",
+            );
+            return CmdResult::Fail;
+        }
+        if !valid_chan(new, s.conf_num("maxchannel", 50usize)) {
+            s.fail(
+                uid,
+                "RENAME",
+                "CANNOT_RENAME",
+                &format!("{new} is not a valid channel name."),
+            );
+            return CmdResult::Fail;
+        }
+        // A pure prefix-type change (e.g. # -> &) isn't a rename we support.
+        if new.chars().next() != old.chars().next() {
+            s.fail(
+                uid,
+                "RENAME",
+                "CANNOT_RENAME",
+                "The channel prefix can't be changed.",
+            );
+            return CmdResult::Fail;
+        }
+        if !case_only && s.channels.contains_key(&newkey) {
+            s.fail(
+                uid,
+                "RENAME",
+                "CHANNEL_NAME_IN_USE",
+                &format!("{new} already exists."),
+            );
+            return CmdResult::Fail;
+        }
+        if !is_oper {
+            if let Some(reason) = s.matched_cban(&newkey) {
+                s.fail(
+                    uid,
+                    "RENAME",
+                    "CANNOT_RENAME",
+                    &format!("{new} is CBAN'd: {reason}"),
+                );
+                return CmdResult::Fail;
+            }
+        }
+        // Capture the identity/TS before the move, then rename + propagate.
+        let (prefix, uuid) = {
+            let u = &s.users[&uid];
+            (u.prefix(), u.uuid.clone())
+        };
+        let oldname = s.channels[&oldkey].name.clone();
+        if s.rename_channel(&oldkey, new, &prefix, &reason).is_none() {
+            s.fail(uid, "RENAME", "CANNOT_RENAME", "The channel cannot be renamed.");
+            return CmdResult::Fail;
+        }
+        s.snotice_c('a', &format!("{oldname} renamed to {new} by {prefix}"));
+        s.propagate_rename(&uuid, &oldname, new, &reason, None);
         CmdResult::Ok
     }
 }

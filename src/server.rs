@@ -1353,6 +1353,49 @@ mod tests {
     }
 
     #[test]
+    fn rename_moves_channel_and_notifies_by_cap() {
+        let mut s = srv();
+        let arx = add_user(&mut s, 1, "ann"); // op, cap-aware
+        let brx = add_user(&mut s, 2, "bob"); // no cap
+        s.users.get_mut(&1).unwrap().caps.channel_rename = true;
+        s.join(1, "#old", None); // ann creates -> op
+        s.join(2, "#old", None);
+        let _ = arx.try_iter().count(); // drain the join chatter
+        let _ = brx.try_iter().count();
+
+        let key = s.rename_channel("#old", "#new", "ann!u@localhost", "moving");
+        assert_eq!(key.as_deref(), Some("#new"));
+        assert!(!s.channels.contains_key("#old"), "old key gone");
+        assert!(s.channels.contains_key("#new"), "new key present");
+        assert_eq!(s.channels["#new"].members.len(), 2, "membership preserved");
+        assert!(s.users[&1].channels.contains("#new") && !s.users[&1].channels.contains("#old"));
+        assert!(s.users[&2].channels.contains("#new") && !s.users[&2].channels.contains("#old"));
+
+        // The cap holder sees a RENAME; the plain client is walked PART -> JOIN.
+        let ann: Vec<String> = arx.try_iter().collect();
+        assert!(ann.iter().any(|l| l.contains("RENAME #old #new")), "cap client got RENAME: {ann:?}");
+        assert!(!ann.iter().any(|l| l.contains("PART #old")), "cap client not PARTed");
+        let bob: Vec<String> = brx.try_iter().collect();
+        assert!(bob.iter().any(|l| l.contains("PART #old")), "plain client PARTed: {bob:?}");
+        assert!(bob.iter().any(|l| l.contains("JOIN #new")), "plain client re-JOINed");
+        assert!(!bob.iter().any(|l| l.contains("RENAME")), "plain client got no RENAME");
+    }
+
+    #[test]
+    fn rename_case_only_keeps_key_and_skips_fallback() {
+        let mut s = srv();
+        let arx = add_user(&mut s, 1, "ann");
+        s.join(1, "#chan", None);
+        let _ = arx.try_iter().count();
+        let key = s.rename_channel("#chan", "#Chan", "ann!u@localhost", "");
+        assert_eq!(key.as_deref(), Some("#chan"), "key unchanged on a case-only rename");
+        assert_eq!(s.channels["#chan"].name, "#Chan", "display casing updated");
+        // Non-cap member: the spec says no PART/JOIN fallback for a case change.
+        let ann: Vec<String> = arx.try_iter().collect();
+        assert!(!ann.iter().any(|l| l.contains("PART")), "no fallback on case-only: {ann:?}");
+    }
+
+    #[test]
     fn nick_change_reindexes_and_notifies_channel() {
         let mut s = srv();
         let arx = add_user(&mut s, 1, "ann");

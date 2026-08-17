@@ -184,6 +184,25 @@ fn read_until<S: Read>(s: &mut S, needle: &str, timeout: Duration) -> bool {
     String::from_utf8_lossy(&buf).contains(needle)
 }
 
+/// Accumulate everything readable within `timeout` into one string, so a test can
+/// assert on several lines that arrived in a single batch (read_until discards its
+/// buffer per call, which loses lines sent back-to-back).
+fn read_collect<S: Read>(s: &mut S, timeout: Duration) -> String {
+    let deadline = Instant::now() + timeout;
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 8192];
+    while Instant::now() < deadline {
+        match s.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(ref e)
+                if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {}
+            Err(_) => break,
+        }
+    }
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
 fn register<S: Read + Write>(s: &mut S, nick: &str) {
     s.write_all(format!("NICK {nick}\r\nUSER {nick} 0 * :{nick}\r\n").as_bytes())
         .unwrap();
@@ -269,6 +288,69 @@ fn tls_in_reactor_handshake_and_cross_transport() {
     assert!(
         read_until(&mut p, " 671 ", Duration::from_secs(3)),
         "TLS user not reported as using a secure connection"
+    );
+}
+
+/// Register `nick` having negotiated capability `cap` (IRCv3 CAP LS/REQ/END).
+fn register_with_cap<S: Read + Write>(s: &mut S, nick: &str, cap: &str) {
+    s.write_all(
+        format!("CAP LS 302\r\nNICK {nick}\r\nUSER {nick} 0 * :{nick}\r\nCAP REQ :{cap}\r\nCAP END\r\n")
+            .as_bytes(),
+    )
+    .unwrap();
+    assert!(
+        read_until(s, "ACK", Duration::from_secs(5)),
+        "no CAP ACK for {cap}"
+    );
+    assert!(
+        read_until(s, " 001 ", Duration::from_secs(5)),
+        "no 001 welcome for {nick}"
+    );
+}
+
+#[test]
+fn channel_rename_notifies_by_cap_and_needs_ops() {
+    let srv = Server::start(2, false, 0);
+    // alice negotiates draft/channel-rename; bob does not.
+    let mut alice = TcpStream::connect(("127.0.0.1", srv.plain)).unwrap();
+    alice.set_read_timeout(Some(Duration::from_millis(400))).unwrap();
+    register_with_cap(&mut alice, "alice", "draft/channel-rename");
+    let mut bob = srv.plain_client("bob");
+
+    line(&mut alice, "JOIN #old"); // alice creates -> op
+    line(&mut bob, "JOIN #old");
+    read_until(&mut alice, "JOIN #old", Duration::from_secs(2));
+    read_until(&mut bob, "JOIN #old", Duration::from_secs(2));
+
+    // A non-op can't rename.
+    line(&mut bob, "RENAME #old #nope");
+    assert!(
+        read_until(&mut bob, " 482 ", Duration::from_secs(3)),
+        "non-op RENAME should get 482 CHANOPRIVSNEEDED"
+    );
+
+    // The op renames; alice (cap) gets a RENAME line, bob (no cap) is walked PART -> JOIN.
+    line(&mut alice, "RENAME #old #new :moving");
+    assert!(
+        read_until(&mut alice, "RENAME #old #new", Duration::from_secs(3)),
+        "cap client did not receive RENAME"
+    );
+    // bob's PART and JOIN arrive in one batch — collect and check both.
+    let bobseen = read_collect(&mut bob, Duration::from_secs(2));
+    assert!(bobseen.contains("PART #old"), "plain client not PARTed: {bobseen:?}");
+    assert!(bobseen.contains("JOIN #new"), "plain client not re-JOINed: {bobseen:?}");
+    assert!(!bobseen.contains("RENAME"), "plain client should not see RENAME: {bobseen:?}");
+
+    // The channel now answers under the new name (and not the old).
+    line(&mut alice, "PRIVMSG #new :landed");
+    assert!(
+        read_until(&mut bob, "landed", Duration::from_secs(3)),
+        "message to the renamed channel didn't reach members"
+    );
+    line(&mut alice, "NAMES #old");
+    assert!(
+        read_until(&mut alice, " 366 ", Duration::from_secs(3)),
+        "NAMES on the old name should just end (channel is gone)"
     );
 }
 

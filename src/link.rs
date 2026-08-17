@@ -178,6 +178,7 @@ impl Server {
             "TOPIC" if registered => self.link_topic_recv(uid, msg),
             "FTOPIC" if registered => self.link_ftopic_recv(uid, msg),
             "KICK" if registered => self.link_kick_recv(uid, msg),
+            "RENAME" if registered => self.link_rename_recv(uid, msg),
             "MODE" | "FMODE" if registered => self.link_mode_recv(uid, msg),
             "FJOIN" if registered => self.link_fjoin_recv(uid, msg),
             "IJOIN" if registered => self.link_ijoin_recv(uid, msg),
@@ -1525,6 +1526,27 @@ impl Server {
         }
     }
 
+    /// Tell linked servers a channel was renamed. `source` is the initiator's
+    /// uuid (a client or a services pseudoclient) or a server SID; each receiver
+    /// moves the channel and notifies its own members. `except` skips the link a
+    /// forwarded rename arrived on.
+    pub fn propagate_rename(
+        &self,
+        source: &str,
+        oldname: &str,
+        newname: &str,
+        reason: &str,
+        except: Option<Uid>,
+    ) {
+        if self.links.is_empty() {
+            return;
+        }
+        self.propagate(
+            &format!(":{source} RENAME {oldname} {newname} :{reason}"),
+            except,
+        );
+    }
+
     /// The distinct links a channel's remote members sit behind (minus `except`).
     fn channel_link_targets(&self, key: &str, except: Option<Uid>) -> Vec<Uid> {
         let mut set: HashSet<Uid> = HashSet::new();
@@ -1671,6 +1693,43 @@ impl Server {
             format!(":{uuid} PART {chan} :{reason}")
         };
         self.propagate(&fwd, Some(via));
+    }
+
+    fn link_rename_recv(&mut self, via: Uid, msg: &Message) {
+        // :<source> RENAME <old> <new> [:reason] — a channel renamed elsewhere
+        // (by a client on another server, or by ChanServ). Apply it locally,
+        // notify our members, then forward to the rest of the mesh. A
+        // services-sourced rename is honoured unconditionally: services owns the
+        // registered name and validated the op/founder before sending this.
+        let Some(source) = msg.source.clone() else {
+            return;
+        };
+        let (Some(old), Some(new)) = (msg.params.first().cloned(), msg.params.get(1).cloned())
+        else {
+            return;
+        };
+        let reason = msg.params.get(2).cloned().unwrap_or_default();
+        let oldkey = old.to_ascii_lowercase();
+        if !self.channels.contains_key(&oldkey) {
+            return;
+        }
+        // The nick!user@host (or server name) shown to local members as the source.
+        let prefix = self
+            .remote_users
+            .get(&source)
+            .map(|r| r.prefix())
+            .or_else(|| self.servers.get(&source).map(|s| s.name.clone()))
+            .or_else(|| {
+                self.servers
+                    .get(source.get(..3).unwrap_or(source.as_str()))
+                    .map(|s| s.name.clone())
+            });
+        let Some(prefix) = prefix else {
+            return; // unknown source — don't act on a rename we can't attribute
+        };
+        if self.rename_channel(&oldkey, &new, &prefix, &reason).is_some() {
+            self.propagate_rename(&source, &old, &new, &reason, Some(via));
+        }
     }
 
     /// Remove a remote user everywhere (channels + registries) and QUIT them to
