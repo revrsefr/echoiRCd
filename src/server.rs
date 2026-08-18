@@ -22,7 +22,7 @@ use crate::link::{Link, RemoteServer, RemoteUser};
 use crate::module::Hook;
 use crate::modules::dnsbl;
 use crate::resolver;
-use crate::socketengine::OutSink;
+use crate::socketengine::{LineBuf, OutSink};
 use crate::users::{Caps, User, UserFlags};
 use crate::xline::XLine;
 use crate::Uid;
@@ -713,17 +713,17 @@ impl Server {
             } else {
                 line
             };
-            self.emit_to(uid, line);
+            self.emit_to(uid, line.into());
         }
     }
 
     /// Final hop for one line to a client: diverted into the labeled-response
     /// capture buffer when one is active for `uid`, otherwise written to the wire.
-    fn emit_to(&self, uid: Uid, line: String) {
+    fn emit_to(&self, uid: Uid, line: LineBuf) {
         if let Ok(mut cap) = self.label_capture.try_borrow_mut() {
             if let Some((cuid, buf)) = cap.as_mut() {
                 if *cuid == uid {
-                    buf.push(line);
+                    buf.push(line.into_string());
                     return;
                 }
             }
@@ -861,7 +861,7 @@ impl Server {
         } else {
             format!("@{} {base}", tags.join(";"))
         };
-        self.emit_to(uid, line);
+        self.emit_to(uid, line.into());
     }
 
     /// The escaped json-log value for `msg`, or `""` if none of `targets` want it
@@ -960,14 +960,36 @@ impl Server {
         }
     }
 
-    /// Send a line to every member of a channel, optionally skipping one uid.
+    /// Send a line to every member of a channel, optionally skipping one uid. The
+    /// line is allocated once and shared (`Arc`) across all recipients — a big
+    /// channel broadcast no longer clones the string per member. A `server-time`
+    /// member gets a time-tagged variant, itself built once and shared.
     pub fn to_channel(&self, key: &str, line: &str, except: Option<Uid>) {
-        if let Some(ch) = self.channels.get(key) {
-            for &uid in ch.members.keys() {
-                if Some(uid) != except {
-                    self.send(uid, line.to_string());
-                }
+        let Some(ch) = self.channels.get(key) else {
+            return;
+        };
+        let plain: std::sync::Arc<str> = std::sync::Arc::from(line);
+        let sourced = line.starts_with(':'); // only `:prefix …` lines carry server-time
+        let mut tagged: Option<std::sync::Arc<str>> = None;
+        for &uid in ch.members.keys() {
+            if Some(uid) == except {
+                continue;
             }
+            let want_time = sourced
+                && self
+                    .users
+                    .get(&uid)
+                    .map(|u| u.caps.server_time)
+                    .unwrap_or(false);
+            let buf = if want_time {
+                let t = tagged.get_or_insert_with(|| {
+                    std::sync::Arc::from(format!("@time={} {line}", iso_time(now())).as_str())
+                });
+                LineBuf::Shared(t.clone())
+            } else {
+                LineBuf::Shared(plain.clone())
+            };
+            self.emit_to(uid, buf);
         }
     }
 
@@ -1004,7 +1026,7 @@ impl Server {
             } else {
                 format!("@{} {body}", tags.join(";"))
             };
-            self.emit_to(uid, line);
+            self.emit_to(uid, line.into());
         }
     }
 
@@ -1394,6 +1416,30 @@ mod tests {
         // Non-cap member: the spec says no PART/JOIN fallback for a case change.
         let ann: Vec<String> = arx.try_iter().collect();
         assert!(!ann.iter().any(|l| l.contains("PART")), "no fallback on case-only: {ann:?}");
+    }
+
+    #[test]
+    fn to_channel_shares_line_and_tags_server_time_members() {
+        let mut s = srv();
+        let arx = add_user(&mut s, 1, "ann"); // plain (no server-time)
+        let brx = add_user(&mut s, 2, "bob");
+        s.users.get_mut(&2).unwrap().caps.server_time = true;
+        s.join(1, "#c", None);
+        s.join(2, "#c", None);
+        let _ = arx.try_iter().count();
+        let _ = brx.try_iter().count();
+        s.to_channel("#c", ":x!u@h TOPIC #c :hi", None);
+        let ann: Vec<String> = arx.try_iter().collect();
+        let bob: Vec<String> = brx.try_iter().collect();
+        assert!(
+            ann.iter().any(|l| l == ":x!u@h TOPIC #c :hi"),
+            "plain member gets the untagged line: {ann:?}"
+        );
+        assert!(
+            bob.iter()
+                .any(|l| l.starts_with("@time=") && l.ends_with(":x!u@h TOPIC #c :hi")),
+            "server-time member gets the @time= variant: {bob:?}"
+        );
     }
 
     #[test]

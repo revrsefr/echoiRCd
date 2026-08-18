@@ -57,7 +57,7 @@ fn normalize_addr(a: SocketAddr) -> SocketAddr {
 /// [`OutSink`], e.g. on quit), or a per-connection queue-limit override (from the
 /// assigned connection class).
 pub enum Out {
-    Line(usize, String),
+    Line(usize, LineBuf),
     Close(usize),
     Limits {
         token: usize,
@@ -71,6 +71,43 @@ pub enum Out {
 /// server links) get a plain channel to their writer thread; reactor connections
 /// (plaintext clients) get a token plus the shared reactor channel and its waker.
 /// Either way the core just calls [`OutSink::send`].
+/// A line queued for delivery: either uniquely owned, or an `Arc` shared by every
+/// recipient of a channel broadcast — so fanning one line out to N members allocates
+/// it once, not N times. Both forms write the identical bytes to the wire.
+pub enum LineBuf {
+    Owned(String),
+    Shared(Arc<str>),
+}
+
+impl LineBuf {
+    fn bytes(&self) -> &[u8] {
+        match self {
+            LineBuf::Owned(s) => s.as_bytes(),
+            LineBuf::Shared(a) => a.as_bytes(),
+        }
+    }
+    fn len(&self) -> usize {
+        match self {
+            LineBuf::Owned(s) => s.len(),
+            LineBuf::Shared(a) => a.len(),
+        }
+    }
+    /// Materialise an owned `String` (a move for `Owned`, one copy for `Shared`) —
+    /// for the thread-model sinks and the labeled-response capture buffer.
+    pub fn into_string(self) -> String {
+        match self {
+            LineBuf::Owned(s) => s,
+            LineBuf::Shared(a) => a.to_string(),
+        }
+    }
+}
+
+impl From<String> for LineBuf {
+    fn from(s: String) -> Self {
+        LineBuf::Owned(s)
+    }
+}
+
 pub enum OutSink {
     Thread(Sender<String>),
     Reactor {
@@ -81,11 +118,12 @@ pub enum OutSink {
 }
 
 impl OutSink {
-    /// Queue one line for delivery (the writer appends CRLF).
-    pub fn send(&self, line: String) {
+    /// Queue one line for delivery (the writer appends CRLF). The reactor sink keeps
+    /// a shared line shared (no copy); the thread sink materialises a `String`.
+    pub fn send(&self, line: LineBuf) {
         match self {
             OutSink::Thread(s) => {
-                let _ = s.send(line);
+                let _ = s.send(line.into_string());
             }
             OutSink::Reactor { token, tx, waker } => {
                 if tx.send(Out::Line(*token, line)).is_ok() {
@@ -621,7 +659,7 @@ fn reactor_loop(
                                             c.wbuf.drain(..c.wpos); // reclaim written prefix
                                             c.wpos = 0;
                                         }
-                                        c.wbuf.extend_from_slice(line.as_bytes());
+                                        c.wbuf.extend_from_slice(line.bytes());
                                         c.wbuf.extend_from_slice(b"\r\n");
                                         // softsendq: over the soft cap, stop reading
                                         // their commands until the backlog drains

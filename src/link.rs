@@ -129,7 +129,7 @@ impl Server {
                 out.send(format!(
                     "SERVER {} {} {} :{}",
                     self.name, pass, self.sid, self.server_desc
-                ));
+                ).into());
                 sent_server = true;
             }
         }
@@ -150,7 +150,7 @@ impl Server {
 
     fn link_out(&self, uid: Uid, line: String) {
         if let Some(l) = self.links.get(&uid) {
-            l.out.send(line);
+            l.out.send(line.into());
         }
     }
 
