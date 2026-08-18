@@ -103,76 +103,73 @@ impl UserFlags {
     }
 }
 
-/// The IRCv3 capabilities advertised. Order = the CAP LS order.
-pub const SUPPORTED_CAPS: &[&str] = &[
-    "sasl",
-    "server-time",
-    "message-tags",
-    "multi-prefix",
-    "away-notify",
-    "account-notify",
-    "extended-join",
-    "chghost",
-    "userhost-in-names",
-    "echo-message",
-    "invite-notify",
-    "setname",
-    "extended-monitor",
-    "account-tag",
-    "standard-replies",
-    "labeled-response",
-    "batch",
-    "draft/chathistory",
-    "draft/message-redaction",
-    "draft/pre-away",
-    "draft/metadata-2",
-    "draft/multiline",
-    "draft/account-registration",
-    "draft/json-log",
-    "draft/extended-isupport",
-    "reverse.im/filehost",
-    "draft/relaymsg",
-    "draft/channel-rename",
-    "draft/read-marker",
-    "no-implicit-names",
-    "cap-notify",
-];
+/// Declare every advertised capability exactly once — the CAP LS token and the
+/// `Caps` bool field it toggles — and derive `SUPPORTED_CAPS`, the `Caps` struct,
+/// and `has`/`set` from that single list. This makes "advertised but not wired up"
+/// (or a field with no token) a compile error rather than a silent bug.
+macro_rules! define_caps {
+    ($($tok:literal => $field:ident),+ $(,)?) => {
+        /// The IRCv3 capabilities advertised, in CAP LS order.
+        pub const SUPPORTED_CAPS: &[&str] = &[$($tok),+];
 
-/// Per-connection IRCv3 capability state, one flat set. Toggled by `CAP REQ`;
-/// consulted wherever a line is formatted per-client.
-#[derive(Default)]
-pub struct Caps {
-    pub sasl: bool,
-    pub server_time: bool,
-    pub message_tags: bool,
-    pub multi_prefix: bool,
-    pub away_notify: bool,
-    pub account_notify: bool,
-    pub extended_join: bool,
-    pub chghost: bool,
-    pub userhost_in_names: bool,
-    pub echo_message: bool,
-    pub invite_notify: bool,
-    pub setname: bool,
-    pub extended_monitor: bool, // route away/account/chghost/setname for MONITOR targets
-    pub account_tag: bool,      // prepend account=<name> tag on messages from logged-in users
-    pub standard_replies: bool, // understands FAIL/WARN/NOTE structured replies
-    pub labeled_response: bool, // tag responses to a labeled command with its label
-    pub batch: bool,            // understands BATCH framing
-    pub chathistory: bool,      // draft/chathistory — can request message history
-    pub message_redaction: bool, // draft/message-redaction — understands REDACT
-    pub pre_away: bool,         // draft/pre-away — may set AWAY before registration
-    pub metadata: bool,         // draft/metadata-2 — wants metadata + change notices
-    pub multiline: bool,        // draft/multiline — may send multiline message batches
-    pub acct_registration: bool, // draft/account-registration — REGISTER/VERIFY understood
-    pub json_log: bool,         // draft/json-log — structured JSON tag on server notices
-    pub ext_isupport: bool,     // draft/extended-isupport — ISUPPORT command + batched 005
-    pub filehost: bool,         // reverse.im/filehost — knows the file-host extension
-    pub relaymsg: bool,         // draft/relaymsg — may use RELAYMSG (bridge relaying)
-    pub channel_rename: bool,   // draft/channel-rename — receives RENAME (else PART+JOIN)
-    pub read_marker: bool,      // draft/read-marker — MARKREAD sync across the identity
-    pub no_implicit_names: bool, // no-implicit-names — suppress the auto NAMES after JOIN
-    pub cap_notify: bool,
+        /// Per-connection IRCv3 capability state, one bool per advertised cap;
+        /// toggled by `CAP REQ`, consulted wherever a line is formatted per-client.
+        #[derive(Default)]
+        pub struct Caps {
+            $(pub $field: bool,)+
+        }
+
+        impl Caps {
+            /// Whether `name` is currently enabled on this connection.
+            pub fn has(&self, name: &str) -> bool {
+                match name {
+                    $($tok => self.$field,)+
+                    _ => false,
+                }
+            }
+            /// Enable/disable a cap by name; returns whether the name was recognised.
+            pub fn set(&mut self, name: &str, on: bool) -> bool {
+                match name {
+                    $($tok => { self.$field = on; true })+
+                    _ => false,
+                }
+            }
+        }
+    };
+}
+
+define_caps! {
+    "sasl" => sasl,
+    "server-time" => server_time,
+    "message-tags" => message_tags,
+    "multi-prefix" => multi_prefix,
+    "away-notify" => away_notify,
+    "account-notify" => account_notify,
+    "extended-join" => extended_join,
+    "chghost" => chghost,
+    "userhost-in-names" => userhost_in_names,
+    "echo-message" => echo_message,
+    "invite-notify" => invite_notify,
+    "setname" => setname,
+    "extended-monitor" => extended_monitor,
+    "account-tag" => account_tag,
+    "standard-replies" => standard_replies,
+    "labeled-response" => labeled_response,
+    "batch" => batch,
+    "draft/chathistory" => chathistory,
+    "draft/message-redaction" => message_redaction,
+    "draft/pre-away" => pre_away,
+    "draft/metadata-2" => metadata,
+    "draft/multiline" => multiline,
+    "draft/account-registration" => acct_registration,
+    "draft/json-log" => json_log,
+    "draft/extended-isupport" => ext_isupport,
+    "reverse.im/filehost" => filehost,
+    "draft/relaymsg" => relaymsg,
+    "draft/channel-rename" => channel_rename,
+    "draft/read-marker" => read_marker,
+    "no-implicit-names" => no_implicit_names,
+    "cap-notify" => cap_notify,
 }
 
 impl Caps {
@@ -209,83 +206,6 @@ impl Caps {
             })
             .collect::<Vec<_>>()
             .join(" ")
-    }
-
-    pub fn has(&self, name: &str) -> bool {
-        match name {
-            "sasl" => self.sasl,
-            "server-time" => self.server_time,
-            "message-tags" => self.message_tags,
-            "multi-prefix" => self.multi_prefix,
-            "away-notify" => self.away_notify,
-            "account-notify" => self.account_notify,
-            "extended-join" => self.extended_join,
-            "chghost" => self.chghost,
-            "userhost-in-names" => self.userhost_in_names,
-            "echo-message" => self.echo_message,
-            "invite-notify" => self.invite_notify,
-            "setname" => self.setname,
-            "extended-monitor" => self.extended_monitor,
-            "account-tag" => self.account_tag,
-            "standard-replies" => self.standard_replies,
-            "labeled-response" => self.labeled_response,
-            "batch" => self.batch,
-            "draft/chathistory" => self.chathistory,
-            "draft/message-redaction" => self.message_redaction,
-            "draft/pre-away" => self.pre_away,
-            "draft/metadata-2" => self.metadata,
-            "draft/multiline" => self.multiline,
-            "draft/account-registration" => self.acct_registration,
-            "draft/json-log" => self.json_log,
-            "draft/extended-isupport" => self.ext_isupport,
-            "reverse.im/filehost" => self.filehost,
-            "draft/relaymsg" => self.relaymsg,
-            "draft/channel-rename" => self.channel_rename,
-            "draft/read-marker" => self.read_marker,
-            "no-implicit-names" => self.no_implicit_names,
-            "cap-notify" => self.cap_notify,
-            _ => false,
-        }
-    }
-
-    /// Enable/disable a cap by name; returns whether the name was recognised.
-    pub fn set(&mut self, name: &str, on: bool) -> bool {
-        let field = match name {
-            "sasl" => &mut self.sasl,
-            "server-time" => &mut self.server_time,
-            "message-tags" => &mut self.message_tags,
-            "multi-prefix" => &mut self.multi_prefix,
-            "away-notify" => &mut self.away_notify,
-            "account-notify" => &mut self.account_notify,
-            "extended-join" => &mut self.extended_join,
-            "chghost" => &mut self.chghost,
-            "userhost-in-names" => &mut self.userhost_in_names,
-            "echo-message" => &mut self.echo_message,
-            "invite-notify" => &mut self.invite_notify,
-            "setname" => &mut self.setname,
-            "extended-monitor" => &mut self.extended_monitor,
-            "account-tag" => &mut self.account_tag,
-            "standard-replies" => &mut self.standard_replies,
-            "labeled-response" => &mut self.labeled_response,
-            "batch" => &mut self.batch,
-            "draft/chathistory" => &mut self.chathistory,
-            "draft/message-redaction" => &mut self.message_redaction,
-            "draft/pre-away" => &mut self.pre_away,
-            "draft/metadata-2" => &mut self.metadata,
-            "draft/multiline" => &mut self.multiline,
-            "draft/account-registration" => &mut self.acct_registration,
-            "draft/json-log" => &mut self.json_log,
-            "draft/extended-isupport" => &mut self.ext_isupport,
-            "reverse.im/filehost" => &mut self.filehost,
-            "draft/relaymsg" => &mut self.relaymsg,
-            "draft/channel-rename" => &mut self.channel_rename,
-            "draft/read-marker" => &mut self.read_marker,
-            "no-implicit-names" => &mut self.no_implicit_names,
-            "cap-notify" => &mut self.cap_notify,
-            _ => return false,
-        };
-        *field = on;
-        true
     }
 
     /// Space-separated list of the currently-enabled caps (for `CAP LIST`).
