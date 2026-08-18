@@ -42,6 +42,24 @@ pub struct OperBlock {
     pub fingerprint: Option<String>,
 }
 
+/// A trusted WEBIRC gateway: after presenting `password` it may rewrite a client's
+/// real host + IP. `ipmask` (empty = any) restricts which source addresses may use
+/// this block.
+#[derive(Clone)]
+pub struct WebircGateway {
+    pub password: String,
+    pub name: String,
+    pub ipmask: String,
+}
+
+/// A +G censor rule: substitute `find` -> `replace` in channel text; an empty
+/// `replace` blocks the message instead of rewriting it.
+#[derive(Clone)]
+pub struct CensorRule {
+    pub find: String,
+    pub replace: String,
+}
+
 /// Config for the `antimixedutf8` module (blocks mixed-script look-alike spam).
 #[derive(Clone)]
 pub struct AntiMixedCfg {
@@ -90,7 +108,7 @@ pub struct Config {
     pub bind_server: Vec<String>,              // server-to-server link listeners (repeatable)
     pub links: Vec<LinkBlock>,                 // peers we accept / dial
     pub conf_path: String,                     // where this was loaded from (for REHASH)
-    pub censor: Vec<(String, String)>, // +G bad words: (find, replace); empty replace = block
+    pub censor: Vec<CensorRule>,       // +G bad words (empty replace = block)
     pub amu: AntiMixedCfg,             // antimixedutf8 module config
     pub resolve_hosts: bool,           // reverse-DNS clients on connect (default on)
     pub use_resolved_host: bool,       // put the resolved hostname in the hostmask (default on)
@@ -98,7 +116,7 @@ pub struct Config {
     pub dnsbl_action: String,          // mark | kline | gline | zline (on a hit)
     pub dnsbl_reason: String,          // ban reason for a DNSBL hit
     pub sasl_server: String,           // linked services server that handles SASL ("" = none)
-    pub webirc: Vec<(String, String, String)>, // web gateways: (password, name, ip-mask)
+    pub webirc: Vec<WebircGateway>,            // trusted web gateways
     /// Every `key = value` line, captured raw so modules read their own settings
     /// via `Server::conf*` — no per-module field bloats this struct or `Server`.
     pub raw: HashMap<String, Vec<String>>,
@@ -235,7 +253,7 @@ impl Config {
                     let mut it = v.splitn(2, char::is_whitespace);
                     if let Some(find) = it.next().filter(|f| !f.is_empty()) {
                         let replace = it.next().unwrap_or("").trim().to_string();
-                        c.censor.push((find.to_string(), replace));
+                        c.censor.push(CensorRule { find: find.to_string(), replace });
                     }
                 }
                 "antimixedutf8" | "amu" => {
@@ -291,7 +309,11 @@ impl Config {
                     if let Some(pass) = it.next() {
                         let gw = it.next().unwrap_or("webirc").to_string();
                         let mask = it.next().unwrap_or("").to_string();
-                        c.webirc.push((pass.to_string(), gw, mask));
+                        c.webirc.push(WebircGateway {
+                            password: pass.to_string(),
+                            name: gw,
+                            ipmask: mask,
+                        });
                     }
                 }
                 _ => {}

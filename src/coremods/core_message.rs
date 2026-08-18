@@ -105,16 +105,16 @@ fn ci_replace(hay: &str, find: &str, rep: &str) -> String {
 
 /// +G censor: replace each configured bad word in `body`. Returns `None` when a
 /// matched word has an empty replacement (⇒ the message must be blocked).
-fn apply_censor(body: &str, censor: &[(String, String)]) -> Option<String> {
+fn apply_censor(body: &str, censor: &[crate::config::CensorRule]) -> Option<String> {
     let mut out = body.to_string();
-    for (find, replace) in censor {
-        if find.is_empty() || !ci_contains(&out, find) {
+    for rule in censor {
+        if rule.find.is_empty() || !ci_contains(&out, &rule.find) {
             continue;
         }
-        if replace.is_empty() {
+        if rule.replace.is_empty() {
             return None; // no replacement ⇒ block
         }
-        out = ci_replace(&out, find, replace);
+        out = ci_replace(&out, &rule.find, &rule.replace);
     }
     Some(out)
 }

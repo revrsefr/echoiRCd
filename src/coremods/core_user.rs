@@ -102,8 +102,8 @@ impl Command for WebIrc {
         let Some(gw) = s
             .webirc
             .iter()
-            .find(|(p, _, mask)| p == pass && (mask.is_empty() || glob_match(mask, &from)))
-            .map(|(_, g, _)| g.clone())
+            .find(|g| g.password == *pass && (g.ipmask.is_empty() || glob_match(&g.ipmask, &from)))
+            .map(|g| g.name.clone())
         else {
             s.notice_star(uid, "WEBIRC: invalid credentials");
             return CmdResult::Fail;

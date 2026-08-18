@@ -149,7 +149,7 @@ pub struct Server {
     pub xlines: Vec<XLine>,                        // server bans (KLINE/GLINE/ZLINE)
     pub mode_sudo: bool,                           // SAMODE/SAKICK: bypass rank checks
     pub in_redirect: bool,                         // +L: guards against redirect loops
-    pub censor: Vec<(String, String)>,             // +G bad words: (find, replace)
+    pub censor: Vec<crate::config::CensorRule>,    // +G bad words
     pub amu: crate::config::AntiMixedCfg,          // antimixedutf8 module config
     pub resolve_hosts: bool,                       // reverse-DNS clients on connect
     pub use_resolved_host: bool,                   // apply the resolved name to the hostmask
@@ -157,7 +157,7 @@ pub struct Server {
     pub dnsbl_action: String,                      // mark | kline | gline | zline
     pub dnsbl_reason: String,                      // ban reason on a DNSBL hit
     pub sasl_server: String,                       // services server that handles SASL
-    pub webirc: Vec<(String, String, String)>,     // web gateways: (password, name, ip-mask)
+    pub webirc: Vec<crate::config::WebircGateway>, // trusted web gateways
     /// Every `key = value` line from the config, so each module reads its own
     /// settings via [`Server::conf`] / [`conf_all`] / [`conf_bool`] / [`conf_num`]
     /// — no per-module field lives on this struct (module-per-file rule).
