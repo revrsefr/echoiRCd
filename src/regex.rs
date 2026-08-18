@@ -545,6 +545,19 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        // Fuzz the regex engine: no pattern may panic the compiler, and no
+        // (pattern, text) pair may panic the matcher. The NFA is linear-time, so a
+        // pathological pattern can't hang it either.
+        #[test]
+        fn regex_new_and_match_never_panic(pat in ".*", text in ".*") {
+            if let Ok(re) = Regex::new(&pat) {
+                let _ = re.is_match(&text);
+            }
+        }
+    }
 
     fn m(pat: &str, text: &str) -> bool {
         Regex::new(pat).unwrap().is_match(text)

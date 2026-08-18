@@ -1469,6 +1469,18 @@ pub fn normalize_ban_mask(m: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        // Fuzz ban-mask normalisation: no input panics, and it's idempotent
+        // (normalising an already-normalised mask changes nothing).
+        #[test]
+        fn normalize_ban_mask_no_panic_and_idempotent(m in ".*") {
+            let once = normalize_ban_mask(&m);
+            let twice = normalize_ban_mask(&once);
+            prop_assert_eq!(once, twice);
+        }
+    }
 
     #[test]
     fn account_extban_mask_is_left_verbatim() {

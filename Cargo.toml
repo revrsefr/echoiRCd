@@ -37,6 +37,8 @@ rustls-pemfile = "2"
 [dev-dependencies]
 # integration tests spawn the built binary and act as a TLS client against it
 openssl = "0.10"
+# property-based fuzzing (parsers) + deterministic S2S simulation (convergence).
+proptest = "1"
 
 [profile.release]
 opt-level = 3

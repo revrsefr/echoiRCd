@@ -371,3 +371,17 @@ impl Server {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        // Fuzz the duration parser: no arbitrary string may panic it.
+        #[test]
+        fn parse_duration_never_panics(s in ".*") {
+            let _ = parse_duration(&s);
+        }
+    }
+}

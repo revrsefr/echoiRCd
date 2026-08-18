@@ -640,6 +640,18 @@ fn header(head: &str, name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        // Fuzz the WebSocket frame parser: arbitrary bytes must not panic, and a
+        // decoded frame must never report consuming past the buffer.
+        #[test]
+        fn ws_parse_frame_never_panics_and_bounds(buf in prop::collection::vec(any::<u8>(), 0..600)) {
+            if let Ok(Some((_f, n))) = parse_frame(&buf) {
+                prop_assert!(n <= buf.len());
+            }
+        }
+    }
 
     #[test]
     fn accept_key_matches_rfc_example() {

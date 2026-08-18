@@ -121,6 +121,27 @@ pub fn parse(line: &str) -> Option<Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        // Fuzz: no arbitrary line may panic the parser.
+        #[test]
+        fn parse_never_panics(line in ".*") {
+            let _ = parse(&line);
+        }
+
+        // Round-trip: a parsed line, re-serialised and re-parsed, yields the same
+        // source/command/params (to_wire drops tags by design, so we don't compare those).
+        #[test]
+        fn parse_roundtrips_core_fields(line in ".*") {
+            if let Some(m) = parse(&line) {
+                let again = parse(&m.to_wire());
+                prop_assert_eq!(again.as_ref().map(|x| x.source.clone()), Some(m.source.clone()));
+                prop_assert_eq!(again.as_ref().map(|x| x.command.clone()), Some(m.command.clone()));
+                prop_assert_eq!(again.as_ref().map(|x| x.params.clone()), Some(m.params.clone()));
+            }
+        }
+    }
 
     #[test]
     fn simple_command() {

@@ -202,6 +202,17 @@ fn parse_v2_tlvs(mut tlv: &[u8]) -> (bool, Option<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        // Fuzz the PROXY-header parser: no byte prefix may panic, and it must never
+        // claim to have consumed more than it was given.
+        #[test]
+        fn proxy_parse_never_panics_and_bounds_consumed(buf in prop::collection::vec(any::<u8>(), 0..400)) {
+            let (_p, n) = parse(&buf);
+            prop_assert!(n <= buf.len());
+        }
+    }
 
     fn src(p: &Parsed) -> Option<SocketAddr> {
         match p {
