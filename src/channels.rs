@@ -964,7 +964,11 @@ impl Server {
             let text = t.text.clone();
             self.numeric(uid, RPL_TOPIC, &format!("{name} :{text}"));
         }
-        self.send_names(uid, &key);
+        // no-implicit-names: a client that negotiated the cap doesn't want the
+        // automatic NAMES burst after JOIN (it asks with NAMES when it needs it).
+        if !self.users.get(&uid).map(|u| u.caps.no_implicit_names).unwrap_or(false) {
+            self.send_names(uid, &key);
+        }
         self.replay_chanhistory(uid, &key); // +H: replay recent messages to the joiner
         self.propagate_join(uid, name, is_new); // tell linked servers this user joined
         self.events.push_back(Hook::Join(uid, key));
@@ -1229,6 +1233,7 @@ impl Server {
         list.iter().any(|b| {
             if b.mask.as_bytes().get(1) == Some(&b':') {
                 match b.mask.as_bytes().first() {
+                    Some(b'a') => crate::modules::accountban::matches(self, uid, &b.mask[2..]),
                     Some(b'g') => crate::modules::securitygroups::in_group(self, uid, &b.mask[2..]),
                     Some(b'y') => {
                         crate::modules::reputation::score_ban_match(self, uid, &b.mask[2..])

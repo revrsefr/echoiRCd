@@ -140,11 +140,14 @@ impl Command for MarkReadCmd {
                     .or_default()
                     .insert(tkey, ts);
                 let line = format!(":{} MARKREAD {target} timestamp={}", s.name, iso_time(ts));
+                // Sync the new marker to every connection under this identity that
+                // negotiated draft/read-marker (multi-device); others never asked
+                // for read-marker traffic.
                 let recips: Vec<Uid> = s
                     .users
-                    .keys()
-                    .copied()
-                    .filter(|&p| marker_id(s, p) == id)
+                    .iter()
+                    .filter(|(&p, u)| u.caps.read_marker && marker_id(s, p) == id)
+                    .map(|(&p, _)| p)
                     .collect();
                 for p in recips {
                     s.send(p, line.clone());

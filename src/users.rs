@@ -133,6 +133,8 @@ pub const SUPPORTED_CAPS: &[&str] = &[
     "reverse.im/filehost",
     "draft/relaymsg",
     "draft/channel-rename",
+    "draft/read-marker",
+    "no-implicit-names",
     "cap-notify",
 ];
 
@@ -168,6 +170,8 @@ pub struct Caps {
     pub filehost: bool,         // reverse.im/filehost — knows the file-host extension
     pub relaymsg: bool,         // draft/relaymsg — may use RELAYMSG (bridge relaying)
     pub channel_rename: bool,   // draft/channel-rename — receives RENAME (else PART+JOIN)
+    pub read_marker: bool,      // draft/read-marker — MARKREAD sync across the identity
+    pub no_implicit_names: bool, // no-implicit-names — suppress the auto NAMES after JOIN
     pub cap_notify: bool,
 }
 
@@ -237,6 +241,8 @@ impl Caps {
             "reverse.im/filehost" => self.filehost,
             "draft/relaymsg" => self.relaymsg,
             "draft/channel-rename" => self.channel_rename,
+            "draft/read-marker" => self.read_marker,
+            "no-implicit-names" => self.no_implicit_names,
             "cap-notify" => self.cap_notify,
             _ => false,
         }
@@ -273,6 +279,8 @@ impl Caps {
             "reverse.im/filehost" => &mut self.filehost,
             "draft/relaymsg" => &mut self.relaymsg,
             "draft/channel-rename" => &mut self.channel_rename,
+            "draft/read-marker" => &mut self.read_marker,
+            "no-implicit-names" => &mut self.no_implicit_names,
             "cap-notify" => &mut self.cap_notify,
             _ => return false,
         };

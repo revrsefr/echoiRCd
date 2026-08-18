@@ -4,6 +4,7 @@
 //! self-contained unit.
 
 pub mod account_registration;
+pub mod accountban;
 pub mod antimixedutf8;
 pub mod antirandom;
 pub mod autodrop;

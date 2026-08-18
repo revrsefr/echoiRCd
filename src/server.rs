@@ -751,7 +751,7 @@ impl Server {
         let include_oper = self.conf_bool("operprefix", false) || self.conf_bool("ojoin", false);
         let prefix = crate::modules::customprefix::isupport(include_oper);
         let mut tokens: Vec<String> = format!(
-            "CHANTYPES=# PREFIX={prefix} CHANMODES=beIgXw,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnprstuz EXTBAN=,Gbcgjmnrsy WATCH={maxwatch} MONITOR={maxmon} SILENCE={maxsil} CALLERID=g WHOX CHATHISTORY={chathist} MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN={maxnick} CHANNELLEN={maxchan} NETWORK={}",
+            "CHANTYPES=# PREFIX={prefix} CHANMODES=beIgXw,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnprstuz EXTBAN=,aGbcgjmnrsy ACCOUNTEXTBAN=a BOT=B WATCH={maxwatch} MONITOR={maxmon} SILENCE={maxsil} CALLERID=g WHOX CHATHISTORY={chathist} MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN={maxnick} CHANNELLEN={maxchan} NETWORK={}",
             self.network
         )
         .split(' ')
@@ -1393,6 +1393,43 @@ mod tests {
         // Non-cap member: the spec says no PART/JOIN fallback for a case change.
         let ann: Vec<String> = arx.try_iter().collect();
         assert!(!ann.iter().any(|l| l.contains("PART")), "no fallback on case-only: {ann:?}");
+    }
+
+    #[test]
+    fn isupport_advertises_bot_and_account_extban() {
+        let s = srv();
+        let joined = s.isupport_lines().join(" ");
+        assert!(joined.contains("BOT=B"), "bot-mode letter: {joined}");
+        assert!(joined.contains("ACCOUNTEXTBAN=a"), "account-extban token: {joined}");
+        assert!(joined.contains("EXTBAN=,aG"), "'a' listed in EXTBAN: {joined}");
+    }
+
+    #[test]
+    fn account_extban_matches_by_account_glob() {
+        let mut s = srv();
+        add_user(&mut s, 1, "ann");
+        s.users.get_mut(&1).unwrap().account = Some("spammer".into());
+        add_user(&mut s, 2, "bob"); // no account
+        assert!(crate::modules::accountban::matches(&s, 1, "spam*"));
+        assert!(!crate::modules::accountban::matches(&s, 1, "other"));
+        assert!(!crate::modules::accountban::matches(&s, 2, "*"), "no account never matches");
+    }
+
+    #[test]
+    fn no_implicit_names_suppresses_the_join_names_burst() {
+        let mut s = srv();
+        let arx = add_user(&mut s, 1, "ann");
+        s.users.get_mut(&1).unwrap().caps.no_implicit_names = true;
+        s.join(1, "#c", None);
+        let al: Vec<String> = arx.try_iter().collect();
+        assert!(al.iter().any(|l| l.contains("JOIN #c")), "still gets its JOIN");
+        assert!(!al.iter().any(|l| l.contains(" 353 ")), "no NAMREPLY: {al:?}");
+        assert!(!al.iter().any(|l| l.contains(" 366 ")), "no ENDOFNAMES");
+        // a client without the cap still gets the implicit NAMES
+        let brx = add_user(&mut s, 2, "bob");
+        s.join(2, "#c", None);
+        let bl: Vec<String> = brx.try_iter().collect();
+        assert!(bl.iter().any(|l| l.contains(" 353 ")) && bl.iter().any(|l| l.contains(" 366 ")));
     }
 
     #[test]
