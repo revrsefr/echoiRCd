@@ -137,7 +137,7 @@ pub fn handle(s: &mut Server, action: &str, params: &str) -> Result<String, RpcE
                 Some(name) if !name.is_empty() => {
                     // apply the named oper block's level; reject an unknown name rather
                     // than silently opering with defaults
-                    match s.opers.iter().find(|o| o.0 == name).map(|o| o.2) {
+                    match s.opers.iter().find(|o| o.name == name).map(|o| o.level) {
                         Some(level) => {
                             s.oper_up(uid);
                             crate::modules::operlevels::set(s, uid, level);

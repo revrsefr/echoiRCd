@@ -5,7 +5,9 @@
 //! network    = echoNet
 //! bind       = 127.0.0.1:6767
 //! motd       = Welcome to echoIRCd
-//! oper       = god secret
+//! oper       = god secret                       # name + password (+ optional level)
+//! oper       = god * fp=<sha256-cert-fp>         # cert-only login (no password)
+//! oper       = god secret fp=<sha256-cert-fp>    # password AND matching cert
 //! ```
 
 use crate::map::HashMap;
@@ -27,6 +29,17 @@ pub struct LinkBlock {
     pub port: u16,
     pub password: String,
     pub autoconnect: bool,
+}
+
+/// An oper login: `oper = <name> <password|*> [level] [fp=<sha256-fingerprint>]`.
+/// `password = *` means no password is checked (cert-only login); a `fp=` token
+/// requires the user's TLS client-certificate SHA-256 fingerprint to match.
+#[derive(Clone, Default)]
+pub struct OperBlock {
+    pub name: String,
+    pub password: String,
+    pub level: u32,
+    pub fingerprint: Option<String>,
 }
 
 /// Config for the `antimixedutf8` module (blocks mixed-script look-alike spam).
@@ -70,7 +83,7 @@ pub struct Config {
     pub tls_cert: Option<String>, // PEM certificate chain
     pub tls_key: Option<String>,  // PEM private key
     pub motd: Vec<String>,
-    pub opers: Vec<(String, String, u32)>,     // (name, password, operlevel)
+    pub opers: Vec<OperBlock>,                 // oper logins (see OperBlock)
     pub cloak_key: Option<String>,             // secret key for host cloaking (+x); None = off
     pub sid: String,                           // this server's 3-char server id (S2S)
     pub serverdesc: String,                    // this server's description
@@ -197,8 +210,24 @@ impl Config {
                 "oper" => {
                     let mut it = v.split_whitespace();
                     if let (Some(n), Some(p)) = (it.next(), it.next()) {
-                        let level = it.next().and_then(|l| l.parse().ok()).unwrap_or(0);
-                        c.opers.push((n.to_string(), p.to_string(), level));
+                        let mut b = OperBlock {
+                            name: n.to_string(),
+                            password: p.to_string(),
+                            level: 0,
+                            fingerprint: None,
+                        };
+                        // trailing tokens (any order): a number is the operlevel, a
+                        // `fp=`/`certfp=` token is the required TLS cert fingerprint.
+                        for tok in it {
+                            if let Some(fp) =
+                                tok.strip_prefix("fp=").or_else(|| tok.strip_prefix("certfp="))
+                            {
+                                b.fingerprint = Some(fp.to_ascii_lowercase());
+                            } else if let Ok(l) = tok.parse::<u32>() {
+                                b.level = l;
+                            }
+                        }
+                        c.opers.push(b);
                     }
                 }
                 // +G censor word: `badword = <find> [replace]` (no replace ⇒ block)

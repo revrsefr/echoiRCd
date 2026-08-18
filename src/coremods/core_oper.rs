@@ -123,15 +123,37 @@ impl Command for Oper {
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         let (name, pass) = (params[0].clone(), params[1].clone());
-        let Some((hash, level)) = s
-            .opers
-            .iter()
-            .find(|(n, _, _)| *n == name)
-            .map(|(_, p, lvl)| (p.clone(), *lvl))
-        else {
+        let Some(block) = s.opers.iter().find(|o| o.name == name).cloned() else {
             s.numeric(uid, ERR_PASSWDMISMATCH, ":Password incorrect");
             return CmdResult::Fail;
         };
+        let (hash, level) = (block.password.clone(), block.level);
+        // fingerprint login: the block demands a specific TLS client-cert SHA-256
+        // fingerprint, so the user must be on a matching certificate.
+        if let Some(want_fp) = &block.fingerprint {
+            let user_fp = s.users.get(&uid).and_then(|u| u.certfp.clone());
+            if !user_fp
+                .as_deref()
+                .is_some_and(|f| f.eq_ignore_ascii_case(want_fp))
+            {
+                s.snotice_c(
+                    'o',
+                    &format!("Failed OPER for {name}: certificate fingerprint mismatch"),
+                );
+                s.numeric(
+                    uid,
+                    ERR_PASSWDMISMATCH,
+                    ":Password incorrect (a matching TLS client certificate is required)",
+                );
+                return CmdResult::Fail;
+            }
+        }
+        // `password = *` means cert-only: the fingerprint above is the whole check.
+        if hash == "*" {
+            s.oper_up(uid);
+            crate::modules::operlevels::set(s, uid, level);
+            return CmdResult::Ok;
+        }
         // a KDF password (bcrypt / pbkdf2) is slow — verify it off the core thread
         // (result arrives as OperAuth), so it can't freeze the server or be a DoS.
         if crate::modules::password_hash::is_slow(&hash) {

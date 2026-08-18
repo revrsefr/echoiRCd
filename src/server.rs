@@ -130,7 +130,7 @@ pub struct Server {
     pub nick_index: HashMap<String, Uid>,   // lower nick -> uid
     pub channels: HashMap<String, Channel>, // lower name -> channel
     pub events: VecDeque<Hook>,
-    pub opers: Vec<(String, String, u32)>, // (name, password, operlevel) from config
+    pub opers: Vec<crate::config::OperBlock>, // oper logins from config
     pub cloak_key: Option<String>,    // host-cloaking key (see modules::cloak)
     pub line_ctags: String,           // client-only tags of the line being handled
     // --- server-to-server (see crate::link) ---

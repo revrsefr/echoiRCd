@@ -308,7 +308,7 @@ impl Command for Stats {
                 );
             }
             'o' => {
-                let opers: Vec<String> = s.opers.iter().map(|(n, _, _)| n.clone()).collect();
+                let opers: Vec<String> = s.opers.iter().map(|o| o.name.clone()).collect();
                 for n in opers {
                     s.numeric(uid, RPL_STATSOLINE, &format!("O * * {n} :oper"));
                 }
