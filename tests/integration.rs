@@ -206,8 +206,10 @@ fn read_collect<S: Read>(s: &mut S, timeout: Duration) -> String {
 fn register<S: Read + Write>(s: &mut S, nick: &str) {
     s.write_all(format!("NICK {nick}\r\nUSER {nick} 0 * :{nick}\r\n").as_bytes())
         .unwrap();
+    // Generous: read_until returns the instant 001 arrives, so a big deadline only
+    // buys patience on a box saturated by the parallel test servers, never latency.
     assert!(
-        read_until(s, " 001 ", Duration::from_secs(5)),
+        read_until(s, " 001 ", Duration::from_secs(15)),
         "no 001 welcome for {nick}"
     );
 }
@@ -299,11 +301,11 @@ fn register_with_cap<S: Read + Write>(s: &mut S, nick: &str, cap: &str) {
     )
     .unwrap();
     assert!(
-        read_until(s, "ACK", Duration::from_secs(5)),
+        read_until(s, "ACK", Duration::from_secs(10)),
         "no CAP ACK for {cap}"
     );
     assert!(
-        read_until(s, " 001 ", Duration::from_secs(5)),
+        read_until(s, " 001 ", Duration::from_secs(15)),
         "no 001 welcome for {nick}"
     );
 }
@@ -317,28 +319,31 @@ fn channel_rename_notifies_by_cap_and_needs_ops() {
     register_with_cap(&mut alice, "alice", "draft/channel-rename");
     let mut bob = srv.plain_client("bob");
 
+    // Generous timeouts: the full integration suite runs many echoircd processes in
+    // parallel, so a saturated CI box can slip past tight socket deadlines.
+    let t = Duration::from_secs(10);
     // Serialize the joins: alice must create #old (and become op) before bob joins,
     // or a reactor-scheduling race could make bob the creator instead.
     line(&mut alice, "JOIN #old"); // alice creates -> op
-    assert!(read_until(&mut alice, "JOIN #old", Duration::from_secs(2)), "alice join");
+    assert!(read_until(&mut alice, "JOIN #old", t), "alice join");
     line(&mut bob, "JOIN #old"); // joins the existing channel -> non-op
-    assert!(read_until(&mut bob, "JOIN #old", Duration::from_secs(2)), "bob join");
+    assert!(read_until(&mut bob, "JOIN #old", t), "bob join");
 
     // A non-op can't rename.
     line(&mut bob, "RENAME #old #nope");
     assert!(
-        read_until(&mut bob, " 482 ", Duration::from_secs(3)),
+        read_until(&mut bob, " 482 ", t),
         "non-op RENAME should get 482 CHANOPRIVSNEEDED"
     );
 
     // The op renames; alice (cap) gets a RENAME line, bob (no cap) is walked PART -> JOIN.
     line(&mut alice, "RENAME #old #new :moving");
     assert!(
-        read_until(&mut alice, "RENAME #old #new", Duration::from_secs(3)),
+        read_until(&mut alice, "RENAME #old #new", t),
         "cap client did not receive RENAME"
     );
     // bob's PART and JOIN arrive in one batch — collect and check both.
-    let bobseen = read_collect(&mut bob, Duration::from_secs(2));
+    let bobseen = read_collect(&mut bob, Duration::from_secs(4));
     assert!(bobseen.contains("PART #old"), "plain client not PARTed: {bobseen:?}");
     assert!(bobseen.contains("JOIN #new"), "plain client not re-JOINed: {bobseen:?}");
     assert!(!bobseen.contains("RENAME"), "plain client should not see RENAME: {bobseen:?}");
@@ -346,12 +351,12 @@ fn channel_rename_notifies_by_cap_and_needs_ops() {
     // The channel now answers under the new name (and not the old).
     line(&mut alice, "PRIVMSG #new :landed");
     assert!(
-        read_until(&mut bob, "landed", Duration::from_secs(3)),
+        read_until(&mut bob, "landed", t),
         "message to the renamed channel didn't reach members"
     );
     line(&mut alice, "NAMES #old");
     assert!(
-        read_until(&mut alice, " 366 ", Duration::from_secs(3)),
+        read_until(&mut alice, " 366 ", t),
         "NAMES on the old name should just end (channel is gone)"
     );
 }

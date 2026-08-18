@@ -149,16 +149,46 @@ fn main() {
             })
             .unwrap_or_default();
         match (&cfg.tls_cert, &cfg.tls_key) {
-            (Some(cert), Some(key)) => match OpensslBackend::new(cert, key, sni) {
-                Ok(backend) => {
-                    let backend = Arc::new(backend);
-                    // publish for REHASH-triggered cert reload
-                    let _ = echoircd::tls::TLS_RELOAD.set(backend.clone());
-                    let backend: Arc<dyn TlsBackend> = backend;
+            (Some(cert), Some(key)) => {
+                // pick the TLS backend: pure-Rust rustls (opt-in via tls_backend =
+                // rustls) or openssl (the default). Both satisfy the same trait.
+                let use_rustls = cfg
+                    .raw
+                    .get("tls_backend")
+                    .and_then(|v| v.first())
+                    .is_some_and(|s| s.eq_ignore_ascii_case("rustls"));
+                let backend: Option<Arc<dyn TlsBackend>> = if use_rustls {
+                    match echoircd::tls_rustls::RustlsBackend::new(cert, key, sni) {
+                        Ok(b) => {
+                            let b = Arc::new(b);
+                            let _ = echoircd::tls::TLS_RELOAD.set(b.clone());
+                            eprintln!("echoircd TLS backend: rustls");
+                            Some(b as Arc<dyn TlsBackend>)
+                        }
+                        Err(e) => {
+                            eprintln!("echoircd: TLS disabled (rustls cert/key error): {e}");
+                            None
+                        }
+                    }
+                } else {
+                    match OpensslBackend::new(cert, key, sni) {
+                        Ok(b) => {
+                            let b = Arc::new(b);
+                            let _ = echoircd::tls::TLS_RELOAD.set(b.clone()); // REHASH cert reload
+                            eprintln!("echoircd TLS backend: openssl");
+                            Some(b as Arc<dyn TlsBackend>)
+                        }
+                        Err(e) => {
+                            eprintln!("echoircd: TLS disabled (cert/key error): {e}");
+                            None
+                        }
+                    }
+                };
+                if let Some(backend) = backend {
                     for bind_tls in &cfg.bind_tls {
                         match TcpListener::bind(bind_tls) {
                             Ok(tls_listener) => {
-                                eprintln!("echoircd TLS on {bind_tls} (openssl)");
+                                eprintln!("echoircd TLS on {bind_tls}");
                                 let tls_tx = tx.clone();
                                 let tls_counter = counter.clone();
                                 let tls_proxy_trust = proxy_trust.clone();
@@ -184,8 +214,7 @@ fn main() {
                         }
                     }
                 }
-                Err(e) => eprintln!("echoircd: TLS disabled (cert/key error): {e}"),
-            },
+            }
             _ => eprintln!("echoircd: bind_tls set but tls_cert/tls_key missing; TLS disabled"),
         }
     }
