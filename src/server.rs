@@ -1033,6 +1033,76 @@ impl Server {
         }
     }
 
+    /// Fan a channel PRIVMSG/NOTICE out to every eligible member, allocating the
+    /// line at most once per distinct capability profile (server-time / account-tag
+    /// / message-tags) and sharing it by `Arc` — instead of formatting a fresh
+    /// String per member. The tag *values* (time, account, msgid, ctags) are the
+    /// same for the whole message, so a big channel needs ≤8 lines, not N. Excludes
+    /// the sender (echo-message is a separate single send) and +D deaf members;
+    /// `op_only` (+U) limits delivery to half-ops and above.
+    pub fn to_channel_tagged(
+        &self,
+        key: &str,
+        src: Uid,
+        ctags: &str,
+        msgid: &str,
+        body: &str,
+        op_only: bool,
+    ) {
+        let Some(ch) = self.channels.get(key) else {
+            return;
+        };
+        let members: Vec<Uid> = ch.members.keys().copied().collect();
+        let time_tag = format!("time={}", iso_time(now()));
+        let account = self.users.get(&src).and_then(|su| su.account.clone());
+        // one cached line per (server_time, account_tag, message_tags) combination
+        let mut cache: [Option<std::sync::Arc<str>>; 8] = std::array::from_fn(|_| None);
+        for m in members {
+            if m == src {
+                continue;
+            }
+            let Some(u) = self.users.get(&m) else {
+                continue;
+            };
+            if u.flags.deaf {
+                continue;
+            }
+            if op_only && self.rank(m, key) < crate::channels::RANK_HALFOP {
+                continue;
+            }
+            let st = u.caps.server_time;
+            let at = u.caps.account_tag && account.is_some();
+            let mt = u.caps.message_tags;
+            let idx = st as usize | (at as usize) << 1 | (mt as usize) << 2;
+            let line = cache[idx]
+                .get_or_insert_with(|| {
+                    let mut tags: Vec<String> = Vec::new();
+                    if st {
+                        tags.push(time_tag.clone());
+                    }
+                    if at {
+                        tags.push(format!("account={}", account.as_deref().unwrap_or_default()));
+                    }
+                    if mt {
+                        if !msgid.is_empty() {
+                            tags.push(format!("msgid={msgid}"));
+                        }
+                        if !ctags.is_empty() {
+                            tags.push(ctags.to_string());
+                        }
+                    }
+                    let s = if tags.is_empty() {
+                        body.to_string()
+                    } else {
+                        format!("@{} {body}", tags.join(";"))
+                    };
+                    std::sync::Arc::from(s.as_str())
+                })
+                .clone();
+            self.emit_to(m, LineBuf::Shared(line));
+        }
+    }
+
     /// Mint a unique IRCv3 `msgid` for one message. Generated once per PRIVMSG/
     /// NOTICE/TAGMSG and shared across all its recipients so they correlate.
     /// `<server-start>-<counter>` in hex: unique for this run, distinct across
@@ -1419,6 +1489,40 @@ mod tests {
         // Non-cap member: the spec says no PART/JOIN fallback for a case change.
         let ann: Vec<String> = arx.try_iter().collect();
         assert!(!ann.iter().any(|l| l.contains("PART")), "no fallback on case-only: {ann:?}");
+    }
+
+    #[test]
+    fn to_channel_tagged_shares_and_tags_by_profile() {
+        let mut s = srv();
+        let arx = add_user(&mut s, 1, "ann"); // plain
+        let brx = add_user(&mut s, 2, "bob"); // server-time
+        let crx = add_user(&mut s, 3, "cara"); // message-tags + account-tag
+        let drx = add_user(&mut s, 4, "dave"); // the sender (has an account)
+        s.users.get_mut(&2).unwrap().caps.server_time = true;
+        s.users.get_mut(&3).unwrap().caps.message_tags = true;
+        s.users.get_mut(&3).unwrap().caps.account_tag = true;
+        s.users.get_mut(&4).unwrap().account = Some("dv".into());
+        for u in [1, 2, 3, 4] {
+            s.join(u, "#c", None);
+        }
+        for rx in [&arx, &brx, &crx, &drx] {
+            let _ = rx.try_iter().count();
+        }
+        s.to_channel_tagged("#c", 4, "", "abc123", ":dave!u@h PRIVMSG #c :hi", false);
+        let ann: Vec<String> = arx.try_iter().collect();
+        let bob: Vec<String> = brx.try_iter().collect();
+        let cara: Vec<String> = crx.try_iter().collect();
+        let dave: Vec<String> = drx.try_iter().collect();
+        assert!(ann.iter().any(|l| l == ":dave!u@h PRIVMSG #c :hi"), "plain untagged: {ann:?}");
+        assert!(
+            bob.iter().any(|l| l.starts_with("@time=") && l.ends_with(":dave!u@h PRIVMSG #c :hi")),
+            "server-time tagged: {bob:?}"
+        );
+        assert!(
+            cara.iter().any(|l| l.contains("account=dv") && l.contains("msgid=abc123")),
+            "message-tags+account-tag both present: {cara:?}"
+        );
+        assert!(dave.is_empty(), "sender is excluded from the fanout: {dave:?}");
     }
 
     #[test]

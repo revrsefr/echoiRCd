@@ -463,21 +463,9 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
         if !op_only {
             record(s, &key, &prefix, cmd, target, &body, &msgid); // for CHATHISTORY
         }
-        let members: Vec<Uid> = s
-            .channels
-            .get(&key)
-            .map(|c| c.members.keys().copied().collect())
-            .unwrap_or_default();
-        for m in members {
-            if m == uid || s.users.get(&m).map(|u| u.flags.deaf).unwrap_or(false) {
-                continue;
-            }
-            // +U: an unprivileged sender's message reaches ops (half-op+) only
-            if op_only && s.rank(m, &key) < RANK_HALFOP {
-                continue;
-            }
-            s.send_tagged(m, uid, &ctags, &msgid, &line);
-        }
+        // fan out to members: one shared line per capability profile, +D deaf and
+        // (+U) op-only filtering applied inside. The sender's own copy is separate.
+        s.to_channel_tagged(&key, uid, &ctags, &msgid, &line, op_only);
         // echo-message: give the sender their own copy if they asked for one
         if s.users
             .get(&uid)
