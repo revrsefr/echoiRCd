@@ -35,6 +35,8 @@ pub mod server;
 pub mod socketengine;
 pub mod tls;
 pub mod tls_rustls;
+#[cfg(test)]
+mod s2s_sim;
 pub mod users;
 pub mod watch;
 pub mod websocket;

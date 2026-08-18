@@ -434,47 +434,13 @@ impl Command for Part {
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         let reason = params.get(1).cloned().unwrap_or_default();
         for target in params[0].split(',').filter(|x| !x.is_empty()) {
-            let key = target.to_ascii_lowercase();
-            let on = s
-                .users
-                .get(&uid)
-                .map(|u| u.channels.contains(&key))
-                .unwrap_or(false);
-            if !on {
+            if !s.part(uid, target, &reason) {
                 s.numeric(
                     uid,
                     ERR_NOTONCHANNEL,
                     &format!("{target} :You're not on that channel"),
                 );
-                continue;
             }
-            let prefix = s.users[&uid].prefix();
-            let line = if reason.is_empty() {
-                format!(":{prefix} PART {target}")
-            } else {
-                format!(":{prefix} PART {target} :{reason}")
-            };
-            // +D delayjoin: a still-hidden member's PART is shown only to themselves
-            let hidden = s
-                .channels
-                .get(&key)
-                .and_then(|c| c.members.get(&uid))
-                .map(|m| m.hidden)
-                .unwrap_or(false);
-            if hidden {
-                s.send(uid, line.clone());
-            } else {
-                s.to_channel_vis(&key, &line, uid); // +u: only ops + self see the part
-            }
-            s.propagate_part(uid, target, &reason); // tell linked servers
-            if let Some(ch) = s.channels.get_mut(&key) {
-                ch.members.remove(&uid);
-            }
-            if let Some(u) = s.users.get_mut(&uid) {
-                u.channels.remove(&key);
-            }
-            s.channels.retain(|_, c| c.keep_alive());
-            s.events.push_back(Hook::Part(uid, key, reason.clone()));
         }
         CmdResult::Ok
     }

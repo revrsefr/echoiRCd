@@ -974,6 +974,49 @@ impl Server {
         self.events.push_back(Hook::Join(uid, key));
     }
 
+    /// A local user leaves `target` (original case): broadcast the PART, tell linked
+    /// servers, drop membership, and cull the channel if it's now empty. Returns
+    /// false (a no-op) if they weren't on it — the caller emits ERR_NOTONCHANNEL.
+    pub fn part(&mut self, uid: Uid, target: &str, reason: &str) -> bool {
+        let key = target.to_ascii_lowercase();
+        let on = self
+            .users
+            .get(&uid)
+            .map(|u| u.channels.contains(&key))
+            .unwrap_or(false);
+        if !on {
+            return false;
+        }
+        let prefix = self.users[&uid].prefix();
+        let line = if reason.is_empty() {
+            format!(":{prefix} PART {target}")
+        } else {
+            format!(":{prefix} PART {target} :{reason}")
+        };
+        // +D delayjoin: a still-hidden member's PART is shown only to themselves
+        let hidden = self
+            .channels
+            .get(&key)
+            .and_then(|c| c.members.get(&uid))
+            .map(|m| m.hidden)
+            .unwrap_or(false);
+        if hidden {
+            self.send(uid, line);
+        } else {
+            self.to_channel_vis(&key, &line, uid); // +u: only ops + self see the part
+        }
+        self.propagate_part(uid, target, reason); // tell linked servers
+        if let Some(ch) = self.channels.get_mut(&key) {
+            ch.members.remove(&uid);
+        }
+        if let Some(u) = self.users.get_mut(&uid) {
+            u.channels.remove(&key);
+        }
+        self.channels.retain(|_, c| c.keep_alive());
+        self.events.push_back(Hook::Part(uid, key, reason.to_string()));
+        true
+    }
+
     /// Rename channel `oldkey` (an existing lowercase key) to display name
     /// `newname`, preserving all state — membership, modes, topic, bans, TS. The
     /// channel object is rekeyed in the table and every local member's channel set
