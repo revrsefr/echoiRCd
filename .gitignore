@@ -16,3 +16,9 @@ Cargo.lock
 *.metadata
 *.reputation
 bin/
+
+# runtime state databases — NEVER commit (reputation.db holds client IPs)
+*.db
+# local backups / scratch config copies
+*.bak-*
+echoircd.conf.*
