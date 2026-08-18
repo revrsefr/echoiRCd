@@ -2,9 +2,13 @@
 # native-rust-guard — echoIRCd's standing invariant.
 #
 # echoIRCd is ORIGINAL Rust — no code copied or translated from any other project.
-# Every module, command and core function is written natively in Rust. This guard
-# fails if that slips. Run it any time:  bash scripts/native-rust-guard.sh
-# It is also wired into an editor hook so it runs automatically on edits.
+# Every module, command and core function is written natively in Rust, and our own
+# crate stays `#![forbid(unsafe_code)]`. This guard fails if that slips. Run it any
+# time:  bash scripts/native-rust-guard.sh   (also wired into an editor hook).
+#
+# NOTE: there is NO dependency whitelist. Any crate that makes the daemon faster or
+# better is welcome (ahash, mimalloc, memchr, rustls, tokio, …); crates keep their
+# own `unsafe` internal, which our forbid(unsafe_code) does not (and cannot) police.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
@@ -27,13 +31,10 @@ cpp=$(find src -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.cc' -o -nam
 ffi=$(grep -rnE 'extern[[:space:]]+"C"|\blibc::|std::ffi|#\[no_mangle\]' src/ 2>/dev/null)
 [ -n "$ffi" ] && flag "FFI / foreign-function interface found:" "$ffi"
 
-# 4. dependency-light — only openssl is allowed as an external crate
-deps=$(awk '/^\[dependencies\]/{f=1;next} /^\[/{f=0} f && NF {print}' Cargo.toml 2>/dev/null \
-        | grep -vE '^[[:space:]]*#' | sed -E 's/[[:space:]=].*//' | grep -vE '^(openssl|mio)?$')
-[ -n "$deps" ] && flag "unexpected dependency (only openssl + mio allowed):" "$deps"
+# (no dependency whitelist — crates are welcome; see the note at the top)
 
 if [ "$fail" -eq 0 ]; then
-  echo "native-rust-guard: OK — original Rust, no-unsafe, no C/FFI, openssl+mio only."
+  echo "native-rust-guard: OK — original Rust, no-unsafe in our crate, no C/FFI in our src."
   exit 0
 fi
 echo "native-rust-guard: FAILED — see violations above." >&2

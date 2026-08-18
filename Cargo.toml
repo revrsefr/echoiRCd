@@ -19,9 +19,16 @@ path = "src/lib.rs"
 openssl = "0.10"
 # epoll/kqueue reactor for the client socket engine — a minimal readiness layer
 # (no async runtime). Lets one thread drive tens of thousands of connections
-# instead of 2 OS threads per client. Its `unsafe` stays internal (like openssl),
-# so the daemon is still `#![forbid(unsafe_code)]`; no async runtime is pulled in.
+# instead of 2 OS threads per client. Its `unsafe` stays internal (like openssl).
 mio = { version = "1", features = ["os-poll", "net"] }
+# aHash — DoS-resistant (random-seeded) hasher, ~2-3x faster than SipHash on the
+# small keys the router hammers (uid/nick/channel lookups). See crate::map.
+ahash = "0.8"
+# mimalloc — global allocator; big throughput win on the many-small-String churn
+# of per-message formatting. `unsafe` stays internal to the crate.
+mimalloc = "0.1"
+# SIMD byte search — accelerates the newline scan in the line framer.
+memchr = "2"
 
 [dev-dependencies]
 # integration tests spawn the built binary and act as a TLS client against it
@@ -29,3 +36,6 @@ openssl = "0.10"
 
 [profile.release]
 opt-level = 3
+lto = "fat"          # cross-crate inlining — the router/format hot paths inline through mio/openssl
+codegen-units = 1    # one unit = best optimisation (slower build, faster binary)
+panic = "unwind"     # REQUIRED: the core isolates handler panics with catch_unwind

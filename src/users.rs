@@ -1,7 +1,7 @@
 //! Users: the `User` record plus nick handling, user modes, oper status and the
 //! registration/welcome burst.
 
-use std::collections::HashSet;
+use crate::map::HashSet;
 use std::net::{SocketAddr, TcpStream};
 
 use crate::extensible::Extensible;
@@ -486,7 +486,7 @@ impl Server {
         }
         if registered {
             let line = format!(":{prefix} NICK :{newnick}");
-            let mut targets: HashSet<Uid> = HashSet::new();
+            let mut targets: HashSet<Uid> = HashSet::default();
             targets.insert(uid);
             let chans: Vec<String> = self.users[&uid].channels.iter().cloned().collect();
             for key in &chans {

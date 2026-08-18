@@ -317,10 +317,12 @@ fn channel_rename_notifies_by_cap_and_needs_ops() {
     register_with_cap(&mut alice, "alice", "draft/channel-rename");
     let mut bob = srv.plain_client("bob");
 
+    // Serialize the joins: alice must create #old (and become op) before bob joins,
+    // or a reactor-scheduling race could make bob the creator instead.
     line(&mut alice, "JOIN #old"); // alice creates -> op
-    line(&mut bob, "JOIN #old");
-    read_until(&mut alice, "JOIN #old", Duration::from_secs(2));
-    read_until(&mut bob, "JOIN #old", Duration::from_secs(2));
+    assert!(read_until(&mut alice, "JOIN #old", Duration::from_secs(2)), "alice join");
+    line(&mut bob, "JOIN #old"); // joins the existing channel -> non-op
+    assert!(read_until(&mut bob, "JOIN #old", Duration::from_secs(2)), "bob join");
 
     // A non-op can't rename.
     line(&mut bob, "RENAME #old #nope");

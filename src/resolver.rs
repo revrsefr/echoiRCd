@@ -9,7 +9,7 @@
 //! IP. Runs off the core thread (never blocks the daemon), bounded in time (the UDP
 //! read timeout) and in concurrency (`try_acquire`).
 
-use std::collections::HashMap;
+use crate::map::HashMap;
 use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs, UdpSocket};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -79,7 +79,7 @@ pub fn release() {
 /// and that host resolves back to `ip`. Cached by IP so reconnects and clients
 /// behind the same NAT resolve instantly.
 pub fn reverse_confirmed(ip: IpAddr, timeout: Duration) -> Option<String> {
-    let cache = RDNS_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let cache = RDNS_CACHE.get_or_init(|| Mutex::new(HashMap::default()));
     if let Ok(g) = cache.lock() {
         if let Some((val, exp)) = g.get(&ip) {
             if Instant::now() < *exp {
@@ -208,7 +208,7 @@ fn ptr_lookup(ns: &str, qname: &str, timeout: Duration) -> Option<String> {
 /// `<reversed-ip>.<zone>` name and calls this to test a listing. Cached by qname
 /// so repeat DNSBL checks for the same IP+zone don't re-hit the network.
 pub fn a_lookup(qname: &str, timeout: Duration) -> Option<Ipv4Addr> {
-    let cache = A_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let cache = A_CACHE.get_or_init(|| Mutex::new(HashMap::default()));
     if let Ok(g) = cache.lock() {
         if let Some((val, exp)) = g.get(qname) {
             if Instant::now() < *exp {

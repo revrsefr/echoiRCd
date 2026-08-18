@@ -5,7 +5,8 @@
 //! records into it via [`record`], and the CHATHISTORY and REDACT commands
 //! read/edit it here.
 
-use std::collections::{HashMap, VecDeque};
+use crate::map::HashMap;
+use std::collections::VecDeque;
 
 use crate::channels::RANK_HALFOP;
 use crate::command::{CmdResult, Command};

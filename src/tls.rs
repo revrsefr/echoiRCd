@@ -5,7 +5,7 @@
 //! This backend is openssl. An alternative backend (e.g. rustls) only has to
 //! implement these same two traits and it slots straight in.
 
-use std::collections::HashMap;
+use crate::map::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::sync::{Arc, OnceLock, RwLock};
@@ -112,7 +112,7 @@ fn build_ctx(cert: &str, key: &str) -> io::Result<SslContext> {
 /// Build the acceptor for the primary cert, with a servername callback that
 /// switches to a per-hostname context when the client's SNI matches an `sni` entry.
 fn build_acceptor(primary: &CertPaths, sni: &[(String, CertPaths)]) -> io::Result<SslAcceptor> {
-    let mut map: HashMap<String, SslContext> = HashMap::new();
+    let mut map: HashMap<String, SslContext> = HashMap::default();
     for (host, cp) in sni {
         map.insert(host.to_ascii_lowercase(), build_ctx(&cp.cert, &cp.key)?);
     }

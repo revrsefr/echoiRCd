@@ -3,6 +3,11 @@
 //! feed it connections.
 #![forbid(unsafe_code)]
 
+// mimalloc as the global allocator: an IRC core allocates a short-lived String per
+// message per recipient (tags + body), so allocator throughput is on the hot path.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;

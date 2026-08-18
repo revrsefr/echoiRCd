@@ -5,7 +5,7 @@
 //! messages. Limits: multiline_maxbytes / multiline_maxlines. In-flight batches live
 //! in `Server.ext`, cleaned up by the on_user_quit hook.
 
-use std::collections::HashMap;
+use crate::map::HashMap;
 
 use crate::command::{CmdResult, Command};
 use crate::coremods::core_message::deliver;

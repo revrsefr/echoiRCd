@@ -6,7 +6,7 @@
 //! sender is on (>1). Off unless `blockamsg = yes`. Per-user last-message state
 //! lives in `Server.ext`.
 
-use std::collections::HashMap;
+use crate::map::HashMap;
 
 use crate::module::{ModResult, Module};
 use crate::server::{now, Server};

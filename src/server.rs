@@ -5,7 +5,8 @@
 //! single core thread ever holds a `Server`.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet, VecDeque};
+use crate::map::{HashMap, HashSet};
+use std::collections::VecDeque;
 use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::AtomicU64;
 use std::sync::mpsc::Sender;
@@ -182,9 +183,9 @@ impl Server {
             network: cfg.network,
             created: now(),
             motd: cfg.motd,
-            users: HashMap::new(),
-            nick_index: HashMap::new(),
-            channels: HashMap::new(),
+            users: HashMap::default(),
+            nick_index: HashMap::default(),
+            channels: HashMap::default(),
             events: VecDeque::new(),
             opers: cfg.opers,
             cloak_key: cfg.cloak_key,
@@ -192,13 +193,13 @@ impl Server {
             sid: cfg.sid,
             server_desc: cfg.serverdesc,
             link_blocks: cfg.links,
-            links: HashMap::new(),
-            servers: HashMap::new(),
+            links: HashMap::default(),
+            servers: HashMap::default(),
             uuid_counter: 0,
             msgid_counter: 0,
-            uuid_local: HashMap::new(),
-            remote_users: HashMap::new(),
-            remote_nick: HashMap::new(),
+            uuid_local: HashMap::default(),
+            remote_users: HashMap::default(),
+            remote_nick: HashMap::default(),
             whowas: VecDeque::new(),
             conf_path: cfg.conf_path,
             xlines: Vec::new(),
@@ -362,7 +363,7 @@ impl Server {
                 cap_302: false,
                 caps: Caps::default(),
                 sasl_mech: None,
-                channels: HashSet::new(),
+                channels: HashSet::default(),
                 watch: Vec::new(),
                 monitor: Vec::new(),
                 silence: Vec::new(),
@@ -531,12 +532,12 @@ impl Server {
     /// content wins), so a backed-up writer stays bounded at one pending snapshot per
     /// file — safe precisely because each write is the complete current state.
     pub fn disk_write(&self, path: String, contents: String) {
-        use std::collections::HashMap;
+        use crate::map::HashMap;
         use std::sync::{Condvar, Mutex, OnceLock};
         type Pending = std::sync::Arc<(Mutex<HashMap<String, String>>, Condvar)>;
         static WRITER: OnceLock<Pending> = OnceLock::new();
         let pending = WRITER.get_or_init(|| {
-            let p: Pending = std::sync::Arc::new((Mutex::new(HashMap::new()), Condvar::new()));
+            let p: Pending = std::sync::Arc::new((Mutex::new(HashMap::default()), Condvar::new()));
             let worker = p.clone();
             std::thread::spawn(move || {
                 let (lock, cv) = &*worker;
@@ -674,7 +675,7 @@ impl Server {
         }
         if user.registered {
             let line = format!(":{} QUIT :{reason}", user.prefix());
-            let mut seen: HashSet<Uid> = HashSet::new();
+            let mut seen: HashSet<Uid> = HashSet::default();
             for key in &user.channels {
                 if let Some(ch) = self.channels.get_mut(key) {
                     // +D delayjoin: if their JOIN here was never announced, no QUIT either
@@ -1024,7 +1025,7 @@ impl Server {
             .get(&uid)
             .map(|u| u.channels.iter().cloned().collect())
             .unwrap_or_default();
-        let mut seen: HashSet<Uid> = HashSet::new();
+        let mut seen: HashSet<Uid> = HashSet::default();
         for k in &chans {
             if let Some(ch) = self.channels.get(k) {
                 for &m in ch.members.keys() {
@@ -1261,7 +1262,7 @@ mod tests {
                 cap_302: false,
                 caps: Caps::default(),
                 sasl_mech: None,
-                channels: HashSet::new(),
+                channels: HashSet::default(),
                 watch: Vec::new(),
                 monitor: Vec::new(),
                 silence: Vec::new(),

@@ -13,7 +13,7 @@
 //! `recaptcha_secret` and `recaptcha_url` are set. All config-driven; the only
 //! state (who has passed) lives in `Server.ext`.
 
-use std::collections::HashSet;
+use crate::map::HashSet;
 
 use crate::command::{CmdResult, Command};
 use crate::http::json_str;

@@ -4,7 +4,7 @@
 //! no manual free, no dangling data.
 
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
+use crate::map::HashMap;
 
 #[derive(Default)]
 pub struct Extensible {

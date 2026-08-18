@@ -2,7 +2,7 @@
 //! `connflood = <max> <secs>`. Per-IP recent-connect times live in `Server.ext`,
 //! pruned on the tick.
 
-use std::collections::HashMap;
+use crate::map::HashMap;
 use std::net::IpAddr;
 
 use crate::module::Module;

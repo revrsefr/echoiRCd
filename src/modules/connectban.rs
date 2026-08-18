@@ -8,7 +8,7 @@
 //! z-lines match by glob, not CIDR, so the banned range is emitted as a wildcard
 //! mask (`1.2.3.*` for an IPv4 /24, the exact IP for a /32).
 
-use std::collections::HashMap;
+use crate::map::HashMap;
 use std::net::IpAddr;
 
 use crate::module::Module;

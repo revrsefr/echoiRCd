@@ -11,12 +11,12 @@ pub mod core_rehash;
 pub mod core_user;
 pub mod core_watch;
 
-use std::collections::HashMap;
+use crate::map::HashMap;
 
 use crate::command::Command;
 
 pub fn command_table() -> HashMap<&'static str, Box<dyn Command>> {
-    let mut m: HashMap<&'static str, Box<dyn Command>> = HashMap::new();
+    let mut m: HashMap<&'static str, Box<dyn Command>> = HashMap::default();
     for c in core_user::commands()
         .into_iter()
         .chain(core_channel::commands())

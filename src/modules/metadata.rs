@@ -2,7 +2,7 @@
 //! and channels, op-gated, with change notices in a `metadata` batch. The store
 //! lives in `Server.ext`, cleaned up by the on_user_quit hook.
 
-use std::collections::HashMap;
+use crate::map::HashMap;
 
 use crate::channels::RANK_HALFOP;
 use crate::command::{CmdResult, Command};

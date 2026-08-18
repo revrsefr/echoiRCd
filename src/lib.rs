@@ -22,6 +22,7 @@ pub mod extensible;
 pub mod http;
 pub mod ircd;
 pub mod link;
+pub mod map;
 pub mod message;
 pub mod mode;
 pub mod module;

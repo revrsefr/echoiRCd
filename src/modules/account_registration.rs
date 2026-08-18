@@ -19,7 +19,7 @@
 //!   acctregister_ratecount = 3        max REGISTER attempts per IP …
 //!   acctregister_ratetime  = 3600     … per this many seconds
 
-use std::collections::HashMap;
+use crate::map::HashMap;
 
 use crate::command::{CmdResult, Command};
 use crate::http::{json_str, urlencode};

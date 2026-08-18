@@ -1,7 +1,7 @@
 //! Channels: the `Channel` record, membership, channel modes, bans, invites and
 //! JOIN/NAMES.
 
-use std::collections::{HashMap, HashSet};
+use crate::map::{HashMap, HashSet};
 
 use crate::module::Hook;
 use crate::modules::chathistory::{HistMsg, History};
@@ -435,8 +435,8 @@ impl Channel {
         Channel {
             name: name.to_string(),
             topic: None,
-            members: HashMap::new(),
-            rmembers: HashMap::new(),
+            members: HashMap::default(),
+            rmembers: HashMap::default(),
             modes: ChanModes {
                 no_external: true,
                 topic_ops: true,
@@ -448,14 +448,14 @@ impl Channel {
             filters: Vec::new(),
             exemptchanops: Vec::new(),
             autoop: Vec::new(),
-            invites: HashSet::new(),
+            invites: HashSet::default(),
             created: now(),
-            msgflood_hits: HashMap::new(),
+            msgflood_hits: HashMap::default(),
             joinflood_hits: Vec::new(),
             joinflood_until: 0,
             nickflood_hits: Vec::new(),
             nickflood_until: 0,
-            recent_kicks: HashMap::new(),
+            recent_kicks: HashMap::default(),
         }
     }
 

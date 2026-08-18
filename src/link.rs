@@ -18,7 +18,7 @@
 
 use std::net::{SocketAddr, TcpStream};
 
-use std::collections::HashSet;
+use crate::map::HashSet;
 
 use crate::channels::{glob_match, Ban, ChanModes, Channel, Member, Topic};
 use crate::message::Message;
@@ -1549,7 +1549,7 @@ impl Server {
 
     /// The distinct links a channel's remote members sit behind (minus `except`).
     fn channel_link_targets(&self, key: &str, except: Option<Uid>) -> Vec<Uid> {
-        let mut set: HashSet<Uid> = HashSet::new();
+        let mut set: HashSet<Uid> = HashSet::default();
         if let Some(ch) = self.channels.get(key) {
             for uuid in ch.rmembers.keys() {
                 if let Some(ru) = self.remote_users.get(uuid) {
@@ -1739,7 +1739,7 @@ impl Server {
             Some(ru) => ru.prefix(),
             None => return,
         };
-        let mut notify: HashSet<Uid> = HashSet::new();
+        let mut notify: HashSet<Uid> = HashSet::default();
         let chans: Vec<String> = self
             .channels
             .iter()
@@ -2689,7 +2689,7 @@ mod tests {
         use crate::config::Config;
         use crate::extensible::Extensible;
         use crate::users::{Caps, UserFlags};
-        use std::collections::HashSet;
+        use crate::map::HashSet;
         use std::sync::atomic::AtomicU64;
         use std::sync::{mpsc, Arc};
 
@@ -2737,7 +2737,7 @@ mod tests {
                 cap_302: false,
                 caps: Caps::default(),
                 sasl_mech: None,
-                channels: HashSet::new(),
+                channels: HashSet::default(),
                 watch: Vec::new(),
                 monitor: Vec::new(),
                 silence: Vec::new(),
@@ -2774,7 +2774,7 @@ mod tests {
         use crate::config::Config;
         use crate::extensible::Extensible;
         use crate::users::{Caps, UserFlags};
-        use std::collections::HashSet;
+        use crate::map::HashSet;
         use std::sync::atomic::AtomicU64;
         use std::sync::{mpsc, Arc};
 
@@ -2824,7 +2824,7 @@ mod tests {
                 cap_302: false,
                 caps,
                 sasl_mech: None,
-                channels: HashSet::new(),
+                channels: HashSet::default(),
                 watch: Vec::new(),
                 monitor: Vec::new(),
                 silence: Vec::new(),

@@ -4,7 +4,7 @@
 //! sharing that identity. The store lives in `Server.ext`, cleaned up by the
 //! on_user_quit hook.
 
-use std::collections::HashMap;
+use crate::map::HashMap;
 
 use crate::command::{CmdResult, Command};
 use crate::module::Module;

@@ -4,7 +4,7 @@
 //! `reputationexpire` rules and persist to disk. Exposes the `y:` score extban, WHOIS
 //! visibility, and the `REPUTATION` oper command. Config-driven (see `[reputation_*]`).
 
-use std::collections::HashMap;
+use crate::map::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::command::{CmdResult, Command};
@@ -346,7 +346,7 @@ mod tests {
     use crate::extensible::Extensible;
     use crate::socketengine::OutSink;
     use crate::users::{Caps, User, UserFlags};
-    use std::collections::HashSet;
+    use crate::map::HashSet;
     use std::sync::atomic::AtomicU64;
     use std::sync::{mpsc, Arc};
 
@@ -359,7 +359,7 @@ mod tests {
         let (tx, _rx) = mpsc::channel();
         let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
         let (utx, _urx) = mpsc::channel();
-        let mut chans = HashSet::new();
+        let mut chans = HashSet::default();
         chans.insert("#echoircd".to_string());
         s.users.insert(
             1,

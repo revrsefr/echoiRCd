@@ -15,7 +15,7 @@
 //! Both hand the core the same [`OutSink`] output handle, so the core never
 //! knows or cares which model a connection uses.
 
-use std::collections::{HashMap, HashSet};
+use crate::map::{HashMap, HashSet};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -324,7 +324,7 @@ impl AcceptLimiter {
             rate: rate as f64,
             burst: burst.max(1) as f64,
             inner: Mutex::new(LimiterState {
-                buckets: HashMap::new(),
+                buckets: HashMap::default(),
                 last_prune: Instant::now(),
             }),
         }))
@@ -484,7 +484,7 @@ fn reactor_loop(
     max_sendq: usize,
     handshake_timeout: Option<Duration>,
 ) {
-    let mut conns: HashMap<usize, Conn> = HashMap::new();
+    let mut conns: HashMap<usize, Conn> = HashMap::default();
     let mut next_token = FIRST_CONN;
     let mut events = Events::with_capacity(1024);
     // TLS conns still negotiating, with the deadline by which they must finish; a
@@ -606,7 +606,7 @@ fn reactor_loop(
                         }
                     }
                     // drain everything the core queued, then flush the touched conns
-                    let mut touched: HashSet<usize> = HashSet::new();
+                    let mut touched: HashSet<usize> = HashSet::default();
                     while let Ok(msg) = out_rx.try_recv() {
                         match msg {
                             Out::Line(t, line) => {
@@ -810,7 +810,7 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
                         }
                     }
                     if !c.proxy_pending {
-                        while let Some(pos) = c.rbuf.iter().position(|&b| b == b'\n') {
+                        while let Some(pos) = memchr::memchr(b'\n', &c.rbuf) {
                             let raw: Vec<u8> = c.rbuf.drain(..=pos).collect();
                             let text = String::from_utf8_lossy(&raw);
                             let l = text.trim_end_matches(['\r', '\n']);
@@ -1201,7 +1201,7 @@ fn tls_conn(
             Ok(0) => break, // EOF
             Ok(n) => {
                 acc.extend_from_slice(&chunk[..n]);
-                while let Some(pos) = acc.iter().position(|&b| b == b'\n') {
+                while let Some(pos) = memchr::memchr(b'\n', &acc) {
                     let raw: Vec<u8> = acc.drain(..=pos).collect();
                     let text = String::from_utf8_lossy(&raw);
                     let l = text.trim_end_matches(['\r', '\n']);

@@ -8,7 +8,7 @@
 //! oper       = god secret
 //! ```
 
-use std::collections::HashMap;
+use crate::map::HashMap;
 
 /// Parse a boolean config value (`yes`/`no`/`true`/`false`/`on`/`off`/`1`/`0`).
 pub fn yesish(v: &str) -> bool {
@@ -117,7 +117,7 @@ impl Default for Config {
             dnsbl_reason: "Your host is listed in a DNS blocklist".to_string(),
             sasl_server: String::new(),
             webirc: Vec::new(),
-            raw: HashMap::new(),
+            raw: HashMap::default(),
         }
     }
 }

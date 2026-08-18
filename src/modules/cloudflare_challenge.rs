@@ -6,7 +6,7 @@
 //! Off unless `cloudflare_challenge = yes` with `cloudflare_secret` +
 //! `cloudflare_url` set. The passed-verification set lives in `Server.ext`.
 
-use std::collections::HashSet;
+use crate::map::HashSet;
 
 use crate::command::{CmdResult, Command};
 use crate::http::json_str;

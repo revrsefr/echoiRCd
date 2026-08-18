@@ -2,7 +2,7 @@
 //! and turns a stream of [`Event`]s into IRC. Runs on one thread, so no state is
 //! ever locked.
 
-use std::collections::HashMap;
+use crate::map::HashMap;
 use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
