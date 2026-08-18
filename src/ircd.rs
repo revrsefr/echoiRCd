@@ -475,6 +475,11 @@ impl Ircd {
             );
             return;
         }
+        use std::sync::atomic::Ordering::Relaxed;
+        self.server.metrics.commands.fetch_add(1, Relaxed);
+        if matches!(cmd, "PRIVMSG" | "NOTICE") {
+            self.server.metrics.messages.fetch_add(1, Relaxed);
+        }
         let _ = handler.handle(&mut self.server, uid, &msg.params);
 
         for m in &mut self.modules {
@@ -669,6 +674,16 @@ impl Ircd {
                 .send(uid, format!("ERROR :Closing link: ({reason})"));
             self.quit_user(uid, reason);
         }
+        // republish gauges (the core owns this state; the scrape thread only reads)
+        use std::sync::atomic::Ordering::Relaxed;
+        let m = &self.server.metrics;
+        m.users.store(
+            self.server.users.values().filter(|u| u.registered).count() as u64,
+            Relaxed,
+        );
+        m.channels.store(self.server.channels.len() as u64, Relaxed);
+        m.servers.store(self.server.servers.len() as u64, Relaxed);
+        m.links.store(self.server.links.len() as u64, Relaxed);
     }
 
     /// Fire queued notify-hooks. Draining a queue (not iterating in place) lets a

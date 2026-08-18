@@ -439,6 +439,9 @@ impl Server {
         if let Some(u) = self.users.get_mut(&uid) {
             u.registered = true;
         }
+        self.metrics
+            .connects
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let nick = self
             .users
             .get(&uid)

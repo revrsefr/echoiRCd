@@ -47,6 +47,7 @@ pub mod log_json;
 pub mod maphide;
 pub mod markread;
 pub mod metadata;
+pub mod metrics;
 pub mod multiline;
 pub mod namedmodes;
 pub mod network_icon;

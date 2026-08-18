@@ -174,6 +174,8 @@ pub struct Server {
     /// Module-owned server state, keyed by type. Each `modules/*.rs` stores its
     /// own struct here so features live in their own file instead of this one.
     pub ext: Extensible,
+    /// Prometheus counters/gauges, shared with the scrape thread (modules::metrics).
+    pub metrics: Arc<crate::modules::metrics::Metrics>,
 }
 
 impl Server {
@@ -220,6 +222,7 @@ impl Server {
             event_tx,
             conn_counter,
             ext: Extensible::default(),
+            metrics: crate::modules::metrics::handle(),
         }
     }
 

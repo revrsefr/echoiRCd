@@ -249,6 +249,9 @@ fn main() {
     // optional JSON-RPC-over-HTTP control interface (see crate::modules::rpc)
     echoircd::modules::rpc::maybe_start(&cfg, tx.clone());
 
+    // optional OpenMetrics/Prometheus scrape endpoint (metrics_bind = host:port)
+    echoircd::modules::metrics::maybe_start(&cfg);
+
     // optional WebSocket transport for browser IRC clients (see crate::websocket)
     echoircd::websocket::maybe_start(&cfg, tx.clone(), counter.clone());
 
