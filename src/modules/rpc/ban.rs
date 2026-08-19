@@ -54,6 +54,13 @@ pub fn handle(s: &mut Server, action: &str, params: &str) -> Result<String, RpcE
             let mask = json::get_str(params, "mask")
                 .or_else(|| json::get_str(params, "name"))
                 .ok_or_else(|| RpcError::invalid_params("missing 'mask'"))?;
+            // Refuse an all-wildcard ban (`*`, `*@*`, `*!*@*`, empty): it must carry a
+            // literal host/ip/nick component, or it bans the whole network.
+            if !mask.chars().any(|c| c.is_ascii_alphanumeric()) {
+                return Err(RpcError::invalid_params(
+                    "mask must contain a literal host/ip/nick component (refusing an all-wildcard ban)",
+                ));
+            }
             let duration = json::get_num::<u64>(params, "duration")
                 .or_else(|| {
                     json::get_str(params, "duration_string").and_then(|d| parse_duration(&d))
