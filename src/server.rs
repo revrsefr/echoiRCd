@@ -1384,11 +1384,11 @@ impl Server {
                     .map(|mem| {
                         let mut s = String::new();
                         for (on, c) in [
-                            (mem.owner, 'q'),
-                            (mem.admin, 'a'),
-                            (mem.op, 'o'),
-                            (mem.halfop, 'h'),
-                            (mem.voice, 'v'),
+                            (mem.owner(), 'q'),
+                            (mem.admin(), 'a'),
+                            (mem.op(), 'o'),
+                            (mem.halfop(), 'h'),
+                            (mem.voice(), 'v'),
                         ] {
                             if on {
                                 s.push(c);
@@ -1579,8 +1579,8 @@ mod tests {
         s.join(1, "#c", None); // ann creates -> gets @
         s.join(2, "#c", None); // bob joins
 
-        assert!(s.channels["#c"].members[&1].op);
-        assert!(!s.channels["#c"].members[&2].op);
+        assert!(s.channels["#c"].members[&1].op());
+        assert!(!s.channels["#c"].members[&2].op());
         assert_eq!(s.channels["#c"].members.len(), 2);
 
         let ann: Vec<String> = arx.try_iter().collect();

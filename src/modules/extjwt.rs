@@ -105,19 +105,19 @@ impl Command for ExtJwt {
             let cmodes = member
                 .map(|m| {
                     let mut v = Vec::new();
-                    if m.owner {
+                    if m.owner() {
                         v.push('q');
                     }
-                    if m.admin {
+                    if m.admin() {
                         v.push('a');
                     }
-                    if m.op {
+                    if m.op() {
                         v.push('o');
                     }
-                    if m.halfop {
+                    if m.halfop() {
                         v.push('h');
                     }
-                    if m.voice {
+                    if m.voice() {
                         v.push('v');
                     }
                     v

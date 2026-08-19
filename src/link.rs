@@ -2526,8 +2526,8 @@ mod tests {
         let msg = crate::message::parse(":42SB00000 IJOIN #echoircd 16 1 ao").unwrap();
         s.link_ijoin_recv(1, &msg);
         let m = &s.channels["#echoircd"].rmembers["42SB00000"];
-        assert!(m.admin, "bot should hold +a (&) from the IJOIN status token");
-        assert!(m.op, "bot should hold +o (@) from the IJOIN status token");
+        assert!(m.admin(), "bot should hold +a (&) from the IJOIN status token");
+        assert!(m.op(), "bot should hold +o (@) from the IJOIN status token");
     }
 
     // A server is a service iff its NAME matches the sasl_server or a `uline` config
@@ -2565,7 +2565,7 @@ mod tests {
         // a peer bursts #c with a NEWER TS, opping bob — bob must join WITHOUT +o
         let m = crate::message::parse(":42S FJOIN #c 2000 +nt :o,42SAAAAAA").unwrap();
         s.link_fjoin_recv(1, &m);
-        let opped = s.channels["#c"].rmembers["42SAAAAAA"].op;
+        let opped = s.channels["#c"].rmembers["42SAAAAAA"].op();
         assert!(!opped, "a member bursted with a newer (losing) TS must be de-statused");
         assert_eq!(s.channels["#c"].created, 1000, "our older TS is kept");
     }

@@ -10,11 +10,11 @@ use crate::server::{now, Server};
 fn prefixes(m: &crate::channels::Member) -> String {
     let mut p = String::new();
     for (has, ch) in [
-        (m.owner, '~'),
-        (m.admin, '&'),
-        (m.op, '@'),
-        (m.halfop, '%'),
-        (m.voice, '+'),
+        (m.owner(), '~'),
+        (m.admin(), '&'),
+        (m.op(), '@'),
+        (m.halfop(), '%'),
+        (m.voice(), '+'),
     ] {
         if has {
             p.push(ch);

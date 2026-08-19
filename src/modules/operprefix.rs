@@ -17,8 +17,8 @@ fn set(s: &mut Server, uid: Uid, key: &str, on: bool) {
         return;
     };
     let changed = match s.channels.get_mut(key).and_then(|c| c.members.get_mut(&uid)) {
-        Some(m) if m.oprefix != on => {
-            m.oprefix = on;
+        Some(m) if m.oprefix() != on => {
+            m.set_oprefix(on);
             true
         }
         _ => false,

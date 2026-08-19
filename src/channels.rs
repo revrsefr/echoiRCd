@@ -12,17 +12,23 @@ use crate::Uid;
 /// Per-member prefix modes (+q/+a/+o/+h/+v). Flag modes live in [`ChanModes`].
 #[derive(Default)]
 pub struct Member {
-    pub oprefix: bool,            // operprefix/ojoin: server oper prefix (!), highest rank
-    pub owner: bool,              // +q (~)
-    pub admin: bool,              // +a (&)
-    pub op: bool,                 // +o (@)
-    pub halfop: bool,             // +h (%)
-    pub voice: bool,              // +v (+)
+    /// Built-in prefix modes held, as a bitfield of `PFX_*` (was six parallel bools:
+    /// oprefix `!`, owner `~`, admin `&`, op `@`, halfop `%`, voice `+`). Read/write
+    /// through the `op()`/`set_op()`-style accessors below.
+    pub prefixes: u8,
     pub custom_prefixes: Vec<char>, // config-defined prefix mode letters held (customprefix)
     pub joined: u64,              // unix ts this member joined (for +d delaymsg; 0 = unknown)
     pub recent_msgs: Vec<String>, // +K repeat: this member's last few lines here
     pub hidden: bool,             // +D delayjoin: JOIN withheld until they reveal themselves
 }
+
+/// Built-in prefix bits held in [`Member::prefixes`], high→low.
+pub const PFX_OPER: u8 = 0b10_0000; // ! network staff (operprefix/ojoin)
+pub const PFX_OWNER: u8 = 0b01_0000; // ~ +q
+pub const PFX_ADMIN: u8 = 0b00_1000; // & +a
+pub const PFX_OP: u8 = 0b00_0100; // @ +o
+pub const PFX_HALFOP: u8 = 0b00_0010; // % +h
+pub const PFX_VOICE: u8 = 0b00_0001; // + +v
 
 /// Prefix ranks, high→low — gate who may grant a prefix / kick whom. Spaced ×10 so
 /// config-defined custom prefixes (modules::customprefix) can slot in between.
@@ -34,20 +40,71 @@ pub const RANK_HALFOP: u8 = 20;
 pub const RANK_VOICE: u8 = 10;
 
 impl Member {
+    #[inline]
+    pub fn oprefix(&self) -> bool {
+        self.prefixes & PFX_OPER != 0
+    }
+    #[inline]
+    pub fn owner(&self) -> bool {
+        self.prefixes & PFX_OWNER != 0
+    }
+    #[inline]
+    pub fn admin(&self) -> bool {
+        self.prefixes & PFX_ADMIN != 0
+    }
+    #[inline]
+    pub fn op(&self) -> bool {
+        self.prefixes & PFX_OP != 0
+    }
+    #[inline]
+    pub fn halfop(&self) -> bool {
+        self.prefixes & PFX_HALFOP != 0
+    }
+    #[inline]
+    pub fn voice(&self) -> bool {
+        self.prefixes & PFX_VOICE != 0
+    }
+    #[inline]
+    fn set_bit(&mut self, bit: u8, on: bool) {
+        if on {
+            self.prefixes |= bit;
+        } else {
+            self.prefixes &= !bit;
+        }
+    }
+    pub fn set_oprefix(&mut self, on: bool) {
+        self.set_bit(PFX_OPER, on);
+    }
+    pub fn set_owner(&mut self, on: bool) {
+        self.set_bit(PFX_OWNER, on);
+    }
+    pub fn set_admin(&mut self, on: bool) {
+        self.set_bit(PFX_ADMIN, on);
+    }
+    pub fn set_op(&mut self, on: bool) {
+        self.set_bit(PFX_OP, on);
+    }
+    pub fn set_halfop(&mut self, on: bool) {
+        self.set_bit(PFX_HALFOP, on);
+    }
+    pub fn set_voice(&mut self, on: bool) {
+        self.set_bit(PFX_VOICE, on);
+    }
+
     /// This member's numeric rank (0 = plain member).
-    /// Built-in tier rank from the fixed booleans (0 = none), ignoring custom prefixes.
+    /// Built-in tier rank from the fixed prefix bits (0 = none), ignoring custom prefixes.
     fn builtin_rank(&self) -> u8 {
-        if self.oprefix {
+        if self.oprefix() {
             RANK_OPER
-        } else if self.owner {
+        } else if self.owner() {
             RANK_OWNER
-        } else if self.admin {
+        } else if self.admin() {
             RANK_ADMIN
-        } else if self.op {
+        } else if self.op() {
             RANK_OP
-        } else if self.halfop {
+        } else if self.halfop() {
             RANK_HALFOP
-        } else if self.voice {
+        } else if self.voice() {
             RANK_VOICE
         } else {
             0
@@ -70,12 +127,12 @@ impl Member {
         use crate::modules::customprefix::{def_for_letter, sigil};
         let mut v: Vec<(u8, &'static str)> = Vec::new();
         for (on, r, i) in [
-            (self.oprefix, RANK_OPER, 0),
-            (self.owner, RANK_OWNER, 1),
-            (self.admin, RANK_ADMIN, 2),
-            (self.op, RANK_OP, 3),
-            (self.halfop, RANK_HALFOP, 4),
-            (self.voice, RANK_VOICE, 5),
+            (self.oprefix(), RANK_OPER, 0),
+            (self.owner(), RANK_OWNER, 1),
+            (self.admin(), RANK_ADMIN, 2),
+            (self.op(), RANK_OP, 3),
+            (self.halfop(), RANK_HALFOP, 4),
+            (self.voice(), RANK_VOICE, 5),
         ] {
             if on {
                 v.push((r, sigil(i)));
@@ -96,17 +153,17 @@ impl Member {
         use crate::modules::customprefix::sigil;
         if self.custom_prefixes.is_empty() {
             // fast path: built-in tiers only
-            if self.oprefix {
+            if self.oprefix() {
                 sigil(0)
-            } else if self.owner {
+            } else if self.owner() {
                 sigil(1)
-            } else if self.admin {
+            } else if self.admin() {
                 sigil(2)
-            } else if self.op {
+            } else if self.op() {
                 sigil(3)
-            } else if self.halfop {
+            } else if self.halfop() {
                 sigil(4)
-            } else if self.voice {
+            } else if self.voice() {
                 sigil(5)
             } else {
                 ""
@@ -121,21 +178,17 @@ impl Member {
     /// Drop the standard status modes (q/a/o/h/v) — used when this side loses a
     /// channel-timestamp war and every member must be de-statused.
     pub fn clear_status(&mut self) {
-        self.owner = false;
-        self.admin = false;
-        self.op = false;
-        self.halfop = false;
-        self.voice = false;
+        self.prefixes &= !(PFX_OWNER | PFX_ADMIN | PFX_OP | PFX_HALFOP | PFX_VOICE);
     }
 
     pub fn set_prefix(&mut self, letter: char, on: bool) {
         match letter {
-            'y' => self.oprefix = on,
-            'q' => self.owner = on,
-            'a' => self.admin = on,
-            'o' => self.op = on,
-            'h' => self.halfop = on,
-            'v' => self.voice = on,
+            'y' => self.set_bit(PFX_OPER, on),
+            'q' => self.set_bit(PFX_OWNER, on),
+            'a' => self.set_bit(PFX_ADMIN, on),
+            'o' => self.set_bit(PFX_OP, on),
+            'h' => self.set_bit(PFX_HALFOP, on),
+            'v' => self.set_bit(PFX_VOICE, on),
             _ => {
                 if crate::modules::customprefix::def_for_letter(letter).is_some() {
                     self.custom_prefixes.retain(|&c| c != letter);
@@ -153,12 +206,12 @@ impl Member {
         if self.custom_prefixes.is_empty() {
             let mut s = String::new();
             for (on, i) in [
-                (self.oprefix, 0),
-                (self.owner, 1),
-                (self.admin, 2),
-                (self.op, 3),
-                (self.halfop, 4),
-                (self.voice, 5),
+                (self.oprefix(), 0),
+                (self.owner(), 1),
+                (self.admin(), 2),
+                (self.op(), 3),
+                (self.halfop(), 4),
+                (self.voice(), 5),
             ] {
                 if on {
                     s.push_str(sigil(i));
@@ -177,12 +230,12 @@ impl Member {
         use crate::modules::customprefix::def_for_letter;
         let mut s = String::new();
         for (on, l) in [
-            (self.oprefix, 'y'),
-            (self.owner, 'q'),
-            (self.admin, 'a'),
-            (self.op, 'o'),
-            (self.halfop, 'h'),
-            (self.voice, 'v'),
+            (self.oprefix(), 'y'),
+            (self.owner(), 'q'),
+            (self.admin(), 'a'),
+            (self.op(), 'o'),
+            (self.halfop(), 'h'),
+            (self.voice(), 'v'),
         ] {
             if on {
                 s.push(l);
@@ -898,7 +951,7 @@ impl Server {
         ch.members.insert(
             uid,
             Member {
-                op: is_new,
+                prefixes: if is_new { PFX_OP } else { 0 },
                 joined: now(),
                 ..Default::default()
             },
@@ -1607,15 +1660,15 @@ mod tests {
         let mut m = Member::default();
         assert_eq!(m.rank(), 0);
         assert_eq!(m.prefix_char(), "");
-        m.voice = true;
+        m.set_voice(true);
         assert_eq!((m.rank(), m.prefix_char()), (RANK_VOICE, "+"));
-        m.halfop = true;
+        m.set_halfop(true);
         assert_eq!((m.rank(), m.prefix_char()), (RANK_HALFOP, "%"));
-        m.op = true;
+        m.set_op(true);
         assert_eq!((m.rank(), m.prefix_char()), (RANK_OP, "@"));
-        m.admin = true;
+        m.set_admin(true);
         assert_eq!((m.rank(), m.prefix_char()), (RANK_ADMIN, "&"));
-        m.owner = true;
+        m.set_owner(true);
         assert_eq!((m.rank(), m.prefix_char()), (RANK_OWNER, "~"));
     }
 }
