@@ -15,6 +15,7 @@ use crate::server::{now, Server};
 use crate::Uid;
 
 /// One parsed `restrictcommand` line.
+#[derive(Clone)]
 struct Restriction {
     command: String, // uppercased
     connectdelay: u64,
@@ -95,6 +96,13 @@ fn parse(s: &Server) -> Vec<Restriction> {
     out
 }
 
+/// Parsed restrictions cached against the config generation they were parsed at.
+#[derive(Default)]
+struct RestrictCache {
+    gen: u64,
+    rules: Vec<Restriction>,
+}
+
 pub struct RestrictCommands;
 
 impl Module for RestrictCommands {
@@ -113,11 +121,21 @@ impl Module for RestrictCommands {
         if srv.conf_all("restrictcommand").is_empty() {
             return ModResult::Passthru;
         }
-        let restrictions = parse(srv);
-        let Some(r) = restrictions
-            .iter()
-            .find(|r| r.command.eq_ignore_ascii_case(cmd))
-        else {
+        // cache the parsed restrictions (config_gen-tagged); re-parse only on rehash,
+        // not on every command. Clone the one matched rule so the ext borrow drops
+        // before we touch the server mutably below.
+        let gen = srv.config_gen;
+        let stale = srv.ext.get::<RestrictCache>().map(|c| c.gen != gen).unwrap_or(true);
+        if stale {
+            let rules = parse(srv);
+            srv.ext.set(RestrictCache { gen, rules });
+        }
+        let Some(r) = srv.ext.get::<RestrictCache>().and_then(|c| {
+            c.rules
+                .iter()
+                .find(|r| r.command.eq_ignore_ascii_case(cmd))
+                .cloned()
+        }) else {
             return ModResult::Passthru;
         };
 
