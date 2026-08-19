@@ -163,18 +163,40 @@ fn build(s: &Server, name: &str) -> Option<ConnClass> {
     Some(c)
 }
 
+thread_local! {
+    /// (config_gen, resolved classes) — rebuilt only when the config changes. The
+    /// core is single-threaded, so this thread_local cache lets the `&Server`
+    /// entry points (pick/assign/named and the per-ping/per-message getters) avoid
+    /// re-parsing + re-resolving parent inheritance on every call.
+    static CLASSES: std::cell::RefCell<(u64, Vec<ConnClass>)> =
+        const { std::cell::RefCell::new((u64::MAX, Vec::new())) };
+}
+
+/// Run `f` over the resolved connect classes, (re)building them only on config change.
+fn with_classes<R>(s: &Server, f: impl FnOnce(&[ConnClass]) -> R) -> R {
+    CLASSES.with(|cell| {
+        if cell.borrow().0 != s.config_gen {
+            let fresh: Vec<ConnClass> = s
+                .conf_all("connectclass")
+                .iter()
+                .filter_map(|l| l.split_whitespace().next())
+                .filter_map(|name| build(s, name))
+                .collect();
+            *cell.borrow_mut() = (s.config_gen, fresh);
+        }
+        let g = cell.borrow();
+        f(&g.1)
+    })
+}
+
 /// Every configured class, resolved.
 pub fn all(s: &Server) -> Vec<ConnClass> {
-    s.conf_all("connectclass")
-        .iter()
-        .filter_map(|l| l.split_whitespace().next())
-        .filter_map(|name| build(s, name))
-        .collect()
+    with_classes(s, <[ConnClass]>::to_vec)
 }
 
 /// A single resolved class by name.
 pub fn named(s: &Server, name: &str) -> Option<ConnClass> {
-    build(s, name)
+    with_classes(s, |c| c.iter().find(|x| x.name == name).cloned())
 }
 
 // --- mask matching -----------------------------------------------------------
