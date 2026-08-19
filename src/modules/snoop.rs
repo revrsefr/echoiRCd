@@ -17,13 +17,17 @@ impl Module for Snoop {
             .get(&uid)
             .map(|u| (u.nick.clone(), u.ident.clone(), u.host.clone()));
         if let Some((nick, ident, host)) = info {
-            eprintln!("[snoop] connect {nick} ({ident}@{host})");
+            if srv.conf_bool("snoop_stderr", false) {
+                eprintln!("[snoop] connect {nick} ({ident}@{host})");
+            }
             srv.snotice_c('c', &format!("Client connecting: {nick} ({ident}@{host})"));
         }
     }
     fn on_join(&mut self, srv: &mut Server, uid: Uid, chan: &str) {
-        if let Some(u) = srv.users.get(&uid) {
-            eprintln!("[snoop] {} joined {chan}", u.nick);
+        if srv.conf_bool("snoop_stderr", false) {
+            if let Some(u) = srv.users.get(&uid) {
+                eprintln!("[snoop] {} joined {chan}", u.nick);
+            }
         }
     }
     fn on_user_quit(&mut self, srv: &mut Server, uid: Uid, reason: &str) {
@@ -40,7 +44,9 @@ impl Module for Snoop {
         else {
             return;
         };
-        eprintln!("[snoop] quit uid={uid} ({reason})");
+        if srv.conf_bool("snoop_stderr", false) {
+            eprintln!("[snoop] quit uid={uid} ({reason})");
+        }
         srv.snotice_c('q', &format!("Client exiting: {nick} ({reason})"));
     }
 }
