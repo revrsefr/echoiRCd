@@ -528,11 +528,20 @@ fn reactor_loop(
     // TLS conns still negotiating, with the deadline by which they must finish; a
     // stalled handshake holds no uid so nothing else would ever reap it.
     let mut pending_hs: Vec<(usize, Instant)> = Vec::new();
+    // sockets that hit MAX_READ_PER_TURN with data still buffered (in the kernel OR,
+    // for TLS, inside the session) — re-drained each turn so no line stalls.
+    let mut pending_reads: Vec<usize> = Vec::new();
 
     loop {
-        // block indefinitely when idle; while handshakes are pending, wake ~1s to reap
-        // any that blew their deadline (slow-loris on the TLS port).
-        let timeout = (!pending_hs.is_empty()).then(|| Duration::from_millis(1000));
+        // poll immediately if reads are queued; else block, waking ~1s while a handshake
+        // is pending to reap any that blew their deadline (slow-loris on the TLS port).
+        let timeout = if !pending_reads.is_empty() {
+            Some(Duration::ZERO)
+        } else if !pending_hs.is_empty() {
+            Some(Duration::from_millis(1000))
+        } else {
+            None
+        };
         if poll.poll(&mut events, timeout).is_err() {
             continue;
         }
@@ -707,9 +716,13 @@ fn reactor_loop(
                         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             read_conn(&mut poll, &mut conns, t, &core)
                         }));
-                        if r.is_err() {
-                            eprintln!("[reactor] recovered from a panic reading a socket; dropping that connection");
-                            close_conn(&mut poll, &mut conns, t, &core);
+                        match r {
+                            Ok(true) => pending_reads.push(t), // hit the per-turn cap
+                            Ok(false) => {}
+                            Err(_) => {
+                                eprintln!("[reactor] recovered from a panic reading a socket; dropping that connection");
+                                close_conn(&mut poll, &mut conns, t, &core);
+                            }
                         }
                     }
                     if event.is_writable() && conns.contains_key(&t) {
@@ -720,6 +733,27 @@ fn reactor_loop(
                             eprintln!("[reactor] recovered from a panic writing a socket; dropping that connection");
                             close_conn(&mut poll, &mut conns, t, &core);
                         }
+                    }
+                }
+            }
+        }
+        // re-drain sockets that hit the read cap: their leftover may be TLS plaintext
+        // buffered in the session (kernel won't re-signal it). After events so fresh
+        // events are serviced first; a still-capped socket re-queues for the next turn.
+        if !pending_reads.is_empty() {
+            for t in std::mem::take(&mut pending_reads) {
+                if !conns.contains_key(&t) {
+                    continue;
+                }
+                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    read_conn(&mut poll, &mut conns, t, &core)
+                }));
+                match r {
+                    Ok(true) => pending_reads.push(t),
+                    Ok(false) => {}
+                    Err(_) => {
+                        eprintln!("[reactor] recovered from a panic re-reading a socket; dropping it");
+                        close_conn(&mut poll, &mut conns, t, &core);
                     }
                 }
             }
@@ -791,10 +825,10 @@ const MAX_READ_PER_TURN: usize = 64 * 1024;
 
 /// Drain readable bytes from `t` (edge-triggered: read until WouldBlock), frame
 /// complete lines and forward them to the core; close on EOF/error.
-fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: &Sender<Event>) {
+fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: &Sender<Event>) -> bool {
     // a TLS conn must finish negotiating before any application bytes flow
     if !try_handshake(poll, conns, t, core) {
-        return;
+        return false;
     }
     let mut chunk = [0u8; 8192];
     let mut lines: Vec<(Uid, String)> = Vec::new();
@@ -884,18 +918,6 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
             }
         }
     }
-    // if we stopped early for fairness, force epoll to re-deliver the still-readable
-    // socket next turn (edge-triggered MOD re-reports a ready fd) so no bytes stall.
-    if capped && !close {
-        if let Some(c) = conns.get_mut(&t) {
-            let interest = match (c.want_read, c.want_write) {
-                (true, true) => Interest::READABLE | Interest::WRITABLE,
-                (false, true) => Interest::WRITABLE,
-                _ => Interest::READABLE,
-            };
-            let _ = poll.registry().reregister(c.sock.source(), Token(t), interest);
-        }
-    }
     if let Some((uid, addr, local_port, secure, certfp, out)) = connect {
         if core
             .send(Event::Connect {
@@ -912,17 +934,21 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
             })
             .is_err()
         {
-            return;
+            return false;
         }
     }
     for (uid, line) in lines {
         if core.send(Event::Line { uid, line }).is_err() {
-            return;
+            return false;
         }
     }
     if close {
         close_conn(poll, conns, t, core);
     }
+    // signal a hit on MAX_READ_PER_TURN so the reactor re-drains us next turn: the
+    // leftover may be decrypted plaintext buffered inside the TLS session, which the
+    // kernel would never re-signal — so we can't rely on an epoll re-arm here.
+    capped && !close
 }
 
 /// Write as much of `t`'s queued output as the socket accepts, adjust epoll
@@ -965,7 +991,7 @@ fn flush_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core:
     if close {
         close_conn(poll, conns, t, core);
     } else if unpaused {
-        read_conn(poll, conns, t, core); // catch reads missed while paused
+        let _ = read_conn(poll, conns, t, core); // catch reads missed while paused
     }
 }
 
