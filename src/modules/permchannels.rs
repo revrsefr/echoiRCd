@@ -89,36 +89,43 @@ fn apply_modes(s: &mut Server, name: &str, key: &str, modes: &str) {
         return;
     };
     let args: Vec<&str> = it.collect();
-    let mut ai = 0usize;
-    let mut adding = true;
     s.mode_sudo = true;
-    for c in letters.chars() {
-        match c {
-            '+' => {
-                adding = true;
-                continue;
+    // Isolate a panicking mode handler: otherwise it would leave `mode_sudo` stuck
+    // on, silently disabling rank/oper gating for every subsequent MODE.
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut ai = 0usize;
+        let mut adding = true;
+        for c in letters.chars() {
+            match c {
+                '+' => {
+                    adding = true;
+                    continue;
+                }
+                '-' => {
+                    adding = false;
+                    continue;
+                }
+                _ => {}
             }
-            '-' => {
-                adding = false;
+            let Some(h) = crate::mode::chan_mode(c) else {
                 continue;
-            }
-            _ => {}
+            };
+            let param = if h.wants_param(adding) {
+                let p = args.get(ai).copied();
+                if p.is_some() {
+                    ai += 1;
+                }
+                p
+            } else {
+                None
+            };
+            let _ = h.apply(s, name, key, 0, adding, param);
         }
-        let Some(h) = crate::mode::chan_mode(c) else {
-            continue;
-        };
-        let param = if h.wants_param(adding) {
-            let p = args.get(ai).copied();
-            if p.is_some() {
-                ai += 1;
-            }
-            p
-        } else {
-            None
-        };
-        let _ = h.apply(s, name, key, 0, adding, param);
-    }
+    }));
     s.mode_sudo = false;
+    if outcome.is_err() {
+        eprintln!("[permchannels] a mode handler panicked applying {name}; skipped its remaining modes");
+    }
 }
 
 /// Recreate one parsed record as a live (member-less) channel.
