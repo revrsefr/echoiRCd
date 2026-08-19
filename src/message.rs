@@ -57,20 +57,22 @@ pub fn parse(line: &str) -> Option<Message> {
     let mut concat = false;
     if let Some(after_at) = rest.strip_prefix('@') {
         let (tags, r) = after_at.split_once(' ')?;
-        ctags = tags
-            .split(';')
-            .filter(|t| t.starts_with('+'))
-            .collect::<Vec<_>>()
-            .join(";");
-        label = tags
-            .split(';')
-            .find_map(|t| t.strip_prefix("label="))
-            .map(|v| v.to_string());
-        batch = tags
-            .split(';')
-            .find_map(|t| t.strip_prefix("batch="))
-            .map(|v| v.to_string());
-        concat = tags.split(';').any(|t| t == "draft/multiline-concat");
+        // single pass over the tag block (was four separate split(';') scans plus an
+        // intermediate Vec for ctags)
+        for t in tags.split(';') {
+            if t.starts_with('+') {
+                if !ctags.is_empty() {
+                    ctags.push(';');
+                }
+                ctags.push_str(t);
+            } else if let Some(v) = t.strip_prefix("label=") {
+                label = Some(v.to_string());
+            } else if let Some(v) = t.strip_prefix("batch=") {
+                batch = Some(v.to_string());
+            } else if t == "draft/multiline-concat" {
+                concat = true;
+            }
+        }
         rest = r.trim_start_matches(' ');
     }
 
