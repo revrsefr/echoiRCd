@@ -171,6 +171,11 @@ pub struct Server {
     /// the common case (count 0) skips the O(users) scan. Maintained solely through
     /// `accept_add`/`accept_remove` and the quit path.
     pub accepted_nicks: HashMap<String, u32>,
+    /// Reverse index (lowercased) nick -> uids WATCHing / MONITORing it, so an
+    /// online/offline flip notifies only the watchers instead of scanning every user.
+    /// Maintained solely through the `watch_index_*` / `monitor_index_*` helpers and quit.
+    pub watch_by: HashMap<String, HashSet<Uid>>,
+    pub monitor_by: HashMap<String, HashSet<Uid>>,
     // labeled-response: while Some((uid, buf)), that client's own responses are
     // diverted into `buf` instead of the socket, so `on_line` can wrap them with
     // the command's `label` (single tag, BATCH, or ACK). RefCell because the
@@ -228,6 +233,8 @@ impl Server {
             raw_config: cfg.raw,
             config_gen: 0,
             accepted_nicks: HashMap::default(),
+            watch_by: HashMap::default(),
+            monitor_by: HashMap::default(),
             label_capture: RefCell::new(None),
             log: RefCell::new(LogState::default()),
             event_tx,
@@ -723,6 +730,23 @@ impl Server {
                 *c = c.saturating_sub(1);
                 if *c == 0 {
                     self.accepted_nicks.remove(n);
+                }
+            }
+        }
+        // drop this user from the WATCH/MONITOR reverse indexes
+        for n in &user.watch {
+            if let Some(set) = self.watch_by.get_mut(n) {
+                set.remove(&uid);
+                if set.is_empty() {
+                    self.watch_by.remove(n);
+                }
+            }
+        }
+        for n in &user.monitor {
+            if let Some(set) = self.monitor_by.get_mut(n) {
+                set.remove(&uid);
+                if set.is_empty() {
+                    self.monitor_by.remove(n);
                 }
             }
         }

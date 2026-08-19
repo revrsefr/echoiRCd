@@ -37,15 +37,17 @@ impl Server {
         }) else {
             return;
         };
-        for (&uid, u) in &self.users {
-            if u.watch.contains(&low) {
+        if let Some(set) = self.watch_by.get(&low) {
+            for &uid in set {
                 self.numeric(
                     uid,
                     RPL_LOGON,
                     &format!("{dnick} {ident} {host} {ts} :is now online"),
                 );
             }
-            if u.monitor.contains(&low) {
+        }
+        if let Some(set) = self.monitor_by.get(&low) {
+            for &uid in set {
                 self.numeric(uid, RPL_MONONLINE, &format!(":{dnick}!{ident}@{host}"));
             }
         }
@@ -56,11 +58,13 @@ impl Server {
     pub fn watch_notify_offline(&self, nick: &str) {
         let low = nick.to_ascii_lowercase();
         let ts = now();
-        for (&uid, u) in &self.users {
-            if u.watch.contains(&low) {
+        if let Some(set) = self.watch_by.get(&low) {
+            for &uid in set {
                 self.numeric(uid, RPL_LOGOFF, &format!("{nick} * * {ts} :is now offline"));
             }
-            if u.monitor.contains(&low) {
+        }
+        if let Some(set) = self.monitor_by.get(&low) {
+            for &uid in set {
                 self.numeric(uid, RPL_MONOFFLINE, &format!(":{nick}"));
             }
         }
@@ -69,10 +73,123 @@ impl Server {
     /// How many users currently WATCH `nick` (for `WATCH S` stats).
     pub fn watchers_of(&self, nick: &str) -> usize {
         let low = nick.to_ascii_lowercase();
-        self.users
-            .values()
-            .filter(|u| u.watch.contains(&low))
-            .count()
+        self.watch_by.get(&low).map(|s| s.len()).unwrap_or(0)
+    }
+
+    // ── WATCH/MONITOR list mutators — keep the reverse index in sync ──────────
+
+    /// Add `nick_low` to `uid`'s WATCH list (if absent) and index it.
+    pub fn watch_index_add(&mut self, uid: Uid, nick_low: String) {
+        let added = self
+            .users
+            .get_mut(&uid)
+            .map(|u| {
+                if u.watch.contains(&nick_low) {
+                    false
+                } else {
+                    u.watch.push(nick_low.clone());
+                    true
+                }
+            })
+            .unwrap_or(false);
+        if added {
+            self.watch_by.entry(nick_low).or_default().insert(uid);
+        }
+    }
+
+    /// Remove `nick_low` from `uid`'s WATCH list and de-index it.
+    pub fn watch_index_remove(&mut self, uid: Uid, nick_low: &str) {
+        let removed = self
+            .users
+            .get_mut(&uid)
+            .map(|u| {
+                let before = u.watch.len();
+                u.watch.retain(|n| n != nick_low);
+                before != u.watch.len()
+            })
+            .unwrap_or(false);
+        if removed {
+            if let Some(set) = self.watch_by.get_mut(nick_low) {
+                set.remove(&uid);
+                if set.is_empty() {
+                    self.watch_by.remove(nick_low);
+                }
+            }
+        }
+    }
+
+    /// Clear `uid`'s whole WATCH list (WATCH C) and de-index every entry.
+    pub fn watch_index_clear(&mut self, uid: Uid) {
+        let nicks = self
+            .users
+            .get_mut(&uid)
+            .map(|u| std::mem::take(&mut u.watch))
+            .unwrap_or_default();
+        for n in nicks {
+            if let Some(set) = self.watch_by.get_mut(&n) {
+                set.remove(&uid);
+                if set.is_empty() {
+                    self.watch_by.remove(&n);
+                }
+            }
+        }
+    }
+
+    /// Add `nick_low` to `uid`'s MONITOR list (if absent) and index it.
+    pub fn monitor_index_add(&mut self, uid: Uid, nick_low: String) {
+        let added = self
+            .users
+            .get_mut(&uid)
+            .map(|u| {
+                if u.monitor.contains(&nick_low) {
+                    false
+                } else {
+                    u.monitor.push(nick_low.clone());
+                    true
+                }
+            })
+            .unwrap_or(false);
+        if added {
+            self.monitor_by.entry(nick_low).or_default().insert(uid);
+        }
+    }
+
+    /// Remove `nick_low` from `uid`'s MONITOR list and de-index it.
+    pub fn monitor_index_remove(&mut self, uid: Uid, nick_low: &str) {
+        let removed = self
+            .users
+            .get_mut(&uid)
+            .map(|u| {
+                let before = u.monitor.len();
+                u.monitor.retain(|n| n != nick_low);
+                before != u.monitor.len()
+            })
+            .unwrap_or(false);
+        if removed {
+            if let Some(set) = self.monitor_by.get_mut(nick_low) {
+                set.remove(&uid);
+                if set.is_empty() {
+                    self.monitor_by.remove(nick_low);
+                }
+            }
+        }
+    }
+
+    /// Clear `uid`'s whole MONITOR list (MONITOR C) and de-index every entry.
+    pub fn monitor_index_clear(&mut self, uid: Uid) {
+        let nicks = self
+            .users
+            .get_mut(&uid)
+            .map(|u| std::mem::take(&mut u.monitor))
+            .unwrap_or_default();
+        for n in nicks {
+            if let Some(set) = self.monitor_by.get_mut(&n) {
+                set.remove(&uid);
+                if set.is_empty() {
+                    self.monitor_by.remove(&n);
+                }
+            }
+        }
     }
 
     /// True if `sender_nick` is on `target`'s ACCEPT list (callerid +g).

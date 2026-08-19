@@ -58,11 +58,7 @@ fn watch_add(s: &mut Server, uid: Uid, nick: &str) {
         );
         return;
     }
-    if let Some(u) = s.users.get_mut(&uid) {
-        if !u.watch.contains(&low) {
-            u.watch.push(low);
-        }
-    }
+    s.watch_index_add(uid, low);
     watch_status(s, uid, nick);
 }
 
@@ -94,9 +90,7 @@ impl Command for Watch {
         for tok in params.iter().flat_map(|p| p.split_whitespace()) {
             match tok {
                 "C" | "c" => {
-                    if let Some(u) = s.users.get_mut(&uid) {
-                        u.watch.clear();
-                    }
+                    s.watch_index_clear(uid);
                     s.numeric(uid, RPL_ENDOFWATCHLIST, ":End of WATCH list");
                 }
                 "S" | "s" => {
@@ -126,9 +120,7 @@ impl Command for Watch {
                 _ if tok.starts_with('+') => watch_add(s, uid, &tok[1..]),
                 _ if tok.starts_with('-') => {
                     let low = tok[1..].to_ascii_lowercase();
-                    if let Some(u) = s.users.get_mut(&uid) {
-                        u.watch.retain(|n| n != &low);
-                    }
+                    s.watch_index_remove(uid, &low);
                     s.numeric(
                         uid,
                         RPL_WATCHOFF,
@@ -199,11 +191,7 @@ impl Command for Monitor {
                         );
                         continue;
                     }
-                    if let Some(u) = s.users.get_mut(&uid) {
-                        if !u.monitor.contains(&low) {
-                            u.monitor.push(low);
-                        }
-                    }
+                    s.monitor_index_add(uid, low);
                     added.push(t);
                 }
                 monitor_report(s, uid, &added);
@@ -218,14 +206,12 @@ impl Command for Monitor {
                             .collect()
                     })
                     .unwrap_or_default();
-                if let Some(u) = s.users.get_mut(&uid) {
-                    u.monitor.retain(|n| !targets.contains(n));
+                for t in &targets {
+                    s.monitor_index_remove(uid, t);
                 }
             }
             "C" => {
-                if let Some(u) = s.users.get_mut(&uid) {
-                    u.monitor.clear();
-                }
+                s.monitor_index_clear(uid);
             }
             "L" => {
                 let list = s
