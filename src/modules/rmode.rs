@@ -27,6 +27,14 @@ impl Command for RMode {
         let chan = params[0].clone();
         let key = chan.to_ascii_lowercase();
         let Some(mode) = params[1].chars().find(|c| c.is_ascii_alphabetic()) else {
+            let nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
+            s.send(
+                uid,
+                format!(
+                    ":{} NOTICE {nick} :RMODE usage: RMODE <channel> <b|e|I> [pattern]",
+                    s.name
+                ),
+            );
             return CmdResult::Fail;
         };
         if !s.channels.contains_key(&key) {
