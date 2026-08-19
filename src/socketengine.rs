@@ -784,6 +784,11 @@ fn try_handshake(
     true
 }
 
+/// Most bytes drained from one socket per readable event before we stop, re-arm and
+/// yield: bounds the per-turn line buffer and stops one flooding client from
+/// monopolising the reactor (the rest waits in the kernel buffer for the next turn).
+const MAX_READ_PER_TURN: usize = 64 * 1024;
+
 /// Drain readable bytes from `t` (edge-triggered: read until WouldBlock), frame
 /// complete lines and forward them to the core; close on EOF/error.
 fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: &Sender<Event>) {
@@ -796,6 +801,8 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
     // a deferred Connect (PROXY conn) to emit, before any lines from the same read
     let mut connect: Option<(Uid, SocketAddr, u16, bool, Option<String>, OutSink)> = None;
     let mut close = false;
+    let mut read_total = 0usize;
+    let mut capped = false;
     if let Some(c) = conns.get_mut(&t) {
         loop {
             match c.sock.read(&mut chunk) {
@@ -805,6 +812,7 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
                 }
                 Ok(n) => {
                     c.rbuf.extend_from_slice(&chunk[..n]);
+                    read_total += n;
                     if c.proxy_pending {
                         // a v2 header from a TLS-terminating proxy can forward the
                         // client's TLS status + cert fingerprint (see modules::proxy)
@@ -860,6 +868,12 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
                             c.rbuf.clear(); // overlong line with no newline: drop it
                         }
                     }
+                    // fairness + memory bound: after MAX_READ_PER_TURN bytes stop and
+                    // re-arm, so one flooding client can't monopolise this reactor turn
+                    if read_total >= MAX_READ_PER_TURN {
+                        capped = true;
+                        break;
+                    }
                 }
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
                 Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
@@ -868,6 +882,18 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
                     break;
                 }
             }
+        }
+    }
+    // if we stopped early for fairness, force epoll to re-deliver the still-readable
+    // socket next turn (edge-triggered MOD re-reports a ready fd) so no bytes stall.
+    if capped && !close {
+        if let Some(c) = conns.get_mut(&t) {
+            let interest = match (c.want_read, c.want_write) {
+                (true, true) => Interest::READABLE | Interest::WRITABLE,
+                (false, true) => Interest::WRITABLE,
+                _ => Interest::READABLE,
+            };
+            let _ = poll.registry().reregister(c.sock.source(), Token(t), interest);
         }
     }
     if let Some((uid, addr, local_port, secure, certfp, out)) = connect {
