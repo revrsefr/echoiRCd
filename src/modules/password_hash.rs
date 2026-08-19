@@ -58,6 +58,11 @@ pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && openssl::memcmp::eq(a, b)
 }
 
+/// Upper bound on PBKDF2 iterations honoured from a stored credential. Legitimate
+/// work factors are well under this; a larger value (from a corrupt or hostile
+/// credential string) would pin a worker thread, so we reject it instead.
+const MAX_PBKDF2_ITERS: usize = 10_000_000;
+
 /// PBKDF2-HMAC-SHA256 of `pass` with `salt` and `iters`, `len` bytes out.
 fn pbkdf2(pass: &str, salt: &[u8], iters: usize, len: usize) -> Option<Vec<u8>> {
     let mut out = vec![0u8; len];
@@ -86,6 +91,9 @@ pub fn verify(stored: &str, plaintext: &str) -> bool {
             if let (Ok(iters), Some(salt), Some(want)) =
                 (parts[0].parse::<usize>(), unhex(parts[1]), unhex(parts[2]))
             {
+                if !(1..=MAX_PBKDF2_ITERS).contains(&iters) {
+                    return false; // absurd/zero work factor — refuse, don't compute
+                }
                 if let Some(got) = pbkdf2(plaintext, &salt, iters, want.len()) {
                     return ct_eq(&got, &want);
                 }
