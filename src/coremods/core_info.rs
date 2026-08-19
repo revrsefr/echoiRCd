@@ -180,7 +180,28 @@ impl Command for Whois {
         // hidewhois: hide sensitive lines from ordinary users (opers/self exempt per config)
         let hide = crate::modules::hidewhois::hide(s, uid, tuid, asker_oper);
         let keys: Vec<String> = s.users[&tuid].channels.iter().cloned().collect();
-        let (
+        // A named snapshot of the target for the WHOIS reply — a struct rather than a
+        // 17-field positional tuple, so construction can't silently transpose fields.
+        struct WhoisInfo {
+            nick: String,
+            ident: String,
+            disp: String,
+            realname: String,
+            realhost: String,
+            realip: String,
+            secure: bool,
+            oper: bool,
+            bot: bool,
+            hideoper: bool,
+            hidechans: bool,
+            account: Option<String>,
+            last_active: u64,
+            signon: u64,
+            certfp: Option<String>,
+            swhois: Option<String>,
+            showwhois: bool,
+        }
+        let WhoisInfo {
             nick,
             ident,
             disp,
@@ -198,29 +219,30 @@ impl Command for Whois {
             certfp,
             swhois,
             showwhois,
-        ) = {
+        } = {
             let u = &s.users[&tuid];
-            (
-                u.nick.clone(),
-                u.ident.clone(),
-                u.host_display().to_string(),
-                u.realname.clone(),
-                u.host.clone(),
-                u.addr.ip().to_string(),
-                u.secure,
-                u.flags.oper,
-                u.flags.bot,
-                u.flags.hideoper,
-                u.flags.hidechans,
-                u.account.clone(),
-                u.last_active,
-                u.signon,
-                u.certfp.clone(),
-                u.ext
+            WhoisInfo {
+                nick: u.nick.clone(),
+                ident: u.ident.clone(),
+                disp: u.host_display().to_string(),
+                realname: u.realname.clone(),
+                realhost: u.host.clone(),
+                realip: u.addr.ip().to_string(),
+                secure: u.secure,
+                oper: u.flags.oper,
+                bot: u.flags.bot,
+                hideoper: u.flags.hideoper,
+                hidechans: u.flags.hidechans,
+                account: u.account.clone(),
+                last_active: u.last_active,
+                signon: u.signon,
+                certfp: u.certfp.clone(),
+                swhois: u
+                    .ext
                     .get::<crate::coremods::core_oper::Swhois>()
                     .map(|w| w.0.clone()),
-                u.flags.showwhois,
-            )
+                showwhois: u.flags.showwhois,
+            }
         };
         let chans: Vec<String> = keys
             .iter()
