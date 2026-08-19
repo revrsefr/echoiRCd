@@ -138,10 +138,12 @@ fn build(s: &Server, name: &str) -> Option<ConnClass> {
         resolvehostnames: true,
         ..Default::default()
     };
-    // resolve the hash algorithm independently of token order (see `apply`'s `hash`)
+    // resolve the hash algorithm independently of token order, taking the LAST `hash=`
+    // (a child's overrides a parent's) to match `password=`'s last-wins semantics
     let hash_algo = toks
         .iter()
-        .find_map(|t| t.strip_prefix("hash="))
+        .filter_map(|t| t.strip_prefix("hash="))
+        .last()
         .map(str::to_string);
     for tok in &toks {
         if let Some((k, v)) = tok.split_once('=') {

@@ -166,7 +166,12 @@ fn read_nameserver() -> String {
             if let Some(rest) = line.strip_prefix("nameserver ") {
                 let ns = rest.trim();
                 if !ns.is_empty() {
-                    return format!("{ns}:53");
+                    // bracket a bare IPv6 literal so `ns:53` parses as a SocketAddr
+                    return if ns.contains(':') && !ns.starts_with('[') {
+                        format!("[{ns}]:53")
+                    } else {
+                        format!("{ns}:53")
+                    };
                 }
             }
         }

@@ -218,7 +218,9 @@ fn chunked_complete(body: &[u8]) -> bool {
         if size == 0 {
             return true; // terminating chunk seen
         }
-        i = nl + 2 + size + 2; // skip CRLF + data + trailing CRLF
+        // saturating so a hostile 16-hex-digit chunk size can't overflow-panic; an
+        // oversized advance just lands past the body and returns "need more".
+        i = nl.saturating_add(2).saturating_add(size).saturating_add(2); // CRLF + data + CRLF
         if i > body.len() {
             return false;
         }
