@@ -637,10 +637,13 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
                 .map(|u| u.nick.to_ascii_lowercase())
                 .unwrap_or_default();
             let maxacc = s.conf_num("maxaccept", crate::watch::ACCEPT_MAX);
-            if let Some(su) = s.users.get_mut(&uid) {
-                if !tnick.is_empty() && su.accept.len() < maxacc && !su.accept.contains(&tnick) {
-                    su.accept.push(tnick);
-                }
+            let can_add = s
+                .users
+                .get(&uid)
+                .map(|u| !tnick.is_empty() && u.accept.len() < maxacc && !u.accept.contains(&tnick))
+                .unwrap_or(false);
+            if can_add {
+                s.accept_add(uid, tnick);
             }
         }
     } else if let Some((uuid, via)) = s.find_remote(target) {

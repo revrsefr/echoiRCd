@@ -373,8 +373,8 @@ impl Command for Accept {
                         ERR_ACCEPTFULL,
                         &format!("{name} :Your accept list is full"),
                     );
-                } else if let Some(u) = s.users.get_mut(&uid) {
-                    u.accept.push(low);
+                } else {
+                    s.accept_add(uid, low);
                 }
             } else {
                 let existed = s
@@ -388,8 +388,8 @@ impl Command for Accept {
                         ERR_ACCEPTNOT,
                         &format!("{name} :is not on your accept list"),
                     );
-                } else if let Some(u) = s.users.get_mut(&uid) {
-                    u.accept.retain(|x| x != &low);
+                } else {
+                    s.accept_remove(uid, &low);
                 }
             }
         }

@@ -166,6 +166,11 @@ pub struct Server {
     /// cache it in `ext` tagged with this value and re-parse only when it changes,
     /// so a REHASH can never leave a stale cache (see e.g. `modules::disable`).
     pub config_gen: u64,
+    /// How many accept lists contain each (lowercased) nick. A quit only scans every
+    /// user's accept list when the departing nick is actually accepted by someone —
+    /// the common case (count 0) skips the O(users) scan. Maintained solely through
+    /// `accept_add`/`accept_remove` and the quit path.
+    pub accepted_nicks: HashMap<String, u32>,
     // labeled-response: while Some((uid, buf)), that client's own responses are
     // diverted into `buf` instead of the socket, so `on_line` can wrap them with
     // the command's `label` (single tag, BATCH, or ACK). RefCell because the
@@ -222,6 +227,7 @@ impl Server {
             webirc: cfg.webirc,
             raw_config: cfg.raw,
             config_gen: 0,
+            accepted_nicks: HashMap::default(),
             label_capture: RefCell::new(None),
             log: RefCell::new(LogState::default()),
             event_tx,
@@ -676,10 +682,50 @@ impl Server {
 
     /// Remove a user: broadcast QUIT to everyone sharing a channel, drop them
     /// from all channels, free the nick, and close the socket.
+    /// Add `nick_low` (already lowercased) to `uid`'s callerid accept list and bump
+    /// the reverse count. Caller has already checked it's absent and under the cap.
+    pub fn accept_add(&mut self, uid: Uid, nick_low: String) {
+        if self.users.get_mut(&uid).map(|u| u.accept.push(nick_low.clone())).is_none() {
+            return;
+        }
+        *self.accepted_nicks.entry(nick_low).or_insert(0) += 1;
+    }
+
+    /// Remove `nick_low` from `uid`'s accept list and decrement the reverse count.
+    pub fn accept_remove(&mut self, uid: Uid, nick_low: &str) {
+        let removed = self
+            .users
+            .get_mut(&uid)
+            .map(|u| {
+                let before = u.accept.len();
+                u.accept.retain(|x| x != nick_low);
+                before != u.accept.len()
+            })
+            .unwrap_or(false);
+        if removed {
+            if let Some(c) = self.accepted_nicks.get_mut(nick_low) {
+                *c = c.saturating_sub(1);
+                if *c == 0 {
+                    self.accepted_nicks.remove(nick_low);
+                }
+            }
+        }
+    }
+
     pub fn remove_user(&mut self, uid: Uid, reason: &str) {
         let Some(user) = self.users.remove(&uid) else {
             return;
         };
+        // the departing user's own accept list vanishes with them — drop its nicks
+        // from the reverse count
+        for n in &user.accept {
+            if let Some(c) = self.accepted_nicks.get_mut(n) {
+                *c = c.saturating_sub(1);
+                if *c == 0 {
+                    self.accepted_nicks.remove(n);
+                }
+            }
+        }
         self.uuid_local.remove(&user.uuid);
         if user.registered {
             self.push_whowas(
@@ -699,9 +745,13 @@ impl Server {
             self.nick_index.remove(&user.nick.to_ascii_lowercase());
             // Scrub the departed nick from every +g callerid ACCEPT list, so a new
             // user grabbing this nick can't inherit its acceptance and bypass a gate.
+            // The reverse count lets us skip the O(users) scan unless someone actually
+            // accepted this nick (the common case).
             let low = user.nick.to_ascii_lowercase();
-            for u in self.users.values_mut() {
-                u.accept.retain(|n| n != &low);
+            if self.accepted_nicks.remove(&low).unwrap_or(0) > 0 {
+                for u in self.users.values_mut() {
+                    u.accept.retain(|n| n != &low);
+                }
             }
         }
         if user.registered {
