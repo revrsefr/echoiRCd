@@ -174,6 +174,17 @@ fn read_nameserver() -> String {
     "1.1.1.1:53".to_string()
 }
 
+/// A random 16-bit DNS transaction id from the CSPRNG. Combined with the
+/// connected socket, an off-path attacker can neither guess the id nor deliver a
+/// reply from a spoofed source, so cache-poisoning of rDNS/DNSBL is infeasible.
+fn rand_txid() -> u16 {
+    let mut b = [0u8; 2];
+    match openssl::rand::rand_bytes(&mut b) {
+        Ok(()) => u16::from_be_bytes(b),
+        Err(_) => 0x4543, // RNG failure (never observed) — still validated on parse
+    }
+}
+
 /// Build a `qtype` query for `qname`, send it to `ns`, and return the raw reply
 /// (with the transaction id validated).
 fn send_query(ns: &str, qname: &str, qtype: u16, id: u16, timeout: Duration) -> Option<Vec<u8>> {
@@ -181,6 +192,10 @@ fn send_query(ns: &str, qname: &str, qtype: u16, id: u16, timeout: Duration) -> 
         .or_else(|_| UdpSocket::bind("[::]:0"))
         .ok()?;
     sock.set_read_timeout(Some(timeout)).ok()?;
+    // Connect to the nameserver: the kernel then drops any datagram from a
+    // different source, so an off-path attacker can't inject a spoofed reply.
+    // (An unconnected `recv` would accept a forged answer from any IP.)
+    sock.connect(ns).ok()?;
     let mut query = Vec::with_capacity(qname.len() + 18);
     query.extend_from_slice(&id.to_be_bytes());
     query.extend_from_slice(&[0x01, 0x00]); // flags: RD=1
@@ -189,7 +204,7 @@ fn send_query(ns: &str, qname: &str, qtype: u16, id: u16, timeout: Duration) -> 
     encode_name(&mut query, qname);
     query.extend_from_slice(&qtype.to_be_bytes());
     query.extend_from_slice(&QCLASS_IN.to_be_bytes());
-    sock.send_to(&query, ns).ok()?;
+    sock.send(&query).ok()?;
     let mut buf = [0u8; 1500];
     let n = sock.recv(&mut buf).ok()?;
     if n < 12 || u16::from_be_bytes([buf[0], buf[1]]) != id {
@@ -200,8 +215,9 @@ fn send_query(ns: &str, qname: &str, qtype: u16, id: u16, timeout: Duration) -> 
 
 /// Send a PTR query for `qname` to `ns` and return the first PTR answer name.
 fn ptr_lookup(ns: &str, qname: &str, timeout: Duration) -> Option<String> {
-    let reply = send_query(ns, qname, QTYPE_PTR, 0x4543, timeout)?;
-    parse_ptr_reply(&reply, 0x4543)
+    let id = rand_txid();
+    let reply = send_query(ns, qname, QTYPE_PTR, id, timeout)?;
+    parse_ptr_reply(&reply, id)
 }
 
 /// Resolve `qname`'s first A record. Generic — the DNSBL module builds a
@@ -216,8 +232,9 @@ pub fn a_lookup(qname: &str, timeout: Duration) -> Option<Ipv4Addr> {
             }
         }
     }
-    let val = send_query(&nameserver(), qname, QTYPE_A, 0x4544, timeout)
-        .and_then(|reply| parse_a_reply(&reply, 0x4544));
+    let id = rand_txid();
+    let val = send_query(&nameserver(), qname, QTYPE_A, id, timeout)
+        .and_then(|reply| parse_a_reply(&reply, id));
     let ttl = if val.is_some() { A_TTL_HIT } else { A_TTL_MISS };
     if let Ok(mut g) = cache.lock() {
         evict_if_full(&mut g);
