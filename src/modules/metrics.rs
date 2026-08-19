@@ -75,6 +75,11 @@ pub fn maybe_start(cfg: &Config) {
 fn serve(listener: TcpListener, metrics: Arc<Metrics>) {
     for stream in listener.incoming() {
         let Ok(mut s) = stream else { continue };
+        // Bound how long one (possibly slow/hostile) client can hold this
+        // single-threaded scrape loop — without a timeout a client that connects
+        // and never sends would block every future scrape (slowloris).
+        let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+        let _ = s.set_write_timeout(Some(std::time::Duration::from_secs(5)));
         // read (and ignore) the request head, then reply — this is a scrape, no routing
         let mut buf = [0u8; 1024];
         let _ = s.read(&mut buf);
