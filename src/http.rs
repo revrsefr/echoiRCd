@@ -10,14 +10,22 @@ use std::time::Duration;
 
 use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 
+/// Largest response body we'll buffer. A hostile or compromised endpoint could
+/// otherwise stream unbounded data and OOM the worker thread (and, via mimalloc,
+/// the whole process).
+const MAX_RESPONSE: u64 = 4 * 1024 * 1024;
+
 /// POST `body` to `url` with `content_type` and extra `headers`. Blocking.
-/// Returns `(status_code, response_body)` or an error string.
+/// Returns `(status_code, response_body)` or an error string. `verify` turns on
+/// TLS certificate + hostname verification for https (the safe default); pass
+/// `false` only for a trusted private endpoint with a self-signed cert.
 pub fn post(
     url: &str,
     content_type: &str,
     body: &str,
     headers: &[(String, String)],
     timeout: Duration,
+    verify: bool,
 ) -> Result<(u16, String), String> {
     let (scheme, rest) = url.split_once("://").ok_or("bad url (no scheme)")?;
     let (hostport, path) = match rest.split_once('/') {
@@ -47,18 +55,23 @@ pub fn post(
 
     let raw = if https {
         let mut b = SslConnector::builder(SslMethod::tls()).map_err(|e| e.to_string())?;
-        b.set_verify(SslVerifyMode::NONE); // APIs are usually behind a trusted reverse proxy
+        // Default: keep the connector's secure verification (cert chain + hostname,
+        // applied by connect(host, ..)). Only downgrade when the operator opts out
+        // for a trusted reverse-proxy / self-signed endpoint.
+        if !verify {
+            b.set_verify(SslVerifyMode::NONE);
+        }
         let connector = b.build();
         let mut tls = connector.connect(host, stream).map_err(|e| e.to_string())?;
         tls.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
         let mut buf = Vec::new();
-        let _ = tls.read_to_end(&mut buf); // close => EOF (Connection: close)
+        let _ = tls.take(MAX_RESPONSE).read_to_end(&mut buf); // bounded; close => EOF
         buf
     } else {
         let mut s = stream;
         s.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
         let mut buf = Vec::new();
-        let _ = s.read_to_end(&mut buf);
+        let _ = s.take(MAX_RESPONSE).read_to_end(&mut buf);
         buf
     };
 

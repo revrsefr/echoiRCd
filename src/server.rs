@@ -471,6 +471,7 @@ impl Server {
         headers: Vec<(String, String)>,
     ) {
         let tx = self.event_tx.clone();
+        let verify = self.conf_bool("http_tls_verify", true);
         std::thread::spawn(move || {
             let (status, body) = crate::http::post(
                 &url,
@@ -478,6 +479,7 @@ impl Server {
                 &body,
                 &headers,
                 std::time::Duration::from_secs(10),
+                verify,
             )
             .unwrap_or((0, String::new()));
             let _ = tx.send(crate::ircd::Event::HttpResult {
