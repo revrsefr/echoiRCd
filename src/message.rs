@@ -48,7 +48,7 @@ impl Message {
 
 /// Parse one wire line. Returns `None` for an empty/garbage line.
 pub fn parse(line: &str) -> Option<Message> {
-    let mut rest = line.trim_start();
+    let mut rest = line.trim_start_matches(' ');
 
     // IRCv3 message tags — keep the client-only (`+`) tags for relay, drop the rest.
     let mut ctags = String::new();
@@ -71,18 +71,18 @@ pub fn parse(line: &str) -> Option<Message> {
             .find_map(|t| t.strip_prefix("batch="))
             .map(|v| v.to_string());
         concat = tags.split(';').any(|t| t == "draft/multiline-concat");
-        rest = r.trim_start();
+        rest = r.trim_start_matches(' ');
     }
 
     let mut source = None;
     if let Some(after_colon) = rest.strip_prefix(':') {
         let (src, r) = after_colon.split_once(' ')?;
         source = Some(src.to_string());
-        rest = r.trim_start();
+        rest = r.trim_start_matches(' ');
     }
 
     let (cmd, mut rest) = match rest.split_once(' ') {
-        Some((c, r)) => (c, r.trim_start()),
+        Some((c, r)) => (c, r.trim_start_matches(' ')),
         None => (rest, ""),
     };
     if cmd.is_empty() {
@@ -98,7 +98,7 @@ pub fn parse(line: &str) -> Option<Message> {
         match rest.split_once(' ') {
             Some((p, r)) => {
                 params.push(p.to_string());
-                rest = r.trim_start();
+                rest = r.trim_start_matches(' ');
             }
             None => {
                 params.push(rest.to_string());
