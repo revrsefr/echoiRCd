@@ -45,6 +45,26 @@ fn flag_tri(v: Option<&str>) -> Tri {
     }
 }
 
+thread_local! {
+    /// (config_gen, parsed groups) — re-parsed only when the config changes. The
+    /// core is single-threaded, so a thread_local cache is safe and lets the
+    /// `&Server` callers (the `g:` extban match, WHOIS) skip re-parsing per call.
+    static GROUPS: std::cell::RefCell<(u64, Vec<SecGroup>)> =
+        const { std::cell::RefCell::new((u64::MAX, Vec::new())) };
+}
+
+/// Run `f` over the security groups, (re)parsing them only when the config changed.
+fn with_groups<R>(s: &Server, f: impl FnOnce(&[SecGroup]) -> R) -> R {
+    GROUPS.with(|cell| {
+        if cell.borrow().0 != s.config_gen {
+            let fresh = parse_groups(s);
+            *cell.borrow_mut() = (s.config_gen, fresh);
+        }
+        let guard = cell.borrow();
+        f(&guard.1)
+    })
+}
+
 fn parse_groups(s: &Server) -> Vec<SecGroup> {
     let mut out = Vec::new();
     for line in s
@@ -144,18 +164,22 @@ fn matches(s: &Server, uid: Uid, g: &SecGroup) -> bool {
 
 /// Whether `uid` is a member of the named security group (case-insensitive).
 pub fn in_group(s: &Server, uid: Uid, name: &str) -> bool {
-    parse_groups(s)
-        .iter()
-        .any(|g| g.name.eq_ignore_ascii_case(name) && matches(s, uid, g))
+    with_groups(s, |groups| {
+        groups
+            .iter()
+            .any(|g| g.name.eq_ignore_ascii_case(name) && matches(s, uid, g))
+    })
 }
 
 /// The names of the groups `uid` is in (only public ones unless `include_private`).
 pub fn user_groups(s: &Server, uid: Uid, include_private: bool) -> Vec<String> {
-    parse_groups(s)
-        .into_iter()
-        .filter(|g| (include_private || g.public) && matches(s, uid, g))
-        .map(|g| g.name)
-        .collect()
+    with_groups(s, |groups| {
+        groups
+            .iter()
+            .filter(|g| (include_private || g.public) && matches(s, uid, g))
+            .map(|g| g.name.clone())
+            .collect()
+    })
 }
 
 pub fn commands() -> Vec<Box<dyn Command>> {
