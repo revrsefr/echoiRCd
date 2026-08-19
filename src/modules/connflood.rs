@@ -32,16 +32,23 @@ pub fn over_limit(s: &mut Server, ip: IpAddr) -> bool {
         return false;
     };
     let n = now();
-    let hist = s
-        .ext
-        .get_or_insert_with::<ConnHistory>(ConnHistory::default)
-        .0
-        .entry(ip)
-        .or_default();
+    let store = s.ext.get_or_insert_with::<ConnHistory>(ConnHistory::default);
+    // Bound memory: a wide source-IP spread (e.g. an IPv6 /64) could otherwise grow
+    // this map unbounded between tick GCs — once it's large, drop stale buckets now.
+    if store.0.len() > MAX_TRACKED_IPS {
+        store.0.retain(|_, times| {
+            times.retain(|&t| n.saturating_sub(t) < secs);
+            !times.is_empty()
+        });
+    }
+    let hist = store.0.entry(ip).or_default();
     hist.retain(|&t| n.saturating_sub(t) < secs);
     hist.push(n);
     hist.len() as u32 > max
 }
+
+/// Ceiling on distinct source IPs tracked between GC ticks (memory bound).
+const MAX_TRACKED_IPS: usize = 65_536;
 
 /// Prunes stale per-IP bookkeeping on the tick.
 pub struct ConnFlood;
