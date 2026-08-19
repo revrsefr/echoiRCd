@@ -1453,9 +1453,50 @@ pub fn valid_chan(name: &str, maxlen: usize) -> bool {
 }
 
 /// Case-insensitive glob (`*` = any run, `?` = one char) — for +b mask matching.
+///
+/// Runs on the message/ban/extban hot paths, so the common case — both operands
+/// pure ASCII (hostmasks, IPs, cloaks) — takes a zero-allocation byte-wise path.
+/// Only a non-ASCII mask or subject falls back to collecting Unicode-lowercased
+/// chars. For ASCII input the two paths are identical (ASCII case-folding matches
+/// `str::to_lowercase`, and one ASCII byte is one char so `?` still spans one char).
 pub fn glob_match(pat: &str, s: &str) -> bool {
+    if pat.is_ascii() && s.is_ascii() {
+        return glob_bytes(pat.as_bytes(), s.as_bytes());
+    }
     let p: Vec<char> = pat.to_lowercase().chars().collect();
     let t: Vec<char> = s.to_lowercase().chars().collect();
+    glob_chars(&p, &t)
+}
+
+/// Greedy `*`/`?` glob over ASCII bytes, case-folded inline (no allocation).
+fn glob_bytes(p: &[u8], t: &[u8]) -> bool {
+    let (mut pi, mut ti) = (0usize, 0usize);
+    let mut star: Option<usize> = None;
+    let mut mark = 0usize;
+    while ti < t.len() {
+        if pi < p.len() && (p[pi] == b'?' || p[pi].eq_ignore_ascii_case(&t[ti])) {
+            pi += 1;
+            ti += 1;
+        } else if pi < p.len() && p[pi] == b'*' {
+            star = Some(pi);
+            mark = ti;
+            pi += 1;
+        } else if let Some(sp) = star {
+            pi = sp + 1;
+            mark += 1;
+            ti = mark;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == b'*' {
+        pi += 1;
+    }
+    pi == p.len()
+}
+
+/// The same greedy glob over pre-lowercased chars (non-ASCII fallback).
+fn glob_chars(p: &[char], t: &[char]) -> bool {
     let (mut pi, mut ti) = (0usize, 0usize);
     let mut star: Option<usize> = None;
     let mut mark = 0usize;
@@ -1513,6 +1554,33 @@ pub fn normalize_ban_mask(m: &str) -> String {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn glob_basic() {
+        assert!(glob_match("*!*@*", "bob!user@host"));
+        assert!(glob_match("*.example.com", "a.b.EXAMPLE.com"));
+        assert!(glob_match("bob", "BOB"));
+        assert!(glob_match("b?b", "bXb"));
+        assert!(!glob_match("b?b", "bb"));
+        assert!(!glob_match("bob", "bobby"));
+        assert!(glob_match("a*z", "aXXXz"));
+        // non-ASCII takes the Unicode fallback and still folds case
+        assert!(glob_match("café*", "CAFÉ-bar"));
+    }
+
+    proptest! {
+        // The zero-alloc ASCII fast path must agree with the char-based algorithm
+        // on every ASCII input.
+        #[test]
+        fn glob_ascii_fastpath_agrees(
+            pat in "[a-zA-Z0-9?*._@!-]{0,12}",
+            s in "[a-zA-Z0-9._@!-]{0,12}",
+        ) {
+            let plo: Vec<char> = pat.to_lowercase().chars().collect();
+            let tlo: Vec<char> = s.to_lowercase().chars().collect();
+            prop_assert_eq!(glob_match(&pat, &s), glob_chars(&plo, &tlo));
+        }
+    }
 
     proptest! {
         // Fuzz ban-mask normalisation: no input panics, and it's idempotent
