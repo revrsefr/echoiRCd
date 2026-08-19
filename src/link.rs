@@ -1155,6 +1155,23 @@ impl Server {
         self.remote_users.get(uuid).map(|ru| ru.via) == Some(via)
     }
 
+    /// Whether a message source `src` — a remote user uuid **or** a server sid —
+    /// genuinely sits behind the link `via` it arrived on. In a spanning tree a
+    /// line from `src` must always reach us via the next hop toward `src`; a peer
+    /// naming a source that lives behind a *different* link is forging it. Used to
+    /// gate the channel-state handlers (JOIN/KICK/TOPIC/MODE/message) the same way
+    /// `sourced_via` already gates NICK/QUIT/PART — except this also accepts a
+    /// server source, since services burst FMODE/FTOPIC/NOTICE from their SID.
+    fn source_behind(&self, src: &str, via: Uid) -> bool {
+        if let Some(ru) = self.remote_users.get(src) {
+            return ru.via == via;
+        }
+        if let Some(sv) = self.servers.get(src) {
+            return sv.via == via;
+        }
+        false
+    }
+
     /// Resolve a nick collision between local user `luid` and an incoming remote
     /// user by timestamp: same user@ip → the OLDER changes; else the NEWER changes;
     /// equal TS → both. The loser is force-renamed to its UUID — locally right here
@@ -1273,6 +1290,9 @@ impl Server {
         let Some(src) = msg.source.clone() else {
             return;
         };
+        if !self.source_behind(&src, via) {
+            return; // reject a KILL whose source doesn't live behind this link
+        }
         let (Some(target), Some(reason)) =
             (msg.params.first().cloned(), msg.params.get(1).cloned())
         else {
@@ -1405,6 +1425,9 @@ impl Server {
         let Some(src) = msg.source.clone() else {
             return;
         };
+        if !self.source_behind(&src, via) {
+            return; // don't relay a message forged from behind another link
+        }
         if msg.params.len() < 2 {
             return;
         }
@@ -1588,7 +1611,8 @@ impl Server {
         let Some(chan) = msg.params.first().cloned() else {
             return;
         };
-        if !self.remote_users.contains_key(&uuid) {
+        // the joiner must actually live behind the link this JOIN arrived on
+        if !self.sourced_via(&uuid, via) {
             return;
         }
         let key = chan.to_ascii_lowercase();
@@ -1617,7 +1641,7 @@ impl Server {
         let Some(chan) = msg.params.first().cloned() else {
             return;
         };
-        if !chan.starts_with('#') || !self.remote_users.contains_key(&uuid) {
+        if !chan.starts_with('#') || !self.sourced_via(&uuid, via) {
             return;
         }
         let key = chan.to_ascii_lowercase();
@@ -1936,6 +1960,9 @@ impl Server {
         let Some(src) = msg.source.clone() else {
             return;
         };
+        if !self.source_behind(&src, via) {
+            return; // a peer can't set a topic sourced from behind another link
+        }
         if msg.params.len() < 2 {
             return;
         }
@@ -1972,6 +1999,9 @@ impl Server {
         let Some(src) = msg.source.clone() else {
             return;
         };
+        if !self.source_behind(&src, via) {
+            return; // reject a KICK whose kicker doesn't live behind this link
+        }
         if msg.params.len() < 2 {
             return;
         }
@@ -2104,10 +2134,14 @@ impl Server {
         // Channel modes arrive as `:<src> FMODE <#chan> <ts> <modes> [params]`
         // (timestamped) or `:<src> MODE <#chan> <modes> [params]`; user modes as
         // `:<src> MODE <uuid> <modes>`. Applied without re-checking privilege — the
-        // originating server already authorised the change.
+        // originating server already authorised the change, *provided* the source
+        // genuinely sits behind this link (else a peer could forge ops/bans).
         let Some(src) = msg.source.clone() else {
             return;
         };
+        if !self.source_behind(&src, via) {
+            return;
+        }
         if msg.params.len() < 2 {
             return;
         }
