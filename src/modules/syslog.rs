@@ -83,7 +83,13 @@ pub fn tee(s: &Server, msg: &str) {
     let tag = s.conf("syslog_tag").unwrap_or("echoircd");
     // severity "notice" (5); PRI = facility*8 + severity
     let pri = facility(s.conf("syslog_facility").unwrap_or("daemon")) as u16 * 8 + 5;
-    let line = format!("<{pri}>{tag}[{}]: {msg}", std::process::id());
+    // Neutralise control chars (esp. CR/LF): an snotice can carry user-influenced
+    // text (nick/realname/quit reason), and a raw newline would forge a syslog record.
+    let safe: String = msg
+        .chars()
+        .map(|c| if (c as u32) < 0x20 || c == '\x7f' { ' ' } else { c })
+        .collect();
+    let line = format!("<{pri}>{tag}[{}]: {safe}", std::process::id());
     SINK.with(|cell| {
         let mut slot = cell.borrow_mut();
         // (re)open if the target changed or nothing is open yet
