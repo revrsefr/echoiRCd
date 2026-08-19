@@ -3,10 +3,10 @@
 ## Prerequisites
 
 - A stable **Rust** toolchain (`cargo`, `rustc`).
-- **OpenSSL** development headers (the `openssl` crate links against the system
-  library) — e.g. `libssl-dev` on Debian/Ubuntu.
-
-That's it. There are exactly two dependencies: `openssl` and `mio`.
+- **OpenSSL** development headers for the default TLS backend (the `openssl` crate
+  links against the system library) — e.g. `libssl-dev` on Debian/Ubuntu. The
+  optional pure-Rust rustls backend (`tls_backend = rustls`) needs no system
+  library.
 
 ## Build
 
@@ -52,20 +52,8 @@ cargo test --test integration     # just the end-to-end suite
 The integration suite spawns the real binary on ephemeral ports and drives it as
 a client — covering reactor-pool cross-worker delivery, TLS-in-reactor handshakes,
 the stalled-handshake reap, the accept-rate limiter, and nick collisions. It
-tracks and kills its child processes by PID, never by name.
-
-## The originality guard
-
-Every source edit is checked by `scripts/native-rust-guard.sh`, which enforces the
-project's invariants:
-
-- no `unsafe` (the crate is `#![forbid(unsafe_code)]`),
-- no C / FFI,
-- dependencies limited to `openssl` + `mio`,
-- and no code copied or translated from any other project — everything is
-  original Rust.
-
-Run it on a file directly with `bash scripts/native-rust-guard.sh <file>`.
+tracks and kills its child processes by PID, never by name. The parser and the S2S
+convergence logic also carry property-based (`proptest`) suites.
 
 ## Project layout
 
@@ -82,7 +70,7 @@ src/
   command.rs       the Command trait
   module.rs        the module lifecycle-hook trait
   coremods/        built-in commands (registration, channels, messaging, oper, …)
-  modules/         optional, pluggable modules (~70 of them)
+  modules/         optional, pluggable modules (70+ of them)
 tests/             end-to-end integration tests
 deploy/            production systemd units + firewall script
 docs/              this manual

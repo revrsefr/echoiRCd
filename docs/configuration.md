@@ -29,6 +29,8 @@ Most settings apply on `REHASH` without a restart.
 | `bind` | Plaintext client listener, `ip:port` (e.g. `0.0.0.0:6667`). |
 | `bind_tls` | TLS client listener (e.g. `0.0.0.0:6697`). |
 | `tls_cert` / `tls_key` | PEM certificate + private key for TLS (and `wss://`). |
+| `tls_sni` | Serve a different cert for a given hostname (`<host> <cert> <key>`, repeatable). |
+| `tls_backend` | `openssl` (default) or `rustls` (pure-Rust, no system OpenSSL). |
 | `bind_server` | Server-to-server link listener (see [linking](linking.md)). |
 
 Generate a self-signed cert to start:
@@ -147,6 +149,14 @@ See [anti-abuse](anti-abuse.md) for how these layer together.
 | `syslog` + `syslog_target` / `syslog_facility` / `syslog_tag` | Mirror the notice/log stream to the system logger (`/dev/log` or `host:port`). |
 | `log_json` | Append the notice/log stream to a file as JSON lines. |
 | `chanlog` | Mirror the oper server-notice stream into a channel. |
+
+## Control & observability
+
+| Key | Meaning |
+|-----|---------|
+| `metrics_bind` | Bind an OpenMetrics/Prometheus scrape endpoint (`ip:port`, plaintext HTTP GET). Off unless set — expose it privately or behind a proxy. |
+| `rpc` + `rpc_bind` | Enable the JSON-RPC control plane and bind its HTTP listener. Both required to turn it on. |
+| `rpc_user` / `rpc_token` | Credentials for the control plane — sent as HTTP Basic (`user:token`) or Bearer. Bind privately; the token is a shared secret. |
 
 ## Transports
 

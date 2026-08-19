@@ -29,6 +29,9 @@ informed as they change. This page groups what's supported.
 | `multi-prefix` | See all of a member's status prefixes at once. |
 | `userhost-in-names` | Full `nick!user@host` in `NAMES`. |
 | `invite-notify` | Channel ops see invites to their channel. |
+| `draft/pre-away` | Send `AWAY` during registration so away state is set before the first `JOIN`. |
+| `no-implicit-names` | Suppress the automatic `NAMES` reply on `JOIN` (the client asks when it wants it). |
+| `draft/channel-rename` | `RENAME` a channel in place, keeping membership. |
 
 ## Authentication
 
@@ -60,6 +63,7 @@ control who may message them.
 | `draft/metadata-2` | `METADATA` key/value data on users and channels. |
 | `draft/extended-isupport` | Re-request the current ISUPPORT tokens on demand. |
 | `draft/json-log` | Stream the server log to an oper as JSON. |
+| `sts` | Strict Transport Security — tell a client to upgrade to TLS and pin that for a duration (opt-in via `sts_duration` / `sts_port` / `sts_preload`). |
 | `EXTJWT` | A short-lived, server-signed HS256 token a client can present elsewhere. |
 | network icon / profile link | Advertise a network icon and per-account profile URLs. |
 

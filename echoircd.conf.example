@@ -22,8 +22,16 @@ tls_key    = ./tls/key.pem
 # The cert is re-read on REHASH, so a renewed cert applies without a restart.
 # SNI: serve a different cert for a given hostname. Repeatable.
 # tls_sni  = irc.example.net ./tls/example.crt ./tls/example.key
+# TLS backend: openssl (default) or rustls (pure-Rust, no system OpenSSL needed).
+# tls_backend = rustls
+# STS (Strict Transport Security): tell CAP 302 clients on the plaintext port to
+# upgrade to TLS and pin it. Off unless sts_duration > 0. Set sts_port to your TLS
+# port. Only enable once TLS is solid — clients will refuse plaintext for the pin.
+# sts_duration = 2592000     # seconds clients should stick to TLS (0 = off)
+# sts_port     = 6697        # the TLS port to upgrade to
+# sts_preload  = no          # advertise preload eligibility
 
-motd = Welcome to echoIRCd — a from-scratch IRC daemon in Rust.
+motd = Welcome to echoIRCd.
 motd = Edit the MOTD in your echoircd.conf.
 
 # --- server-to-server linking ---
@@ -191,6 +199,18 @@ amu_target    = both
 
 # --- log_json: append the server-notice / log stream to a file as JSONL ---
 # log_json = /var/log/echoircd/events.jsonl
+
+# --- metrics: OpenMetrics/Prometheus scrape endpoint (plaintext HTTP GET). Off
+#     unless bound; expose it only on a private/loopback address or behind a proxy. ---
+# metrics_bind = 127.0.0.1:9109
+
+# --- rpc: token-authenticated JSON-RPC control plane over HTTP (admin tooling).
+#     Off unless rpc = yes AND rpc_bind is set. Bind privately; the token is a
+#     shared secret sent as HTTP Basic (rpc_user:rpc_token) or Bearer. ---
+# rpc       = yes
+# rpc_bind  = 127.0.0.1:8080
+# rpc_user  = admin
+# rpc_token = CHANGE_THIS_RPC_TOKEN
 
 # --- PROXY protocol: trust the HAProxy/nginx PROXY header (v1 or v2) from these
 #     sources (glob or CIDR, repeatable), so the real client IP is used instead of

@@ -96,7 +96,7 @@ A connection from a trusted proxy must lead with a PROXY (v1 or v2) header. This
 applies to the plaintext and TLS client listeners; for browser clients over
 WebSocket, use `ws_proxyranges` with `X-Forwarded-For` instead.
 
-## Log shipping
+## Log shipping & metrics
 
 | Setting | Sends the notice/log stream to |
 |---------|--------------------------------|
@@ -106,6 +106,13 @@ WebSocket, use `ws_proxyranges` with `X-Forwarded-For` instead.
 
 The core also surfaces its own health: `slow_command_ms` raises a notice when an
 event runs long, and `watchdog_ms` logs if the core is stuck.
+
+For a metrics pipeline, bind the OpenMetrics/Prometheus endpoint with
+`metrics_bind = 127.0.0.1:9109` and scrape it (counters for commands / messages /
+connects, gauges for users / channels / servers / links). For scripted control,
+the JSON-RPC plane (`rpc` / `rpc_bind` / `rpc_token`) exposes admin operations over
+HTTP. Bind both privately — on loopback or behind the reverse proxy, never on a
+public interface.
 
 ## TLS certificates
 

@@ -91,7 +91,7 @@ cares which one a connection uses:
 | Transport | Model | Notes |
 |-----------|-------|-------|
 | **Plaintext clients** | reactor pool | The common case; one worker frames many sockets. |
-| **Direct TLS clients** | reactor pool | The handshake and record crypto run **non-blocking inside the worker** (OpenSSL driven off a `mio` socket). TLS work spreads across cores like everything else. |
+| **Direct TLS clients** | reactor pool | The handshake and record crypto run **non-blocking inside the worker**, driven off a `mio` socket by the configured TLS backend (OpenSSL by default, or rustls via `tls_backend = rustls`). TLS work spreads across cores like everything else. |
 | **Proxied TLS** (a PROXY header before the handshake) | thread per connection | Reading the pre-handshake header wants the simpler blocking path; there are few of these. |
 | **Server links** | thread per connection | A handful of long-lived peers; not worth multiplexing. |
 
@@ -131,22 +131,18 @@ kernel-level filtering.
 
 ## Memory safety
 
-Safety is structural, not just `#![forbid(unsafe_code)]`:
+Safety is structural, not just a matter of avoiding raw pointers:
 
 - **Handles, not pointers.** Users and channels are referenced by `Uid` /
   channel-key handles looked up in maps, so there are no dangling references and
-  no use-after-free.
+  no use-after-free — a `Uid` is monotonic and never reused, so a stale handle
+  resolves to nothing rather than to the wrong user.
 - **A typemap, not `void*`.** Modules attach per-user / per-channel / per-server
   state through an `Extensible` typemap keyed by Rust type; it's dropped
   automatically with its owner, so module state can't leak or be freed twice.
 - **Trait objects, not a plugin ABI.** Commands, modes, and modules are
   compiled-in trait objects. There is no dynamic-loading FFI boundary to get
   wrong.
-
-The two dependencies (`openssl`, `mio`) keep their own `unsafe` internal, so the
-daemon itself never writes any. The `scripts/native-rust-guard.sh` check enforces
-all of this on every edit: no `unsafe`, no C/FFI, dependencies limited to those
-two, and no code copied or translated from another project.
 
 ## Tuning knobs
 

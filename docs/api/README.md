@@ -2,7 +2,7 @@
 
 This is the reference for extending echoIRCd. The server has five extension
 points, all ordinary Rust trait objects compiled into the binary — there is no
-plugin ABI, no dynamic loading, and no `unsafe`:
+plugin ABI and no dynamic loading:
 
 | You want to… | Implement | Registered in | Reference |
 |--------------|-----------|---------------|-----------|
@@ -41,9 +41,9 @@ Modules in this codebase follow a few hard rules — match them:
    literal default.
 4. **Register in the table**, don't touch the parser or the dispatcher. Adding a
    command / mode / module is one new file plus one line in a registration table.
-5. **Original Rust only.** No `unsafe`, no C/FFI, no new dependencies, and no code
-   copied or translated from another project. `scripts/native-rust-guard.sh`
-   enforces this on every edit.
+5. **Stay self-contained.** A module shouldn't pull in a heavy new dependency —
+   the primitives you'll reach for (an HTTP client, a regex engine, base64, the
+   hashing/KDF helpers) already live in the tree; reuse them.
 
 ## Write your first module in five steps
 
@@ -92,11 +92,10 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
 **4. (Only if it adds a command)** expose a `commands()` function from your module
 and chain it into `module_commands()` — see [commands](commands.md).
 
-**5. Build, test, and check:**
+**5. Build and test:**
 
 ```sh
 cargo build && cargo test
-bash scripts/native-rust-guard.sh src/modules/hello.rs
 ```
 
 That's it — `hello` is now a first-class part of the server.
