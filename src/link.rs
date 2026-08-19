@@ -1345,6 +1345,9 @@ impl Server {
         let Some(src) = msg.source.clone() else {
             return;
         };
+        if !self.source_behind(&src, via) {
+            return; // reject an invite-bypass forged from behind another link
+        }
         let (Some(target), Some(chan)) =
             (msg.params.first().cloned(), msg.params.get(1).cloned())
         else {
@@ -1372,6 +1375,12 @@ impl Server {
         if msg.params.len() < 6 {
             return;
         }
+        let Some(src) = msg.source.as_deref() else {
+            return;
+        };
+        if !self.source_behind(src, via) {
+            return; // reject a network x-line forged from behind another link
+        }
         let Some(kind) = crate::xline::XKind::from_tag(&msg.params[0]) else {
             return;
         };
@@ -1389,6 +1398,12 @@ impl Server {
     fn link_delline_recv(&mut self, via: Uid, msg: &Message) {
         if msg.params.len() < 2 {
             return;
+        }
+        let Some(src) = msg.source.as_deref() else {
+            return;
+        };
+        if !self.source_behind(src, via) {
+            return; // reject an x-line removal forged from behind another link
         }
         let Some(kind) = crate::xline::XKind::from_tag(&msg.params[0]) else {
             return;
