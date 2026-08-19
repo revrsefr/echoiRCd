@@ -35,6 +35,7 @@ pub struct MlineBatch {
     pub notice: bool,
     pub parts: Vec<(String, bool)>, // (text, concat-with-previous-part)
     pub bytes: usize,
+    pub overflowed: bool, // a line exceeded the byte/line limit — reject the whole batch
 }
 
 /// uid -> its open batch. Stored in `Server.ext`.
@@ -52,6 +53,7 @@ fn open(s: &mut Server, uid: Uid, bref: &str, target: &str) {
             notice: false,
             parts: Vec::new(),
             bytes: 0,
+            overflowed: false,
         },
     );
 }
@@ -74,6 +76,10 @@ pub fn accumulate(
                 mb.notice = notice;
                 mb.bytes += text.len();
                 mb.parts.push((text.to_string(), concat));
+            } else {
+                // over the byte/line budget — flag so close() rejects the whole batch
+                // rather than silently delivering a truncated message.
+                mb.overflowed = true;
             }
             true
         }
@@ -90,6 +96,15 @@ fn close(s: &mut Server, uid: Uid, bref: &str) -> Option<(String, bool, Vec<Stri
         _ => return None,
     }
     let mb = store.0.remove(&uid)?;
+    if mb.overflowed {
+        s.fail(
+            uid,
+            "BATCH",
+            "MULTILINE_INVALID",
+            "Multiline batch exceeded the size/line limit and was dropped.",
+        );
+        return None;
+    }
     let mut lines: Vec<String> = Vec::new();
     for (text, concat) in mb.parts {
         if concat && !lines.is_empty() {
