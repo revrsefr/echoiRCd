@@ -66,14 +66,21 @@ pub fn broadcast(
         .get(key)
         .map(|c| c.members.keys().copied().collect())
         .unwrap_or_default();
+    // resolve each changed mode's hidden-rank once (a config scan) rather than
+    // re-scanning `hidemode` for every (member × change) pair.
+    let hidden: Vec<Option<u8>> = changes.iter().map(|(_, c, _)| hidden_rank(s, *c)).collect();
     for m in members {
         let privileged = m == setter || s.is_oper(m);
+        // compute this member's rank once, not once per changed mode
+        let mrank = if privileged { u8::MAX } else { s.rank(m, key) };
         let visible: Vec<&(char, char, Option<String>)> = changes
             .iter()
-            .filter(|(_, c, _)| match hidden_rank(s, *c) {
+            .enumerate()
+            .filter(|(i, _)| match hidden[*i] {
                 None => true,
-                Some(req) => privileged || s.rank(m, key) >= req,
+                Some(req) => mrank >= req,
             })
+            .map(|(_, ch)| ch)
             .collect();
         if visible.is_empty() {
             continue;
