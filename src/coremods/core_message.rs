@@ -203,6 +203,8 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
     };
     if target.starts_with('#') {
         let key = target.to_ascii_lowercase();
+        // rank is fixed for this message — compute it once instead of on every check
+        let mrank = s.rank(uid, &key);
         let (member, no_external) = s
             .channels
             .get(&key)
@@ -234,7 +236,7 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             .get(&key)
             .map(|c| c.modes.opmoderated)
             .unwrap_or(false)
-            && s.rank(uid, &key) < RANK_VOICE;
+            && mrank < RANK_VOICE;
         // +m: only voiced-or-above may speak
         let moderated = s
             .channels
@@ -242,7 +244,7 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             .map(|c| c.modes.moderated)
             .unwrap_or(false);
         if moderated
-            && s.rank(uid, &key) < RANK_VOICE
+            && mrank < RANK_VOICE
             && !op_only
             && !s.chanop_exempt(uid, &key, "moderated")
         {
@@ -262,7 +264,7 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             .map(|c| c.modes.reg_moderated)
             .unwrap_or(false);
         if reg_moderated
-            && s.rank(uid, &key) < RANK_VOICE
+            && mrank < RANK_VOICE
             && !s.is_logged_in(uid)
             && !s.chanop_exempt(uid, &key, "regmoderated")
         {
@@ -277,7 +279,7 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
         }
         // +d delaymsg — a just-joined unprivileged user must wait before speaking
         if let Some(secs) = s.channels.get(&key).and_then(|c| c.modes.delaymsg) {
-            if s.rank(uid, &key) < RANK_VOICE && !s.chanop_exempt(uid, &key, "delaymsg") {
+            if mrank < RANK_VOICE && !s.chanop_exempt(uid, &key, "delaymsg") {
                 let joined = s
                     .channels
                     .get(&key)
@@ -297,7 +299,7 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             }
         }
         // extban `m:` mute — matched users can't speak unless voiced-or-above
-        if s.extban_active(uid, &key, 'm') && s.rank(uid, &key) < RANK_VOICE {
+        if s.extban_active(uid, &key, 'm') && mrank < RANK_VOICE {
             if !notice {
                 s.numeric(
                     uid,
@@ -308,7 +310,7 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             return CmdResult::Fail;
         }
         // +f message flood — ops/half-ops and opers are exempt; others get kicked
-        let flood_exempt = s.rank(uid, &key) >= RANK_HALFOP
+        let flood_exempt = mrank >= RANK_HALFOP
             || s.users.get(&uid).map(|u| u.flags.oper).unwrap_or(false);
         if !flood_exempt && !s.chanop_exempt(uid, &key, "flood") {
             if let Some(ban) = s.messageflood_hit(uid, &key) {
@@ -422,7 +424,7 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
         }
         // +K repeat — reject a line the sender just repeated; else remember it (ops exempt)
         if let Some(n) = s.channels.get(&key).and_then(|c| c.modes.repeat) {
-            if s.rank(uid, &key) < RANK_HALFOP && !s.chanop_exempt(uid, &key, "repeat") {
+            if mrank < RANK_HALFOP && !s.chanop_exempt(uid, &key, "repeat") {
                 let repeated = s
                     .channels
                     .get(&key)
@@ -718,6 +720,7 @@ impl Command for TagMsg {
         let msgid = s.next_msgid(); // shared across this TAGMSG's recipients
         if target.starts_with('#') {
             let key = target.to_ascii_lowercase();
+            let mrank = s.rank(uid, &key);
             if !s
                 .channels
                 .get(&key)
@@ -732,7 +735,7 @@ impl Command for TagMsg {
                 .get(&key)
                 .map(|c| c.modes.moderated)
                 .unwrap_or(false);
-            if moderated && s.rank(uid, &key) < RANK_VOICE {
+            if moderated && mrank < RANK_VOICE {
                 return CmdResult::Fail;
             }
             let echo = s
