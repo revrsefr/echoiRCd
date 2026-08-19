@@ -69,18 +69,10 @@ fn apply(c: &mut ConnClass, k: &str, v: &str) {
             c.ssl_trusted = v.eq_ignore_ascii_case("trusted");
         }
         "password" | "pass" => c.password = Some(v.to_string()),
-        "hash" => {
-            // name the algorithm of a hashed password: fold it into the stored
-            // credential (`<algo>:<digest>`) that verify() auto-detects, unless the
-            // password value already carries its own prefix.
-            if let Some(pw) = c.password.take() {
-                c.password = Some(if pw.contains(':') {
-                    pw
-                } else {
-                    format!("{v}:{pw}")
-                });
-            }
-        }
+        // `hash=` names the algorithm of a hashed password; it's folded into the
+        // stored credential in build() *after* the whole token pass, so it works
+        // regardless of whether it appears before or after `password=`.
+        "hash" => {}
         "port" => c.ports.extend(list(v).filter_map(|p| p.parse::<u16>().ok())),
         "localmax" => c.localmax = v.parse().ok(),
         "globalmax" => c.globalmax = v.parse().ok(),
@@ -146,10 +138,24 @@ fn build(s: &Server, name: &str) -> Option<ConnClass> {
         resolvehostnames: true,
         ..Default::default()
     };
-    for tok in toks {
+    // resolve the hash algorithm independently of token order (see `apply`'s `hash`)
+    let hash_algo = toks
+        .iter()
+        .find_map(|t| t.strip_prefix("hash="))
+        .map(str::to_string);
+    for tok in &toks {
         if let Some((k, v)) = tok.split_once('=') {
             apply(&mut c, k, v);
         }
+    }
+    // fold `<algo>:<digest>` into the credential verify() auto-detects, unless the
+    // password already carries its own prefix.
+    if let (Some(algo), Some(pw)) = (hash_algo, c.password.take()) {
+        c.password = Some(if pw.contains(':') {
+            pw
+        } else {
+            format!("{algo}:{pw}")
+        });
     }
     if c.allow.is_empty() {
         c.allow.push("*".to_string()); // an unqualified class matches everyone
