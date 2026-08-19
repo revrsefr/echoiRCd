@@ -15,6 +15,8 @@ use crate::Uid;
 
 const MARKER: &[u8] = b"\xab\xcd\xefMaxMind.com";
 const SEPARATOR: usize = 16;
+/// Recursion cap for the typed-value decoder (see `Mmdb::value_len`).
+const MAX_MMDB_DEPTH: u8 = 32;
 
 /// A loaded MaxMind DB, cached in `Server.ext`.
 pub struct GeoDb(pub Arc<Mmdb>);
@@ -102,7 +104,16 @@ impl<'a> Decoder<'a> {
 
     /// The number of bytes the value at `off` occupies (pointers are 2–5 bytes; not
     /// followed). Recurses into maps/arrays. Returns 0 on malformed input.
-    fn value_len(&self, off: usize) -> usize {
+    ///
+    /// `MAX_MMDB_DEPTH` caps nesting — real GeoIP records are 3–4 deep; the cap only
+    /// exists so a hostile file can't overflow the stack.
+    fn value_len(&self, off: usize, depth: u8) -> usize {
+        // Bound recursion (a crafted, deeply-nested .mmdb would otherwise overflow the
+        // stack). A valid value is never 0 bytes, so 0 doubles as a "malformed" signal
+        // callers bail on — which also stops a huge `size` from spinning with no progress.
+        if depth > MAX_MMDB_DEPTH {
+            return 0;
+        }
         let b = match self.data.get(off) {
             Some(&b) => b,
             None => return 0,
@@ -119,8 +130,12 @@ impl<'a> Decoder<'a> {
                 // map: `size` key/value pairs
                 let mut cur = payload;
                 for _ in 0..size {
-                    cur += self.value_len(cur); // key
-                    cur += self.value_len(cur); // value
+                    let k = self.value_len(cur, depth + 1); // key
+                    let v = self.value_len(cur + k, depth + 1); // value
+                    if k == 0 || v == 0 {
+                        return 0; // malformed or too deep
+                    }
+                    cur += k + v;
                 }
                 cur - off
             }
@@ -128,7 +143,11 @@ impl<'a> Decoder<'a> {
                 // array: `size` elements
                 let mut cur = payload;
                 for _ in 0..size {
-                    cur += self.value_len(cur);
+                    let v = self.value_len(cur, depth + 1);
+                    if v == 0 {
+                        return 0;
+                    }
+                    cur += v;
                 }
                 cur - off
             }
@@ -169,11 +188,19 @@ impl<'a> Decoder<'a> {
         let mut cur = payload;
         for _ in 0..size {
             let k = self.string(cur)?;
-            cur += self.value_len(cur);
+            let klen = self.value_len(cur, 0);
+            if klen == 0 {
+                return None; // malformed
+            }
+            cur += klen;
             if k == key {
                 return Some(cur);
             }
-            cur += self.value_len(cur);
+            let vlen = self.value_len(cur, 0);
+            if vlen == 0 {
+                return None;
+            }
+            cur += vlen;
         }
         None
     }
