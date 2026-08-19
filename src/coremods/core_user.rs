@@ -75,8 +75,10 @@ impl Command for Vhost {
 /// WEBIRC — a trusted web gateway declares the real client's host + IP, so users
 /// behind it don't all share the gateway's address. `WEBIRC <password> <gateway>
 /// <hostname> <ip> [:flags]`; must precede registration and the password must
-/// match a `webirc` config block. (Password-only trust for now — restricting it
-/// to the gateway's own source IP is a TODO.)
+/// match a `webirc` config block whose `ipmask` also matches the gateway's own
+/// connecting IP. A block with no `ipmask` is rejected: a shared password alone
+/// would let anyone who learns it spoof any host/IP (bypassing z-lines, DNSBL,
+/// GeoIP and cloaking).
 struct WebIrc;
 impl Command for WebIrc {
     fn name(&self) -> &'static str {
@@ -102,7 +104,7 @@ impl Command for WebIrc {
         let Some(gw) = s
             .webirc
             .iter()
-            .find(|g| g.password == *pass && (g.ipmask.is_empty() || glob_match(&g.ipmask, &from)))
+            .find(|g| g.password == *pass && !g.ipmask.is_empty() && glob_match(&g.ipmask, &from))
             .map(|g| g.name.clone())
         else {
             s.notice_star(uid, "WEBIRC: invalid credentials");
