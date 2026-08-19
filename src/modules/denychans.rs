@@ -23,6 +23,15 @@ struct BadChan {
     allowopers: bool,
 }
 
+/// Re-entrancy depth for redirect joins. `intercept` redirects by re-entering
+/// `Server::join`, which runs `intercept` again — so a redirect chain (`#a→#b→#a`)
+/// or a redirect into a broad `badchan` glob would recurse until the stack blows.
+/// A real redirect is a single hop to a safe channel; cap the chain well short of
+/// anything that could overflow.
+#[derive(Default)]
+struct RedirDepth(u32);
+const MAX_REDIR: u32 = 8;
+
 /// Split on whitespace but keep `key="quoted value"` together.
 fn tokenize(line: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -113,14 +122,21 @@ pub fn intercept(s: &mut Server, uid: Uid, name: &str, is_oper: bool) -> bool {
 
     s.numeric(uid, ERR_BADCHANNEL, &format!("{name} :{}", bc.reason));
     if let Some(redir) = &bc.redirect {
-        if !redir.eq_ignore_ascii_case(name) {
+        // Bounded redirect: re-entering join runs intercept again, so stop chaining
+        // once we've hopped MAX_REDIR times (a loop or badchan→badchan redirect).
+        let depth = s.ext.get::<RedirDepth>().map(|d| d.0).unwrap_or(0);
+        if !redir.eq_ignore_ascii_case(name) && depth < MAX_REDIR {
             let redir = redir.clone();
+            s.ext.get_or_insert_with(RedirDepth::default).0 = depth + 1;
             s.numeric(
                 uid,
                 ERR_LINKCHANNEL,
                 &format!("{name} {redir} :You have been redirected."),
             );
             s.join(uid, &redir, None);
+            if let Some(d) = s.ext.get_mut::<RedirDepth>() {
+                d.0 = d.0.saturating_sub(1);
+            }
         }
     }
     true
