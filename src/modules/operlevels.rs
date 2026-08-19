@@ -12,7 +12,7 @@ struct OperLevel(u32);
 /// Record `uid`'s oper level (called from the OPER handler after oper-up).
 pub fn set(s: &mut Server, uid: Uid, level: u32) {
     if let Some(u) = s.users.get_mut(&uid) {
-        *u.ext.get_or_insert_with(|| OperLevel(0)) = OperLevel(level);
+        u.ext.set(OperLevel(level));
     }
 }
 
