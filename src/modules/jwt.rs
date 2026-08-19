@@ -63,17 +63,48 @@ pub fn verify_hs256(token: &str, secret: &str) -> Option<String> {
     String::from_utf8(claims).ok()
 }
 
-/// Read a numeric claim (e.g. `exp`, `iat`) from raw-JSON claims text.
+/// Read a numeric claim (e.g. `exp`, `iat`) from raw-JSON claims text. Matches `key`
+/// only as a *top-level* object key (depth 1) immediately followed by `:`, so a claim
+/// whose string *value* contains `"exp":…` can't spoof what a verifier reads.
 pub fn claim_num(claims_json: &str, key: &str) -> Option<i64> {
     let needle = format!("\"{key}\"");
-    let pos = claims_json.find(&needle)?;
-    let after = &claims_json[pos + needle.len()..];
-    let colon = after.find(':')?;
-    let tail = after[colon + 1..].trim_start();
-    let end = tail
-        .find(|c: char| !c.is_ascii_digit() && c != '-')
-        .unwrap_or(tail.len());
-    tail[..end].parse().ok()
+    let bytes = claims_json.as_bytes();
+    let (mut depth, mut in_str, mut esc, mut i) = (0i32, false, false, 0usize);
+    while i < bytes.len() {
+        let b = bytes[i];
+        if in_str {
+            if esc {
+                esc = false;
+            } else if b == b'\\' {
+                esc = true;
+            } else if b == b'"' {
+                in_str = false;
+            }
+            i += 1;
+            continue;
+        }
+        match b {
+            b'{' | b'[' => depth += 1,
+            b'}' | b']' => depth -= 1,
+            b'"' => {
+                // a real top-level key is `"key"` at depth 1 followed by `:`
+                if depth == 1 && claims_json[i..].starts_with(&needle) {
+                    let rest = claims_json[i + needle.len()..].trim_start();
+                    if let Some(tail) = rest.strip_prefix(':') {
+                        let tail = tail.trim_start();
+                        let end = tail
+                            .find(|c: char| !c.is_ascii_digit() && c != '-')
+                            .unwrap_or(tail.len());
+                        return tail[..end].parse().ok();
+                    }
+                }
+                in_str = true;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
 }
 
 #[cfg(test)]
@@ -105,5 +136,9 @@ mod tests {
         assert_eq!(claim_num(c, "exp"), Some(1730000000));
         assert_eq!(claim_num(c, "iat"), Some(1729998200));
         assert_eq!(claim_num(c, "nope"), None);
+        // a nested object's key must not be read as the top-level claim
+        assert_eq!(claim_num(r#"{"data":{"exp":999},"exp":42}"#, "exp"), Some(42));
+        // a string value containing `"exp":` must not spoof it
+        assert_eq!(claim_num("{\"note\":\"\\\"exp\\\":13\",\"exp\":7}", "exp"), Some(7));
     }
 }
