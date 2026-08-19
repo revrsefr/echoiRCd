@@ -11,8 +11,10 @@ use std::io::Write;
 use crate::server::Server;
 
 thread_local! {
-    /// (configured path, open append handle) cached for reuse.
-    static SINK: RefCell<Option<(String, File)>> = const { RefCell::new(None) };
+    /// (configured path, open append handle or `None` if opening it failed) cached
+    /// for reuse. Caching the failure stops us re-issuing an `open` syscall — and a
+    /// silent drop — on every single notice when the path is misconfigured.
+    static SINK: RefCell<Option<(String, Option<File>)>> = const { RefCell::new(None) };
 }
 
 /// Append `msg` as a JSON line to the configured log file. Called at the tail of
@@ -30,16 +32,19 @@ pub fn tee(s: &Server, msg: &str) {
             None => true,
         };
         if need_open {
-            *slot = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-                .ok()
-                .map(|f| (path.to_string(), f));
+            match OpenOptions::new().create(true).append(true).open(path) {
+                Ok(f) => *slot = Some((path.to_string(), Some(f))),
+                Err(e) => {
+                    // surface once (this branch only runs when the path changes),
+                    // then remember the failure so we don't retry every notice
+                    eprintln!("echoircd: log_json cannot open {path}: {e}");
+                    *slot = Some((path.to_string(), None));
+                }
+            }
         }
-        if let Some((_, f)) = slot.as_mut() {
+        if let Some((_, Some(f))) = slot.as_mut() {
             if writeln!(f, "{line}").is_err() {
-                *slot = None; // reopen next time
+                *slot = None; // reopen next time (e.g. after a logrotate rename)
             }
         }
     });
