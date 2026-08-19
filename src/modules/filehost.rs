@@ -129,7 +129,10 @@ impl Module for FileHost {
             let rest = &text[pos..];
             let end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
             let url = rest[..end].trim_end_matches([',', '.', ';', ':', '!', '?', ')', ']', '}']);
-            let filename = &url[files_prefix.len().min(url.len())..];
+            let raw_name = &url[files_prefix.len().min(url.len())..];
+            // display only the final path segment, so a `../` or nested path in the URL
+            // can't mislead a client that renders the filename tag
+            let filename = raw_name.rsplit(['/', '\\']).next().unwrap_or(raw_name);
             let meta = format!(
                 "{{\"url\":\"{}\",\"filename\":\"{}\",\"type\":\"{}\"}}",
                 json_esc(url),
