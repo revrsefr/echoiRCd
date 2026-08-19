@@ -203,13 +203,21 @@ impl Command for Register {
             urlencode(&ip),
             port
         );
-        s.spawn_http(
+        if !s.spawn_http(
             uid,
             format!("acctreg:register:{account}"),
             url,
             body,
             apikey_headers(s),
-        );
+        ) {
+            s.fail(
+                uid,
+                "REGISTER",
+                "TEMPORARILY_UNAVAILABLE",
+                "The server is busy; please try again in a moment.",
+            );
+            return CmdResult::Fail;
+        }
         CmdResult::Ok
     }
 }
@@ -252,13 +260,21 @@ impl Command for Verify {
             urlencode(&account),
             urlencode(&params[1])
         );
-        s.spawn_http(
+        if !s.spawn_http(
             uid,
             format!("acctreg:verify:{account}"),
             url,
             body,
             apikey_headers(s),
-        );
+        ) {
+            s.fail(
+                uid,
+                "VERIFY",
+                "TEMPORARILY_UNAVAILABLE",
+                "The server is busy; please try again in a moment.",
+            );
+            return CmdResult::Fail;
+        }
         CmdResult::Ok
     }
 }

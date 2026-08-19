@@ -462,6 +462,10 @@ impl Server {
     /// the core as `Event::HttpResult { uid, tag, .. }` — the same self-injection
     /// pattern as the DNS resolver, so a slow endpoint never blocks the main loop.
     /// `tag` is `"<module>:<detail>"`; the core routes the reply by its prefix.
+    /// Returns `false` when at capacity (`http_max_concurrent`, default 32) so the
+    /// caller can reject instead of spawning an unbounded number of threads — a
+    /// pre-auth flood (e.g. VERIFY) would otherwise exhaust threads and hammer the
+    /// backend. A `Drop` guard keeps the counter correct even if the task panics.
     pub fn spawn_http(
         &self,
         uid: Uid,
@@ -469,10 +473,24 @@ impl Server {
         url: String,
         body: String,
         headers: Vec<(String, String)>,
-    ) {
+    ) -> bool {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static ACTIVE: AtomicUsize = AtomicUsize::new(0);
+        struct Guard;
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                ACTIVE.fetch_sub(1, Ordering::Relaxed);
+            }
+        }
+        let max = self.conf_num("http_max_concurrent", 32usize);
+        if ACTIVE.fetch_add(1, Ordering::Relaxed) >= max {
+            ACTIVE.fetch_sub(1, Ordering::Relaxed);
+            return false;
+        }
         let tx = self.event_tx.clone();
         let verify = self.conf_bool("http_tls_verify", true);
         std::thread::spawn(move || {
+            let _guard = Guard; // decrements even on panic
             let (status, body) = crate::http::post(
                 &url,
                 "application/x-www-form-urlencoded",
@@ -489,6 +507,7 @@ impl Server {
                 body,
             });
         });
+        true
     }
 
     /// Run an expensive credential operation (a KDF: bcrypt / pbkdf2) on a worker
