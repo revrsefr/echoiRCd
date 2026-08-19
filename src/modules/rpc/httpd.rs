@@ -79,6 +79,27 @@ fn handle(
             if let Some(pos) = find_headers_end(&buf) {
                 head_end = Some(pos);
                 framing = framing_of(&buf[..pos]);
+                // Authenticate on the header block alone, before buffering any body,
+                // so an unauthenticated peer can't stream up to MAX_REQUEST at us.
+                let header_text = String::from_utf8_lossy(&buf[..pos]).into_owned();
+                let first = header_text.lines().next().unwrap_or("");
+                if !first
+                    .split_whitespace()
+                    .next()
+                    .is_some_and(|m| m.eq_ignore_ascii_case("POST"))
+                {
+                    return respond(&mut stream, 405, "Method Not Allowed", "{}");
+                }
+                let authz = header_line(&header_text, "authorization");
+                if !auth_ok(authz.as_deref(), user, token) {
+                    return respond_with(
+                        &mut stream,
+                        401,
+                        "Unauthorized",
+                        "{\"error\":\"authentication required\"}",
+                        Some("WWW-Authenticate: Basic realm=\"echoircd-rpc\""),
+                    );
+                }
             }
         }
         if let Some(he) = head_end {
@@ -104,7 +125,7 @@ fn handle(
     let Some(he) = head_end else {
         return respond(&mut stream, 400, "Bad Request", "{}");
     };
-    let header_text = String::from_utf8_lossy(&buf[..he]).into_owned();
+    // method + auth were already validated on the header block above; extract body
     let raw_body = &buf[(he + 4).min(buf.len())..];
     let body = match framing {
         Framing::Length(n) => {
@@ -112,28 +133,6 @@ fn handle(
         }
         Framing::Chunked => crate::http::dechunk(&String::from_utf8_lossy(raw_body)),
     };
-
-    // request line: only POST is accepted
-    let first = header_text.lines().next().unwrap_or("");
-    if !first
-        .split_whitespace()
-        .next()
-        .is_some_and(|m| m.eq_ignore_ascii_case("POST"))
-    {
-        return respond(&mut stream, 405, "Method Not Allowed", "{}");
-    }
-
-    // authenticate
-    let authz = header_line(&header_text, "authorization");
-    if !auth_ok(authz.as_deref(), user, token) {
-        return respond_with(
-            &mut stream,
-            401,
-            "Unauthorized",
-            "{\"error\":\"authentication required\"}",
-            Some("WWW-Authenticate: Basic realm=\"echoircd-rpc\""),
-        );
-    }
 
     // parse the JSON-RPC request
     let method = super::json::get_str(&body, "method");
