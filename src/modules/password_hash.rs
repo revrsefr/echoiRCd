@@ -94,6 +94,9 @@ pub fn verify(stored: &str, plaintext: &str) -> bool {
                 if !(1..=MAX_PBKDF2_ITERS).contains(&iters) {
                     return false; // absurd/zero work factor — refuse, don't compute
                 }
+                if want.is_empty() || salt.is_empty() {
+                    return false; // an empty hash/salt would make ct_eq(&[],&[]) accept any password
+                }
                 if let Some(got) = pbkdf2(plaintext, &salt, iters, want.len()) {
                     return ct_eq(&got, &want);
                 }
