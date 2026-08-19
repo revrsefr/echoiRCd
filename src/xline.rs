@@ -259,7 +259,7 @@ impl Server {
             mask: mask.to_string(),
             reason: reason.to_string(),
             setter: setter.to_string(),
-            expires: if duration == 0 { 0 } else { n + duration },
+            expires: if duration == 0 { 0 } else { n.saturating_add(duration) },
         });
         self.snotice_c('x', &format!(
             "{setter} added a {}-line on {mask}: {reason}",

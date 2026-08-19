@@ -1361,7 +1361,12 @@ impl Server {
         let Some(kind) = crate::xline::XKind::from_tag(&msg.params[0]) else {
             return;
         };
-        let duration: u64 = msg.params[4].parse().unwrap_or(0);
+        // A malformed duration must not be silently coerced to 0 (= permanent);
+        // a legitimate peer always sends a decimal integer (0 explicitly means
+        // permanent). Reject garbage rather than installing an accidental perma-ban.
+        let Ok(duration) = msg.params[4].parse::<u64>() else {
+            return;
+        };
         self.add_xline(kind, &msg.params[1], duration, &msg.params[2], &msg.params[5]);
         self.propagate(&msg.to_wire(), Some(via));
     }
