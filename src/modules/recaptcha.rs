@@ -60,7 +60,9 @@ fn port_whitelisted(s: &Server, uid: Uid) -> bool {
 fn make_token(s: &Server, uid: Uid) -> Option<String> {
     let secret = s.conf("recaptcha_secret")?;
     let issuer = s.conf("recaptcha_issuer").unwrap_or("echoIRCd");
-    let ttl = s.conf_num("recaptcha_ttl", 1800i64);
+    // clamp to a sane positive window: a negative/absurd ttl would put exp in the
+    // past (instant self-DoS) or far future
+    let ttl = s.conf_num("recaptcha_ttl", 1800i64).clamp(60, 86400);
     let ip = s.users.get(&uid)?.addr.ip().to_string();
     let n = now() as i64;
     let claims = format!(
