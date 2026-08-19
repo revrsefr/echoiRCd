@@ -219,7 +219,11 @@ impl TlsBackend for RustlsBackend {
     }
 
     fn start(&self, sock: MioStream) -> io::Result<Box<dyn TlsSession>> {
-        let conn = ServerConnection::new(self.cfg()).map_err(err)?;
+        let mut conn = ServerConnection::new(self.cfg()).map_err(err)?;
+        // bound the buffered plaintext so a slow-reading client makes writer().write()
+        // return short (backpressure) instead of growing without limit; the reactor's
+        // sendq caps then govern it, matching the openssl backend.
+        conn.set_buffer_limit(Some(256 * 1024));
         Ok(Box::new(RustlsSession { conn, sock }))
     }
 }
@@ -306,6 +310,14 @@ impl TlsSession for RustlsSession {
         let n = self.conn.writer().write(buf)?;
         self.pump_write()?;
         Ok(n)
+    }
+    fn wants_write(&self) -> bool {
+        // rustls holds encrypted bytes when the socket filled mid-flush; the reactor
+        // must keep WRITABLE interest and drain them, or a burst strands here.
+        self.conn.wants_write()
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.pump_write()
     }
     fn source(&mut self) -> &mut MioStream {
         &mut self.sock

@@ -55,6 +55,17 @@ pub trait TlsSession: Send {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize>;
     /// Encrypt+queue application data; returns the plaintext bytes accepted.
     fn write(&mut self, buf: &[u8]) -> io::Result<usize>;
+    /// Whether the session still holds outbound TLS bytes not yet pushed to the
+    /// socket. rustls buffers ciphertext internally when the socket is full;
+    /// openssl surfaces backpressure through `write`, so it never buffers.
+    fn wants_write(&self) -> bool {
+        false
+    }
+    /// Push any buffered outbound TLS bytes to the socket. `WouldBlock` leaves the
+    /// remainder for the next writable event; a no-op when nothing is buffered.
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
     /// The underlying mio socket, for the reactor's poll (re)registration.
     fn source(&mut self) -> &mut MioStream;
     /// SHA-256 fingerprint of the peer certificate (CertFP / SASL EXTERNAL), if any.

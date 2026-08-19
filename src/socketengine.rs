@@ -204,6 +204,21 @@ impl Sock {
             Sock::Tls(t) => t.write(buf),
         }
     }
+    /// Whether a TLS session still has outbound bytes buffered internally (rustls
+    /// after a WouldBlock); a plaintext socket never buffers in-process.
+    fn wants_write(&self) -> bool {
+        match self {
+            Sock::Plain(_) => false,
+            Sock::Tls(t) => t.wants_write(),
+        }
+    }
+    /// Push a TLS session's buffered ciphertext to the socket; no-op for plaintext.
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Sock::Plain(_) => Ok(()),
+            Sock::Tls(t) => t.flush(),
+        }
+    }
     /// Best-effort graceful close. TLS sends a close_notify alert; plaintext relies on
     /// the socket's own FIN when the stream drops.
     fn shutdown(&mut self) {
@@ -245,8 +260,9 @@ impl Conn {
 fn set_interest(poll: &mut Poll, c: &mut Conn, t: usize) {
     let want_read = !c.paused;
     // a TLS handshake may need to write (its flight) as well as read, so keep both
-    // until it completes; after that, write only when there's a backlog to drain.
-    let want_write = c.handshaking || !c.wbuf.is_empty() || c.paused;
+    // until it completes; after that, write when there's a backlog to drain — either
+    // our own queued plaintext, or ciphertext still buffered inside a TLS session.
+    let want_write = c.handshaking || !c.wbuf.is_empty() || c.paused || c.sock.wants_write();
     if want_read == c.want_read && want_write == c.want_write {
         return;
     }
@@ -979,12 +995,20 @@ fn flush_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core:
             c.wbuf.clear();
             c.wpos = 0;
         }
+        // push any ciphertext a TLS session still holds buffered (rustls keeps it when
+        // the socket filled mid-write); our plaintext queue draining doesn't mean the
+        // socket has it all. WouldBlock leaves the rest for the next writable event.
+        match c.sock.flush() {
+            Ok(()) => {}
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {}
+            Err(_) => close = true,
+        }
         if c.paused && c.pending() <= c.softsendq {
             c.paused = false;
             unpaused = true;
         }
         set_interest(poll, c, t);
-        if c.closing && c.wbuf.is_empty() {
+        if c.closing && c.wbuf.is_empty() && !c.sock.wants_write() {
             close = true;
         }
     }
