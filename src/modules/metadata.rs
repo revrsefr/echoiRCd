@@ -37,6 +37,30 @@ impl Module for Metadata {
             st.0.remove(&format!("u{uid}"));
         }
     }
+    fn on_tick(&mut self, s: &mut Server) {
+        // Free channel metadata (`#name` keys) once the channel is gone — user
+        // entries are pruned on quit, and +P channels stay in s.channels so keep
+        // theirs. Without this, metadata on a channel that empties leaks forever
+        // (and is re-persisted to disk).
+        let orphans: Vec<String> = match s.ext.get::<MetaStore>() {
+            Some(st) => st
+                .0
+                .keys()
+                .filter(|k| k.starts_with('#') && !s.channels.contains_key(k.as_str()))
+                .cloned()
+                .collect(),
+            None => return,
+        };
+        if orphans.is_empty() {
+            return;
+        }
+        if let Some(st) = s.ext.get_mut::<MetaStore>() {
+            for k in &orphans {
+                st.0.remove(k);
+            }
+        }
+        save(s);
+    }
 }
 
 pub fn commands() -> Vec<Box<dyn Command>> {
