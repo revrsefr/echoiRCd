@@ -872,8 +872,11 @@ impl Server {
 
     /// `:<uuid> OPERTYPE :<type>` — a remote user opered up; reflect it on their modes
     /// so the network's view of who is an operator stays consistent.
-    fn link_opertype_recv(&mut self, _from: Uid, msg: &Message) {
+    fn link_opertype_recv(&mut self, via: Uid, msg: &Message) {
         if let Some(src) = msg.source.as_deref() {
+            if !self.sourced_via(src, via) {
+                return; // a peer can't flag a user behind another link as oper
+            }
             if let Some(ru) = self.remote_users.get_mut(src) {
                 if !ru.modes.contains('o') {
                     ru.modes.push('o');
@@ -892,6 +895,9 @@ impl Server {
         let Some(src) = msg.source.clone() else {
             return;
         };
+        if !self.source_behind(&src, via) {
+            return; // reject a forged message-deletion from behind another link
+        }
         let (target, msgid) = (msg.params[0].clone(), msg.params[1].clone());
         if !target.starts_with('#') {
             return;
@@ -1072,6 +1078,11 @@ impl Server {
             return;
         }
         let sid = msg.source.clone().unwrap_or_default();
+        // the announcing server must actually sit behind the link this UID arrived on,
+        // else a peer could introduce phantom users under another server's SID
+        if !self.source_behind(&sid, via) {
+            return;
+        }
         let uuid = msg.params[0].clone();
         // reject a malformed or duplicate UID instead of corrupting the routing
         // tables: the uuid is 9 chars carrying the announcing server's 3-char SID,
@@ -1732,6 +1743,9 @@ impl Server {
             return;
         };
         let reason = msg.params.get(2).cloned().unwrap_or_default();
+        if !self.source_behind(&source, via) {
+            return; // reject a channel rename forged from behind another link
+        }
         let oldkey = old.to_ascii_lowercase();
         if !self.channels.contains_key(&oldkey) {
             return;
@@ -2069,6 +2083,9 @@ impl Server {
         let Some(src) = msg.source.clone() else {
             return;
         };
+        if !self.source_behind(&src, via) {
+            return; // a peer can't set a topic sourced from behind another link
+        }
         if msg.params.len() < 4 {
             return;
         }
