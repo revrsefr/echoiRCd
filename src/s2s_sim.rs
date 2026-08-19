@@ -92,6 +92,7 @@ impl Node {
                 caps: Caps::default(),
                 sasl_mech: None,
                 channels: HashSet::default(),
+                invited: HashSet::default(),
                 watch: Vec::new(),
                 monitor: Vec::new(),
                 silence: Vec::new(),

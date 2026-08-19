@@ -1344,6 +1344,9 @@ impl Server {
             if let Some(ch) = self.channels.get_mut(&key) {
                 ch.invites.insert(luid);
             }
+            if let Some(u) = self.users.get_mut(&luid) {
+                u.invited.insert(key.clone()); // reverse index for O(1) quit scrub
+            }
             let prefix = self.uuid_prefix(&src).unwrap_or_else(|| src.clone());
             let nick = self.users.get(&luid).map(|u| u.nick.clone()).unwrap_or_default();
             self.send(luid, format!(":{prefix} INVITE {nick} :{chan}"));
@@ -2768,6 +2771,7 @@ mod tests {
                 caps: Caps::default(),
                 sasl_mech: None,
                 channels: HashSet::default(),
+                invited: HashSet::default(),
                 watch: Vec::new(),
                 monitor: Vec::new(),
                 silence: Vec::new(),
@@ -2855,6 +2859,7 @@ mod tests {
                 caps,
                 sasl_mech: None,
                 channels: HashSet::default(),
+                invited: HashSet::default(),
                 watch: Vec::new(),
                 monitor: Vec::new(),
                 silence: Vec::new(),

@@ -907,6 +907,7 @@ impl Server {
         ch.recent_kicks.remove(&uid); // they got back in; clear any +J rejoin timer
         if let Some(u) = self.users.get_mut(&uid) {
             u.channels.insert(key.clone());
+            u.invited.remove(&key); // invite consumed — drop it from the reverse index
         }
         // chancreate: snotice when a brand-new channel comes into being
         if is_new

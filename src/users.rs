@@ -248,6 +248,7 @@ pub struct User {
     pub caps: Caps,            // enabled IRCv3 capabilities
     pub sasl_mech: Option<String>, // SASL mechanism chosen, mid-handshake
     pub channels: HashSet<String>, // lowercased channel keys
+    pub invited: HashSet<String>,  // channels this user has a pending +i invite to (reverse index)
     pub watch: Vec<String>,    // WATCH list — lowercased nicks
     pub monitor: Vec<String>,  // MONITOR list — lowercased nicks
     pub silence: Vec<String>,  // SILENCE masks — nick!user@host globs

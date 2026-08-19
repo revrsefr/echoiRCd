@@ -392,6 +392,7 @@ mod tests {
                 caps: Caps::default(),
                 sasl_mech: None,
                 channels: chans,
+                invited: crate::map::HashSet::default(),
                 watch: Vec::new(),
                 monitor: Vec::new(),
                 silence: Vec::new(),

@@ -373,6 +373,7 @@ impl Server {
                 caps: Caps::default(),
                 sasl_mech: None,
                 channels: HashSet::default(),
+                invited: HashSet::default(),
                 watch: Vec::new(),
                 monitor: Vec::new(),
                 silence: Vec::new(),
@@ -724,8 +725,12 @@ impl Server {
             // Scrub any pending +i invite for this user from channels they never joined
             // (a member consumes their invite on join; a never-joined invite for a now-
             // departed uid would otherwise linger forever on a persistent channel).
-            for ch in self.channels.values_mut() {
-                ch.invites.remove(&uid);
+            // The `invited` reverse index gives the exact channels, so this is O(pending
+            // invites) rather than a scan of every channel on the network.
+            for key in &user.invited {
+                if let Some(ch) = self.channels.get_mut(key) {
+                    ch.invites.remove(&uid);
+                }
             }
             self.channels.retain(|_, c| c.keep_alive());
             self.watch_notify_offline(&user.nick); // tell WATCH/MONITOR watchers
@@ -1424,6 +1429,7 @@ mod tests {
                 caps: Caps::default(),
                 sasl_mech: None,
                 channels: HashSet::default(),
+                invited: HashSet::default(),
                 watch: Vec::new(),
                 monitor: Vec::new(),
                 silence: Vec::new(),

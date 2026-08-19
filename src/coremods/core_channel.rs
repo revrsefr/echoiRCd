@@ -323,6 +323,9 @@ impl Command for Invite {
         if let Some(ch) = s.channels.get_mut(&key) {
             ch.invites.insert(tuid);
         }
+        if let Some(u) = s.users.get_mut(&tuid) {
+            u.invited.insert(key.clone()); // reverse index for O(1) quit scrub
+        }
         let who = s.users[&tuid].nick.clone();
         s.numeric(uid, RPL_INVITING, &format!("{who} {chan}"));
         let prefix = s.users[&uid].prefix();
@@ -390,6 +393,9 @@ impl Command for Uninvite {
             .get_mut(&key)
             .map(|ch| ch.invites.remove(&tuid))
             .unwrap_or(false);
+        if let Some(u) = s.users.get_mut(&tuid) {
+            u.invited.remove(&key); // keep the reverse index in sync
+        }
         let who = s.users[&tuid].nick.clone();
         let word = if removed {
             "is no longer invited to"
