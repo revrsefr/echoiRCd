@@ -162,6 +162,10 @@ pub struct Server {
     /// settings via [`Server::conf`] / [`conf_all`] / [`conf_bool`] / [`conf_num`]
     /// — no per-module field lives on this struct (module-per-file rule).
     pub raw_config: HashMap<String, Vec<String>>,
+    /// Bumped on every rehash. Modules that parse config into a hot-path structure
+    /// cache it in `ext` tagged with this value and re-parse only when it changes,
+    /// so a REHASH can never leave a stale cache (see e.g. `modules::disable`).
+    pub config_gen: u64,
     // labeled-response: while Some((uid, buf)), that client's own responses are
     // diverted into `buf` instead of the socket, so `on_line` can wrap them with
     // the command's `label` (single tag, BATCH, or ACK). RefCell because the
@@ -217,6 +221,7 @@ impl Server {
             sasl_server: cfg.sasl_server,
             webirc: cfg.webirc,
             raw_config: cfg.raw,
+            config_gen: 0,
             label_capture: RefCell::new(None),
             log: RefCell::new(LogState::default()),
             event_tx,
@@ -272,6 +277,7 @@ impl Server {
         self.sasl_server = fresh.sasl_server;
         self.webirc = fresh.webirc;
         self.raw_config = fresh.raw;
+        self.config_gen = self.config_gen.wrapping_add(1); // invalidate module config caches
         // Re-evaluate which linked servers are services against the fresh
         // `uline`/`sasl_server` config (re-evaluated on every rehash).
         let names: Vec<(String, String)> = self
