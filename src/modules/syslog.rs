@@ -103,10 +103,15 @@ pub fn tee(s: &Server, msg: &str) {
         if let Some((_, sink)) = slot.as_ref() {
             let ok = match sink {
                 Sink::Unix(sock) => sock.send(line.as_bytes()).is_ok(),
-                Sink::Udp(sock, dst) => sock.send_to(line.as_bytes(), dst).is_ok(),
+                Sink::Udp(sock, dst) => {
+                    // UDP is fire-and-forget: a transient send error shouldn't force a
+                    // re-bind + re-resolve on the very next notice. Keep the socket.
+                    let _ = sock.send_to(line.as_bytes(), dst);
+                    true
+                }
             };
             if !ok {
-                *slot = None; // transient failure: drop so we reopen next time
+                *slot = None; // (Unix datagram socket only) reopen next time
             }
         }
     });
