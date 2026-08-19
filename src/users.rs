@@ -404,6 +404,13 @@ impl Server {
                     }
                 }
             }
+            // carry the accepted-nick reverse count across the rename (the number of
+            // acceptors doesn't change when the accepted user renames), so the
+            // count-gated quit scrub stays correct — otherwise a reused old nick could
+            // inherit acceptance and bypass +g, and the old-nick count would leak.
+            if let Some(c) = self.accepted_nicks.remove(&oldlow) {
+                *self.accepted_nicks.entry(newlow.clone()).or_insert(0) += c;
+            }
         }
         if registered {
             let line = format!(":{prefix} NICK :{newnick}");
