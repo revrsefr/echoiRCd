@@ -30,13 +30,19 @@ pub enum Outcome {
     Hit { zone: String, reply: Ipv4Addr },
 }
 
+/// Most blocklist zones consulted per connecting client (latency bound).
+const MAX_ZONES: usize = 16;
+
 /// Check `ip` against every blocklist `zone`; the first listing wins. Runs off the
 /// core thread (called from the resolver worker), so it may block on DNS.
 pub fn check(ip: IpAddr, zones: &[String], timeout: Duration) -> Outcome {
     if zones.is_empty() {
         return Outcome::Skipped;
     }
-    for zone in zones {
+    // Each zone is a serial blocking lookup, so total latency is bounded by the
+    // number checked × timeout; cap it so a long (mis)configured zone list can't
+    // stall a client's registration for a very long time.
+    for zone in zones.iter().take(MAX_ZONES) {
         let z = zone.trim().trim_end_matches('.');
         let qname = format!("{}.{z}", resolver::reverse_labels(ip));
         if let Some(reply) = resolver::a_lookup(&qname, timeout) {
