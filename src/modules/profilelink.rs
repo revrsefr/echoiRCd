@@ -9,7 +9,7 @@ pub fn line(s: &Server, account: &Option<String>) -> Option<String> {
         return None;
     }
     Some(match account {
-        Some(acct) => format!("Profil: {base}{acct}"),
+        Some(acct) => format!("Profile: {base}{acct}"),
         None => "Profile: The user is not logged in or the account is not registered.".to_string(),
     })
 }

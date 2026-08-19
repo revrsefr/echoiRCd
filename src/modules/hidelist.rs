@@ -23,13 +23,18 @@ pub fn denied(s: &Server, uid: Uid, key: &str, modechar: char) -> bool {
     if s.is_oper(uid) {
         return false;
     }
+    // last matching line wins, mirroring conf()'s last-value-overrides semantics
+    let mut req: Option<u8> = None;
     for line in s.conf_all("hidelist") {
         let mut it = line.split_whitespace();
         if let (Some(mc), Some(rank)) = (it.next(), it.next()) {
             if mc.chars().next() == Some(modechar) {
-                return s.rank(uid, key) < rank_value(rank);
+                req = Some(rank_value(rank));
             }
         }
     }
-    false
+    match req {
+        Some(r) => s.rank(uid, key) < r,
+        None => false,
+    }
 }
