@@ -1453,20 +1453,11 @@ impl Server {
             if !self.channels.contains_key(&key) {
                 return;
             }
+            // echo/services badges a service source for message-tags clients; the
+            // line is built once and shared by Arc across all members (not cloned
+            // per recipient).
             let base = format!(":{prefix} {cmd} {target} :{text}");
-            // echo/services: tag messages from a network service so capable
-            // clients can badge them. Per-recipient (needs the message-tags cap).
-            let is_service = src_is_service;
-            let tagged = format!("@echo/services {base}");
-            let members: Vec<Uid> = self.channels[&key].members.keys().copied().collect();
-            for m in members {
-                if self.users.get(&m).map(|u| u.flags.deaf).unwrap_or(false) {
-                    continue;
-                }
-                let want_tag = is_service
-                    && self.users.get(&m).map(|u| u.caps.message_tags).unwrap_or(false);
-                self.send(m, if want_tag { tagged.clone() } else { base.clone() });
-            }
+            self.relay_channel_message(&key, &base, src_is_service);
             // forward to the other links that have members in this channel
             for l in self.channel_link_targets(&key, Some(via)) {
                 self.link_out(l, format!(":{src} {cmd} {target} :{text}"));

@@ -1018,6 +1018,44 @@ impl Server {
         }
     }
 
+    /// Fan an already-composed S2S channel message (`:prefix PRIVMSG #c :text`) out
+    /// to local members, sharing the line by `Arc` instead of cloning a String per
+    /// recipient. When `service`, message-tags clients get the `echo/services` badge;
+    /// server-time and +D deaf filtering are applied per recipient. At most three
+    /// distinct lines are built (plain / time-tagged / service-tagged) whatever the
+    /// channel size.
+    pub fn relay_channel_message(&self, key: &str, base: &str, service: bool) {
+        let Some(ch) = self.channels.get(key) else {
+            return;
+        };
+        let sourced = base.starts_with(':'); // only `:prefix …` lines carry server-time
+        let plain: std::sync::Arc<str> = std::sync::Arc::from(base);
+        let tagged: Option<std::sync::Arc<str>> =
+            service.then(|| std::sync::Arc::from(format!("@echo/services {base}").as_str()));
+        let mut plain_time: Option<std::sync::Arc<str>> = None;
+        for &m in ch.members.keys() {
+            let Some(u) = self.users.get(&m) else {
+                continue;
+            };
+            if u.flags.deaf {
+                continue;
+            }
+            // a service-badged line already carries a tag block, so — as before — it
+            // isn't additionally server-time tagged.
+            let buf = if service && u.caps.message_tags {
+                LineBuf::Shared(tagged.clone().unwrap())
+            } else if sourced && u.caps.server_time {
+                let t = plain_time.get_or_insert_with(|| {
+                    std::sync::Arc::from(format!("@time={} {base}", iso_time(now())).as_str())
+                });
+                LineBuf::Shared(t.clone())
+            } else {
+                LineBuf::Shared(plain.clone())
+            };
+            self.emit_to(m, buf);
+        }
+    }
+
     /// Send a message body (`:prefix CMD …`) from `src` to `uid`, composing its
     /// IRCv3 tag prefix from *that recipient's* caps: `time=` (server-time),
     /// `account=` (account-tag, from the sender's login) plus the client-only tags
