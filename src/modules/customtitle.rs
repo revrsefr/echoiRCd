@@ -98,6 +98,7 @@ impl Command for TitleCmd {
             });
             if !started {
                 deny(s, uid);
+                return CmdResult::Fail; // crypto pool full — consistent with the sync path
             }
             return CmdResult::Ok;
         }
