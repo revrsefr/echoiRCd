@@ -10,9 +10,11 @@ use crate::channels::glob_match;
 use crate::server::Server;
 use crate::Uid;
 
-/// A plain host-mask ban entry (not itself an extban).
+/// A plain host-mask ban entry (not itself an extban). An extban is `<letter>:…`,
+/// matching `normalize_ban_mask`'s rule — anything else is a plain host-mask.
 fn is_plain(mask: &str) -> bool {
-    mask.as_bytes().get(1) != Some(&b':')
+    let b = mask.as_bytes();
+    !(b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':')
 }
 
 /// True if `uid` is on `chan`'s (plain) ban list with no matching plain exception.
