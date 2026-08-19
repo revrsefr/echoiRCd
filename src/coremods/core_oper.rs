@@ -254,10 +254,12 @@ impl Command for Kill {
 }
 
 /// SVSLOGIN / SVSLOGOUT — the services interface to the account layer
-/// ([`crate::accounts`]). Over S2S these arrive from a services pseudoserver;
-/// until S2S exists an oper may invoke them to drive `+r` and the account-gated
-/// channel modes. `SVSLOGIN <nick> <account>` logs a user in (`account` of `*`/`0`
-/// logs out); `SVSLOGOUT <nick>` logs them out.
+/// ([`crate::accounts`]). The live path is S2S: a U-lined services server sources
+/// them (see `link_svslogin`, gated by `source_is_service`). The client-facing
+/// oper form is an emergency stopgap for a network with no services linked — it can
+/// forge any account login, so it is OFF unless `oper_svslogin = yes`.
+/// `SVSLOGIN <nick> <account>` logs a user in (`account` of `*`/`0` logs out);
+/// `SVSLOGOUT <nick>` logs them out.
 struct SvsLogin;
 impl Command for SvsLogin {
     fn name(&self) -> &'static str {
@@ -272,6 +274,16 @@ impl Command for SvsLogin {
                 uid,
                 ERR_NOPRIVILEGES,
                 ":Permission Denied- SVSLOGIN is a services command",
+            );
+            return CmdResult::Fail;
+        }
+        // The account layer is driven by services over S2S; the oper form can forge
+        // any login, so it's an opt-in emergency stopgap (default off).
+        if !s.conf_bool("oper_svslogin", false) {
+            s.numeric(
+                uid,
+                ERR_NOPRIVILEGES,
+                ":Permission Denied- account login is handled by services (set oper_svslogin to override)",
             );
             return CmdResult::Fail;
         }
@@ -307,6 +319,14 @@ impl Command for SvsLogout {
                 uid,
                 ERR_NOPRIVILEGES,
                 ":Permission Denied- SVSLOGOUT is a services command",
+            );
+            return CmdResult::Fail;
+        }
+        if !s.conf_bool("oper_svslogin", false) {
+            s.numeric(
+                uid,
+                ERR_NOPRIVILEGES,
+                ":Permission Denied- account login is handled by services (set oper_svslogin to override)",
             );
             return CmdResult::Fail;
         }
