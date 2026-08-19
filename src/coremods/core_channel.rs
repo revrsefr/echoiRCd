@@ -309,6 +309,17 @@ impl Command for Invite {
             );
             return CmdResult::Fail;
         }
+        // cap the per-channel invite set — it only grows until the invitee joins, so
+        // without a bound an op could grow it indefinitely (like maxbans caps +b).
+        let maxinv = s.conf_num("maxinvites", 100usize);
+        if s.channels[&key].invites.len() >= maxinv && !s.channels[&key].invites.contains(&tuid) {
+            let nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
+            s.send(
+                uid,
+                format!(":{} NOTICE {nick} :{chan} :Channel invite list is full", s.name),
+            );
+            return CmdResult::Fail;
+        }
         if let Some(ch) = s.channels.get_mut(&key) {
             ch.invites.insert(tuid);
         }
