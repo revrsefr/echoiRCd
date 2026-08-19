@@ -49,7 +49,9 @@ fn range_of(ip: IpAddr, v4cidr: u8, v6cidr: u8) -> (String, String) {
         }
         IpAddr::V6(a) => {
             let segs = a.segments();
-            let keep = (v6cidr / 16).min(8) as usize;
+            // keep at least one hextet, so a sub-/16 config can't collapse the ban
+            // mask to "*" and z-line every IPv6 address (mirrors the v4 clamp above).
+            let keep = (v6cidr / 16).clamp(1, 8) as usize;
             if keep >= 8 {
                 (format!("v6:{}", a), a.to_string())
             } else {
@@ -169,5 +171,8 @@ mod tests {
         let ip: IpAddr = "2001:db8::1".parse().unwrap();
         assert_eq!(range_of(ip, 32, 128).1, "2001:db8::1");
         assert_eq!(range_of(ip, 32, 32).1, "2001:db8:*");
+        // a sub-/16 v6 prefix must keep at least one hextet, never collapse to "*"
+        assert_eq!(range_of(ip, 32, 8).1, "2001:*");
+        assert_ne!(range_of(ip, 32, 1).1, "*");
     }
 }
