@@ -163,8 +163,12 @@ fn build_config(
     let verifier = Arc::new(AcceptAnyClientCert {
         provider: provider.clone(),
     });
+    // Mirror the openssl backend's version policy (mozilla_intermediate = TLS 1.2)
+    // so rustls is a true drop-in: every client negotiates the same protocol it did
+    // on openssl. Offering 1.3 here pushed clients onto a 1.3 handshake openssl never
+    // served, and some couldn't complete it.
     let cfg = ServerConfig::builder_with_provider(provider.clone())
-        .with_protocol_versions(rustls::ALL_VERSIONS)
+        .with_protocol_versions(&[&rustls::version::TLS12])
         .map_err(err)?
         .with_client_cert_verifier(verifier)
         .with_cert_resolver(resolver);
