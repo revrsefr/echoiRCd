@@ -43,7 +43,12 @@ impl Command for Vhost {
         let host = s.conf_all("vhost").iter().find_map(|line| {
             let mut it = line.split_whitespace();
             match (it.next(), it.next(), it.next()) {
-                (Some(u), Some(p), Some(h)) if u == user && p == pass => Some(h.to_string()),
+                (Some(u), Some(p), Some(h))
+                    if u == user
+                        && crate::modules::password_hash::ct_eq(p.as_bytes(), pass.as_bytes()) =>
+                {
+                    Some(h.to_string())
+                }
                 _ => None,
             }
         });
@@ -104,7 +109,11 @@ impl Command for WebIrc {
         let Some(gw) = s
             .webirc
             .iter()
-            .find(|g| g.password == *pass && !g.ipmask.is_empty() && glob_match(&g.ipmask, &from))
+            .find(|g| {
+                crate::modules::password_hash::ct_eq(g.password.as_bytes(), pass.as_bytes())
+                    && !g.ipmask.is_empty()
+                    && glob_match(&g.ipmask, &from)
+            })
             .map(|g| g.name.clone())
         else {
             s.notice_star(uid, "WEBIRC: invalid credentials");

@@ -53,7 +53,8 @@ fn unhex(s: &str) -> Option<Vec<u8>> {
 
 /// Constant-time equality (guards against timing attacks on the compare).
 /// `openssl::memcmp::eq` requires equal-length inputs, so short-circuit first.
-fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+/// Shared comparator for any secret check (passwords, gateway/vhost secrets).
+pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && openssl::memcmp::eq(a, b)
 }
 
