@@ -201,10 +201,20 @@ impl Command for FileHostCmd {
             }
         };
 
-        let secret = s
-            .conf("filehost_jwt_secret")
-            .unwrap_or("changeme")
-            .to_string();
+        // Fail closed: signing upload tokens with a missing/placeholder secret
+        // would let anyone forge a server-trusted upload authorization.
+        let secret = match s.conf("filehost_jwt_secret") {
+            Some(sec) if !sec.is_empty() && sec != "changeme" => sec.to_string(),
+            _ => {
+                note(
+                    s,
+                    uid,
+                    "FILEHOST: file hosting is misconfigured (no upload secret set). \
+                     Please tell an operator.",
+                );
+                return CmdResult::Fail;
+            }
+        };
         let issuer = s
             .conf("filehost_jwt_issuer")
             .unwrap_or("FILEHOST")
