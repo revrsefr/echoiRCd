@@ -298,20 +298,14 @@ impl Command for Whois {
                 s.numeric(uid, RPL_WHOISCHANNELS, &format!("{nick} :{line}"));
             }
         }
-        // 313: is a/an <oper type> (the type's title, else plain "IRC operator");
-        // hidden by +H unless the asker is an oper.
+        // 313: is an IRC Operator (hidden by +H unless the asker is an oper). The
+        // oper type sets capabilities, not this line — a custom title (e.g. "is a
+        // Network Administrator") comes from the SWHOIS line (320) instead.
         if oper && (!hideoper || asker_oper) {
-            let title = crate::modules::opertypes::title_of(s, tuid)
-                .unwrap_or_else(|| "IRC operator".to_string());
-            let article = if title.chars().next().is_some_and(|c| "aeiouAEIOU".contains(c)) {
-                "an"
-            } else {
-                "a"
-            };
             s.numeric(
                 uid,
                 RPL_WHOISOPERATOR,
-                &format!("{nick} :is {article} {title}"),
+                &format!("{nick} :is an IRC Operator"),
             );
         }
         // 320: oper-set SWHOIS line. No redundant target-nick param — just the
