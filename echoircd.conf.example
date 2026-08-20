@@ -51,8 +51,20 @@ bind_server = 0.0.0.0:7000
 # restricts which source IP may use the password (recommended). Repeat for more.
 # webirc = CHANGE_THIS_WEBIRC_SECRET mygateway 203.0.113.9
 
-# IRC operators — oper = <name> <password>
+# IRC operators — oper = <name> <password> [level] [fp=<sha256>] [type=<id>]
 oper = admin CHANGE_THIS_PASSWORD
+
+# Oper types (optional). An oper with no type= keeps full access. A type is a
+# named role (the WHOIS "is a <title>") built from reusable capability classes;
+# five ship built-in: helpop, globop, admin, servadmin, netadmin. Override or add
+# your own — see docs/operators.md. Running a command your type doesn't grant is
+# refused; the type's modes/snomasks/vhost are set automatically on oper-up.
+#   class = <id> commands=<A,B|*> [privs=<x,y|*>] [snomasks=<letters|*>]
+#   opertype = <id> classes=<a,b|*> [commands=..] [modes=+iw] [snomasks=+cg] \
+#              [vhost=host.name] [title=Nice_Title] [level=N]
+# class    = helpdesk commands=CHECK snomasks=c
+# opertype = helpdesk classes=helpdesk modes=+ih title=Help_Desk level=15
+# oper = alice sha256:<hex> type=netadmin
 
 # host-cloaking secret (+x). Use a long random hex string; keep it private.
 # Changing it re-cloaks everyone.

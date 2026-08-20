@@ -26,6 +26,44 @@ An `oper` block may carry a trailing numeric **level** (`oper = <name> <pass>
 be `KILL`ed by a lower-level one. Levels are advisory policy layered on top of the
 `+o` flag.
 
+### Oper types
+
+An `oper` block can name a **type** with `type=<id>` — a role that decides what the
+oper may actually do, what usermodes and snomasks they get on oper-up, and how their
+`/WHOIS` reads (`is a <title>`). An oper with **no** `type` keeps full access (every
+oper command), so existing blocks are unaffected.
+
+A type is built from reusable **classes** — capability bundles:
+
+```text
+# class = <id> commands=<A,B,…|*> [privs=<x,y|*>] [snomasks=<letters|*>]
+class = ban       commands=KILL,KLINE,GLINE,ZLINE,QLINE,ELINE,RLINE,SHUN,CBAN,CHECK snomasks=kx
+class = announce  commands=WALLOPS,GLOBOPS snomasks=ag
+class = override  commands=SAJOIN,SAPART,SANICK,SAKICK,SAMODE,SATOPIC,SAQUIT,CLEARCHAN privs=override
+
+# opertype = <id> classes=<a,b|*> [commands=…] [modes=+iw] [snomasks=+cg] \
+#            [vhost=host.name] [title=Nice_Title] [level=N]
+opertype = netadmin classes=* modes=+iw snomasks=+* title=Network_Administrator level=100
+
+oper = alice sha256:<hex> type=netadmin
+```
+
+`commands`, `privs`, `snomasks`, and `classes` accept `*` for "all". A type's `modes`
+and `snomasks` are set automatically at oper-up; `vhost` (if given) replaces the host;
+`title` (underscores become spaces) is the `/WHOIS` line; `level` folds into the
+[oper level](#oper-levels). Running a command the type doesn't grant is refused.
+
+Five types ship **built-in**, so `type=<id>` works with no `class`/`opertype` config —
+override or extend any by defining one with the same id:
+
+| id | title | grants |
+|----|-------|--------|
+| `helpop` | Help Operator | +ih, oper snomask — a titled helper, no privileged commands |
+| `globop` | GlobOp | + `WALLOPS`/`GLOBOPS` + announce snomasks |
+| `admin` | Administrator | + `KILL`/x-lines/`SHUN`/`CHECK`, `SA*` override, `CHG*`/`SET*` |
+| `servadmin` | Services Administrator | + the `SVS*` services commands |
+| `netadmin` | Network Administrator | everything, plus `CONNECT`/`SQUIT`/`DIE`/`RESTART` |
+
 ## Snomasks
 
 Server-notice masks (`+s`) subscribe an oper to categories of the server's live
