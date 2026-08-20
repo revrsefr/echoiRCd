@@ -308,16 +308,11 @@ impl Command for Whois {
                 &format!("{nick} :is an IRC Operator"),
             );
         }
-        // 320: the oper type's title on its own line, e.g. "is a Network
-        // Administrator" — from the oper's type (hidden with +H like the 313 line).
+        // 320: the oper type's title on its own line (bold + its colour), e.g. "is a
+        // Network Administrator" — from the oper's type (hidden with +H like 313).
         if oper && (!hideoper || asker_oper) {
-            if let Some(title) = crate::modules::opertypes::title_of(s, tuid) {
-                let article = if title.chars().next().is_some_and(|c| "aeiouAEIOU".contains(c)) {
-                    "an"
-                } else {
-                    "a"
-                };
-                s.numeric(uid, RPL_WHOISSPECIAL, &format!(":is {article} {title}"));
+            if let Some(line) = crate::modules::opertypes::whois_line(s, tuid) {
+                s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));
             }
         }
         // 320: oper-set SWHOIS line. No redundant target-nick param — just the

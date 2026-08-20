@@ -23,6 +23,7 @@ use crate::Uid;
 /// oper; absent ⇒ a legacy oper with full access. Read by WHOIS for the title.
 pub struct OperType {
     pub title: String,
+    pub color: Option<u8>, // mIRC colour for the WHOIS title line (None = plain)
     pub all_commands: bool,
     pub commands: HashSet<String>,
     pub all_privs: bool,
@@ -71,9 +72,26 @@ impl Module for OperTypes {
     }
 }
 
-/// The WHOIS title of a typed oper, if any (read by core_info's 313).
+/// The WHOIS title of a typed oper, if any (used in the denial message).
 pub fn title_of(s: &Server, uid: Uid) -> Option<String> {
     s.users.get(&uid).and_then(|u| u.ext.get::<OperType>()).map(|t| t.title.clone())
+}
+
+/// The formatted WHOIS special line for a typed oper, if any — "is a/an <title>",
+/// bold + the type's colour (mIRC code, e.g. 4 = red) so it stands out. core_info
+/// emits it on its own 320 line.
+pub fn whois_line(s: &Server, uid: Uid) -> Option<String> {
+    let t = s.users.get(&uid).and_then(|u| u.ext.get::<OperType>())?;
+    let article = if t.title.chars().next().is_some_and(|c| "aeiouAEIOU".contains(c)) {
+        "an"
+    } else {
+        "a"
+    };
+    let body = format!("is {article} {}", t.title);
+    Some(match t.color {
+        Some(c) => format!("\x02\x03{c:02}{body}\x0f"), // bold + colour, reset after
+        None => body,
+    })
 }
 
 /// Apply the oper's type at oper-up: auto usermodes / snomasks / vhost / level, then
@@ -104,6 +122,7 @@ pub fn apply(s: &mut Server, uid: Uid, type_id: Option<&str>) {
     if let Some(u) = s.users.get_mut(&uid) {
         u.ext.set(OperType {
             title: r.title.clone(),
+            color: r.color,
             all_commands: r.all_commands,
             commands: r.commands.clone(),
             all_privs: r.all_privs,
@@ -125,6 +144,7 @@ fn set_snomask(s: &mut Server, uid: Uid, letters: &str) {
 #[derive(Clone)]
 struct Resolved {
     title: String,
+    color: Option<u8>,
     all_commands: bool,
     commands: HashSet<String>,
     all_privs: bool,
@@ -175,6 +195,7 @@ struct TypeDef {
     snomasks: String,
     vhost: Option<String>,
     level: Option<u32>,
+    color: Option<u8>,
 }
 
 fn cdef(commands: &[&str], privs: &[&str], sno: &str) -> ClassDef {
@@ -186,7 +207,8 @@ fn cdef(commands: &[&str], privs: &[&str], sno: &str) -> ClassDef {
     }
 }
 
-fn tdef(title: &str, classes: &[&str], all_classes: bool, modes: &str, sno: &str, all_sno: bool, level: u32) -> TypeDef {
+#[allow(clippy::too_many_arguments)]
+fn tdef(title: &str, classes: &[&str], all_classes: bool, modes: &str, sno: &str, all_sno: bool, level: u32, color: Option<u8>) -> TypeDef {
     TypeDef {
         title: title.to_string(),
         all_classes,
@@ -195,6 +217,7 @@ fn tdef(title: &str, classes: &[&str], all_classes: bool, modes: &str, sno: &str
         snomasks: sno.to_string(),
         all_snomasks: all_sno,
         level: Some(level),
+        color,
         ..Default::default()
     }
 }
@@ -210,12 +233,15 @@ fn builtin() -> (HashMap<String, ClassDef>, HashMap<String, TypeDef>) {
     classes.insert("server".into(), cdef(&["CONNECT", "SQUIT", "DIE", "RESTART"], &[], "lr"));
 
     let mut types: HashMap<String, TypeDef> = HashMap::default();
-    //                     title                       classes                                           all    modes   sno      all*   level
-    types.insert("helpop".into(), tdef("Help Operator", &[], false, "+ih", "o", false, 10));
-    types.insert("globop".into(), tdef("GlobOp", &["announce"], false, "+iw", "acgoq", false, 20));
-    types.insert("admin".into(), tdef("Administrator", &["announce", "ban", "override", "host"], false, "+iw", "", true, 50));
-    types.insert("servadmin".into(), tdef("Services Administrator", &["announce", "ban", "override", "host", "services"], false, "+iw", "", true, 70));
-    types.insert("netadmin".into(), tdef("Network Administrator", &[], true, "+iw", "", true, 100));
+    // The WHOIS title line is bold + colour 4 (red) by default; override per type
+    // with `color=<name|0-15|none>`.
+    let red = Some(4);
+    //                     title                       classes                                           all    modes   sno      all*   level color
+    types.insert("helpop".into(), tdef("Help Operator", &[], false, "+ih", "o", false, 10, red));
+    types.insert("globop".into(), tdef("GlobOp", &["announce"], false, "+iw", "acgoq", false, 20, red));
+    types.insert("admin".into(), tdef("Administrator", &["announce", "ban", "override", "host"], false, "+iw", "", true, 50, red));
+    types.insert("servadmin".into(), tdef("Services Administrator", &["announce", "ban", "override", "host", "services"], false, "+iw", "", true, 70, red));
+    types.insert("netadmin".into(), tdef("Network Administrator", &[], true, "+iw", "", true, 100, red));
     (classes, types)
 }
 
@@ -314,6 +340,24 @@ fn apply_type_kv(td: &mut TypeDef, k: &str, v: &str) {
                 td.level = Some(l);
             }
         }
+        "color" | "colour" => {
+            td.color = match v.to_ascii_lowercase().as_str() {
+                "none" | "off" | "no" | "plain" => None,
+                "white" => Some(0),
+                "black" => Some(1),
+                "blue" => Some(2),
+                "green" => Some(3),
+                "red" => Some(4),
+                "brown" => Some(5),
+                "magenta" | "purple" => Some(6),
+                "orange" => Some(7),
+                "yellow" => Some(8),
+                "cyan" | "teal" => Some(10),
+                "pink" => Some(13),
+                "grey" | "gray" => Some(14),
+                n => n.parse::<u8>().ok().filter(|c| *c <= 15).or(td.color),
+            };
+        }
         _ => {} // maxchans etc.: accepted, not yet enforced
     }
 }
@@ -356,6 +400,7 @@ fn resolve(td: &TypeDef, classes: &HashMap<String, ClassDef>) -> Resolved {
 
     Resolved {
         title: td.title.clone(),
+        color: td.color,
         all_commands,
         commands,
         all_privs,
