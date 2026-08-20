@@ -965,6 +965,17 @@ impl Server {
                 let v = (!value.is_empty()).then_some(value.as_str());
                 crate::modules::metadata::apply_user(self, tuid, &nick, &key, v, &setter);
             }
+            // OperServ SWHOIS: an extra WHOIS line services set on the account and
+            // re-push on each login (empty value clears it).
+            "swhois" => {
+                if let Some(u) = self.users.get_mut(&tuid) {
+                    if value.is_empty() {
+                        u.ext.take::<crate::coremods::core_oper::Swhois>();
+                    } else {
+                        u.ext.set(crate::coremods::core_oper::Swhois(value.clone()));
+                    }
+                }
+            }
             _ => {}
         }
     }
