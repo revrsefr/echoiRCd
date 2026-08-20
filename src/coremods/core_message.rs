@@ -599,7 +599,8 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
         }
         // SILENCE: if the recipient silenced the sender, drop it silently — the
         // sender is never told (that's the point), but still gets their own echo.
-        let silenced = s.is_silenced(tuid, &prefix);
+        // SIGNORE is mutual: drop if either party server-ignores the other.
+        let silenced = s.is_silenced(tuid, &prefix) || s.signore_blocks(uid, tuid);
         let pm = format!(":{prefix} {cmd} {target} :{text}");
         let ctags = s.line_ctags.clone();
         let msgid = s.next_msgid();

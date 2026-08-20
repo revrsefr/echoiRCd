@@ -252,6 +252,7 @@ pub struct User {
     pub watch: Vec<String>,    // WATCH list — lowercased nicks
     pub monitor: Vec<String>,  // MONITOR list — lowercased nicks
     pub silence: Vec<String>,  // SILENCE masks — nick!user@host globs
+    pub signore: Vec<String>,  // SIGNORE masks — mutual server-side ignore (both ways)
     pub accept: Vec<String>,   // ACCEPT list — lowercased nicks (callerid +g)
     pub quitting: Option<String>, // set by QUIT; drained by the core
     pub flags: UserFlags,

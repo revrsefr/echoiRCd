@@ -14,6 +14,7 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(Watch),
         Box::new(Monitor),
         Box::new(Silence),
+        Box::new(Signore),
         Box::new(Accept),
     ]
 }
@@ -293,6 +294,77 @@ impl Command for Silence {
             s.send(uid, format!(":{prefix} SILENCE -{mask}"));
         } else {
             silence_list(s, uid);
+        }
+        CmdResult::Ok
+    }
+}
+
+// --- SIGNORE (personal mutual server-side ignore) ---------------------------
+
+fn signore_list(s: &Server, uid: Uid) {
+    let (nick, list) = s
+        .users
+        .get(&uid)
+        .map(|u| (u.nick.clone(), u.signore.clone()))
+        .unwrap_or_default();
+    let sn = &s.name;
+    if list.is_empty() {
+        s.send(uid, format!(":{sn} NOTICE {nick} :Your SIGNORE list is empty."));
+    } else {
+        for m in &list {
+            s.send(uid, format!(":{sn} NOTICE {nick} :SIGNORE {m}"));
+        }
+    }
+    s.send(uid, format!(":{sn} NOTICE {nick} :End of SIGNORE list."));
+}
+
+/// SIGNORE — a personal, mutual server-side ignore. `SIGNORE <mask>` (or `+mask`)
+/// blocks a user both ways: neither of you sees the other's channel or private
+/// messages. `SIGNORE -<mask>` lifts it; a bare `SIGNORE` lists your masks. A bare
+/// nick becomes `nick!*@*`.
+struct Signore;
+impl Command for Signore {
+    fn name(&self) -> &'static str {
+        "SIGNORE"
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        let Some(arg) = params.first() else {
+            signore_list(s, uid);
+            return CmdResult::Ok;
+        };
+        let nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
+        let sn = s.name.clone();
+        let (add, raw) = match arg.strip_prefix('-') {
+            Some(m) => (false, m),
+            None => (true, arg.strip_prefix('+').unwrap_or(arg)),
+        };
+        if raw.is_empty() {
+            signore_list(s, uid);
+            return CmdResult::Ok;
+        }
+        let mask = normalize_mask(raw);
+        if add {
+            let max = s.conf_num("maxsignore", 64usize);
+            let full = s
+                .users
+                .get(&uid)
+                .map(|u| u.signore.len() >= max && !u.signore.contains(&mask))
+                .unwrap_or(true);
+            if full {
+                s.send(uid, format!(":{sn} NOTICE {nick} :Your SIGNORE list is full ({max} max)."));
+                return CmdResult::Fail;
+            }
+            if let Some(u) = s.users.get_mut(&uid) {
+                if !u.signore.contains(&mask) {
+                    u.signore.push(mask.clone());
+                }
+            }
+            s.send(uid, format!(":{sn} NOTICE {nick} :SIGNORE \x02{mask}\x02 added — you and they can no longer see each other's messages."));
+        } else {
+            if let Some(u) = s.users.get_mut(&uid) {
+                u.signore.retain(|x| x != &mask);
+            }
+            s.send(uid, format!(":{sn} NOTICE {nick} :SIGNORE \x02{mask}\x02 removed."));
         }
         CmdResult::Ok
     }

@@ -390,6 +390,7 @@ impl Server {
                 watch: Vec::new(),
                 monitor: Vec::new(),
                 silence: Vec::new(),
+                signore: Vec::new(),
                 accept: Vec::new(),
                 quitting: None,
                 flags: UserFlags::default(),
@@ -1200,6 +1201,10 @@ impl Server {
         let members: Vec<Uid> = ch.members.keys().copied().collect();
         let time_tag = format!("time={}", iso_time(now()));
         let account = self.users.get(&src).and_then(|su| su.account.clone());
+        // SIGNORE (mutual server-ignore): the sender's mask + list, hoisted once.
+        let src_mask = self.users.get(&src).map(|su| su.prefix()).unwrap_or_default();
+        let src_signore: Vec<String> =
+            self.users.get(&src).map(|su| su.signore.clone()).unwrap_or_default();
         // one cached line per (server_time, account_tag, message_tags) combination
         let mut cache: [Option<std::sync::Arc<str>>; 8] = std::array::from_fn(|_| None);
         for m in members {
@@ -1210,6 +1215,13 @@ impl Server {
                 continue;
             };
             if u.flags.deaf {
+                continue;
+            }
+            // SIGNORE: skip a member mutually server-ignored with the sender
+            if (!src_signore.is_empty() || !u.signore.is_empty())
+                && (src_signore.iter().any(|p| crate::channels::glob_match(p, &u.prefix()))
+                    || u.signore.iter().any(|p| crate::channels::glob_match(p, &src_mask)))
+            {
                 continue;
             }
             if op_only && self.rank(m, key) < crate::channels::RANK_HALFOP {
@@ -1507,6 +1519,7 @@ mod tests {
                 watch: Vec::new(),
                 monitor: Vec::new(),
                 silence: Vec::new(),
+                signore: Vec::new(),
                 accept: Vec::new(),
                 quitting: None,
                 flags: UserFlags::default(),

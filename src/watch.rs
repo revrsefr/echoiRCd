@@ -208,4 +208,23 @@ impl Server {
             .map(|u| u.silence.iter().any(|m| glob_match(m, sender_mask)))
             .unwrap_or(false)
     }
+
+    /// True if `a` and `b` mutually SIGNORE each other (either one has the other on
+    /// their SIGNORE list): a bidirectional block — neither sees the other's channel
+    /// or PM messages, triggered by whichever one ran SIGNORE.
+    pub fn signore_blocks(&self, a: Uid, b: Uid) -> bool {
+        self.signore_one_way(a, b) || self.signore_one_way(b, a)
+    }
+
+    /// Does `by`'s SIGNORE list match `who`'s current mask?
+    fn signore_one_way(&self, by: Uid, who: Uid) -> bool {
+        let Some(byu) = self.users.get(&by) else {
+            return false;
+        };
+        if byu.signore.is_empty() {
+            return false;
+        }
+        let mask = self.users.get(&who).map(|u| u.prefix()).unwrap_or_default();
+        byu.signore.iter().any(|m| glob_match(m, &mask))
+    }
 }
