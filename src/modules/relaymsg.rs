@@ -1,7 +1,7 @@
 //! relaymsg — `RELAYMSG <channel> <nick> <text>` (IRCv3 `draft/relaymsg`): an
 //! operator whose client negotiated the capability, and who is in the channel,
 //! sends a channel message under a spoofed "relay" nick (e.g. `discord/alice`), for
-//! stateless bridges (operator-only, as in InspIRCd — the source nick is spoofed).
+//! stateless bridges (operator-only — the source nick is spoofed).
 //! The message is
 //! tagged `@draft/relaymsg=<sender>` so clients can attribute it. The spoofed nick
 //! must contain a configured separator and must not collide with a real nick.
@@ -37,8 +37,8 @@ impl Command for RelayMsg {
             CmdResult::Fail
         };
 
-        // RELAYMSG spoofs an arbitrary source nick, so it's operator-only (as in
-        // InspIRCd, CmdAccess::OPERATOR) — bridges run their relay as an oper.
+        // RELAYMSG spoofs an arbitrary source nick, so it's operator-only —
+        // bridges run their relay as an oper.
         if !s.is_oper(uid) {
             s.numeric(
                 uid,

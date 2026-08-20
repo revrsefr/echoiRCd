@@ -119,7 +119,7 @@ pub fn apply_mode(s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
     let mut echoed: Vec<String> = Vec::new();
     // (sign, letter, displayed-param) per applied change — for hidemode filtering
     let mut changes: Vec<(char, char, Option<String>)> = Vec::new();
-    // Cap mode changes per command (advertised as MODES=, default 20 like InspIRCd):
+    // Cap mode changes per command (advertised as MODES=, default 20):
     // otherwise `MODE #c +bbbb…` in one line dispatches hundreds of handlers, each
     // fanning out to the whole channel and every link — a cheap amplification flood.
     let max_modes = s.conf_num("modes", 20usize).max(1);

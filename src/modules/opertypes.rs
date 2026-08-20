@@ -372,58 +372,6 @@ fn resolve(td: &TypeDef, classes: &HashMap<String, ClassDef>) -> Resolved {
 mod tests {
     use super::*;
 
-    #[test]
-    fn builtin_types_grant_the_right_commands() {
-        let (classes, types) = builtin();
-        let r = |id: &str| resolve(&types[id], &classes);
-        // Network Administrator: everything.
-        assert!(r("netadmin").all_commands);
-        // Administrator: bans + overrides, but not services or server control.
-        let admin = r("admin");
-        assert!(!admin.all_commands);
-        assert!(admin.commands.contains("KILL"));
-        assert!(admin.commands.contains("SAMODE"));
-        assert!(!admin.commands.contains("CONNECT"));
-        assert!(!admin.commands.contains("SVSNICK"));
-        // Services Administrator: Administrator + services.
-        let sa = r("servadmin");
-        assert!(sa.commands.contains("KILL"));
-        assert!(sa.commands.contains("SVSNICK"));
-        assert!(!sa.commands.contains("CONNECT"));
-        // GlobOp: announce only.
-        let g = r("globop");
-        assert!(g.commands.contains("GLOBOPS"));
-        assert!(!g.commands.contains("KILL"));
-        // Help Operator: no gated commands.
-        assert!(r("helpop").commands.is_empty());
-    }
-
-    #[test]
-    fn gated_covers_privileged_commands_only() {
-        assert!(gated("kill") && gated("CONNECT") && gated("SamODE"));
-        assert!(!gated("WHOIS") && !gated("MKPASSWD") && !gated("PRIVMSG"));
-    }
-
-    #[test]
-    fn config_opertype_overrides_and_composes() {
-        let (mut classes, mut types) = builtin();
-        // a custom class + type layered on top, as config would add
-        classes.insert("readonly".into(), cdef(&["CHECK"], &[], "t"));
-        let mut td = TypeDef { title: "Watcher".into(), ..Default::default() };
-        apply_type_kv(&mut td, "classes", "readonly");
-        apply_type_kv(&mut td, "commands", "GLOBOPS");
-        types.insert("watcher".into(), td);
-        let r = resolve(&types["watcher"], &classes);
-        assert_eq!(r.title, "Watcher");
-        assert!(r.commands.contains("CHECK") && r.commands.contains("GLOBOPS"));
-        assert!(!r.commands.contains("KILL"));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
     fn resolved(id: &str) -> Resolved {
         let (classes, types) = builtin();
         resolve(types.get(id).expect("builtin type"), &classes)

@@ -889,7 +889,7 @@ impl Server {
         }
         // +l full — with +L redirect, bounce the user to the target instead (opers override).
         // Count every member, local AND remote (services/other-server users), so the
-        // limit reflects the channel's real network-wide size like InspIRCd.
+        // limit reflects the channel's real network-wide size.
         if let Some(ch) = self.channels.get(&key) {
             let full = ch
                 .modes

@@ -351,7 +351,7 @@ mod tests {
     use std::sync::{mpsc, Arc};
 
     // The minchanmembers bump gate must count ALL members — local plus remote
-    // (services bots, users on other servers) — like InspIRCd's GetUsers().size().
+    // (services bots, users on other servers).
     // Regression: counting only local members froze the score of anyone sharing a
     // channel with remote/services members (e.g. reverse + a bot in #echoircd).
     #[test]
