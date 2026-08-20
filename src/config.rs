@@ -40,6 +40,7 @@ pub struct OperBlock {
     pub password: String,
     pub level: u32,
     pub fingerprint: Option<String>,
+    pub oper_type: Option<String>,
 }
 
 /// A trusted WEBIRC gateway: after presenting `password` it may rewrite a client's
@@ -233,14 +234,18 @@ impl Config {
                             password: p.to_string(),
                             level: 0,
                             fingerprint: None,
+                            oper_type: None,
                         };
                         // trailing tokens (any order): a number is the operlevel, a
-                        // `fp=`/`certfp=` token is the required TLS cert fingerprint.
+                        // `fp=`/`certfp=` token is the required TLS cert fingerprint,
+                        // a `type=` token names the oper type (see modules::opertypes).
                         for tok in it {
                             if let Some(fp) =
                                 tok.strip_prefix("fp=").or_else(|| tok.strip_prefix("certfp="))
                             {
                                 b.fingerprint = Some(fp.to_ascii_lowercase());
+                            } else if let Some(t) = tok.strip_prefix("type=") {
+                                b.oper_type = Some(t.to_string());
                             } else if let Ok(l) = tok.parse::<u32>() {
                                 b.level = l;
                             }

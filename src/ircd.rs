@@ -59,6 +59,7 @@ pub enum Event {
         uid: Uid,
         ok: bool,
         level: u32,
+        oper_type: Option<String>,
     },
     /// A background MKPASSWD hash finished (KDFs run off the core thread).
     MkpasswdResult {
@@ -235,10 +236,11 @@ impl Ircd {
                 crate::modules::ident::on_result(&mut self.server, uid, ident);
                 self.try_register(uid); // ident may have been the last hold
             }
-            Event::OperAuth { uid, ok, level } => {
+            Event::OperAuth { uid, ok, level, oper_type } => {
                 if ok {
                     self.server.oper_up(uid);
                     crate::modules::operlevels::set(&mut self.server, uid, level);
+                    crate::modules::opertypes::apply(&mut self.server, uid, oper_type.as_deref());
                 } else if self.server.users.contains_key(&uid) {
                     self.server
                         .numeric(uid, ERR_PASSWDMISMATCH, ":Password incorrect");

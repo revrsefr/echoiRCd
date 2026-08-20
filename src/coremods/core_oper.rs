@@ -128,6 +128,7 @@ impl Command for Oper {
             return CmdResult::Fail;
         };
         let (hash, level) = (block.password.clone(), block.level);
+        let otype = block.oper_type.clone();
         // fingerprint login: the block demands a specific TLS client-cert SHA-256
         // fingerprint, so the user must be on a matching certificate.
         if let Some(want_fp) = &block.fingerprint {
@@ -152,14 +153,16 @@ impl Command for Oper {
         if hash == "*" {
             s.oper_up(uid);
             crate::modules::operlevels::set(s, uid, level);
+            crate::modules::opertypes::apply(s, uid, otype.as_deref());
             return CmdResult::Ok;
         }
         // a KDF password (bcrypt / pbkdf2) is slow — verify it off the core thread
         // (result arrives as OperAuth), so it can't freeze the server or be a DoS.
         if crate::modules::password_hash::is_slow(&hash) {
+            let ot = otype.clone();
             let ok = s.spawn_crypto(move || {
                 let ok = crate::modules::password_hash::verify(&hash, &pass);
-                crate::ircd::Event::OperAuth { uid, ok, level }
+                crate::ircd::Event::OperAuth { uid, ok, level, oper_type: ot }
             });
             if !ok {
                 s.numeric(uid, ERR_PASSWDMISMATCH, ":Too many auth attempts, try again");
@@ -171,6 +174,7 @@ impl Command for Oper {
         if crate::modules::password_hash::verify(&hash, &pass) {
             s.oper_up(uid);
             crate::modules::operlevels::set(s, uid, level); // operlevels: KILL protection
+            crate::modules::opertypes::apply(s, uid, otype.as_deref());
             CmdResult::Ok
         } else {
             s.numeric(uid, ERR_PASSWDMISMATCH, ":Password incorrect");

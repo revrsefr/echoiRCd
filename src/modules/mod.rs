@@ -54,6 +54,7 @@ pub mod network_icon;
 pub mod ojoin;
 pub mod operlevels;
 pub mod operprefix;
+pub mod opertypes;
 pub mod password_hash;
 pub mod permchannels;
 pub mod profilelink;
@@ -112,6 +113,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(autoop::AutoOp),
         Box::new(autodrop::AutoDrop),
         Box::new(operprefix::OperPrefix),
+        Box::new(opertypes::OperTypes),
         Box::new(permchannels::PermChannels::default()),
         Box::new(chathistory::ChatHistoryGc),
         Box::new(account_registration::AcctRegGc),
