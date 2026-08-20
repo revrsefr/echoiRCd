@@ -366,6 +366,8 @@ impl Command for Signore {
             }
             s.send(uid, format!(":{sn} NOTICE {nick} :SIGNORE \x02{mask}\x02 removed."));
         }
+        // Persist the change to the user's services account (no-op if not logged in).
+        s.push_signore_to_services(uid);
         CmdResult::Ok
     }
 }

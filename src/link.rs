@@ -976,8 +976,37 @@ impl Server {
                     }
                 }
             }
+            // Persistent SIGNORE list: services store it per-account and replay it on
+            // each login (space-separated masks; empty value clears it).
+            "signore" => {
+                if let Some(u) = self.users.get_mut(&tuid) {
+                    u.signore = value
+                        .split(' ')
+                        .filter(|m| !m.is_empty())
+                        .map(str::to_string)
+                        .collect();
+                }
+            }
             _ => {}
         }
+    }
+
+    /// Push a user's current SIGNORE list up to the services server so it's saved on
+    /// their account and replayed on the next login. No-op when the user isn't logged
+    /// in (no account to store it on) or services aren't linked — the list then stays
+    /// session-only, exactly as it worked before persistence.
+    pub fn push_signore_to_services(&self, uid: Uid) {
+        let Some(via) = self.sasl_link() else {
+            return;
+        };
+        let Some(u) = self.users.get(&uid) else {
+            return;
+        };
+        if u.account.is_none() {
+            return;
+        }
+        let masks = u.signore.join(" ");
+        self.link_out(via, format!(":{} METADATA {} signore :{masks}", self.sid, u.uuid));
     }
 
     // --- SASL relay (client AUTHENTICATE ⇄ services) --------------------------
@@ -2818,6 +2847,7 @@ mod tests {
                 watch: Vec::new(),
                 monitor: Vec::new(),
                 silence: Vec::new(),
+                signore: Vec::new(),
                 accept: Vec::new(),
                 quitting: None,
                 flags: UserFlags::default(),
@@ -2906,6 +2936,7 @@ mod tests {
                 watch: Vec::new(),
                 monitor: Vec::new(),
                 silence: Vec::new(),
+                signore: Vec::new(),
                 accept: Vec::new(),
                 quitting: None,
                 flags: UserFlags::default(),

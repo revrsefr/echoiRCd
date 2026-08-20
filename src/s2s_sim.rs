@@ -96,6 +96,7 @@ impl Node {
                 watch: Vec::new(),
                 monitor: Vec::new(),
                 silence: Vec::new(),
+                signore: Vec::new(),
                 accept: Vec::new(),
                 quitting: None,
                 flags: UserFlags::default(),
