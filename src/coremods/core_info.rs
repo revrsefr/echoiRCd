@@ -111,20 +111,22 @@ impl Command for Whois {
             // maybe they're on another server
             if let Some((uuid, _)) = s.find_remote(&tnick) {
                 if let Some(ru) = s.remote_users.get(&uuid) {
-                    let srv = s
+                    let (srv, sdesc) = s
                         .servers
                         .get(&ru.sid)
-                        .map(|sv| sv.name.clone())
-                        .unwrap_or_else(|| ru.sid.clone());
+                        .map(|sv| (sv.name.clone(), sv.desc.clone()))
+                        .unwrap_or_else(|| (ru.sid.clone(), "remote server".to_string()));
                     s.numeric(
                         uid,
                         RPL_WHOISUSER,
                         &format!("{} {} {} * :{}", ru.nick, ru.ident, ru.host, ru.realname),
                     );
+                    // 312: the user's server and its description (not a placeholder —
+                    // the actual server info, so a services user reads as its server).
                     s.numeric(
                         uid,
                         RPL_WHOISSERVER,
-                        &format!("{} {srv} :remote user", ru.nick),
+                        &format!("{} {srv} :{sdesc}", ru.nick),
                     );
                     // 313: a user on a U-lined services server is "a network service"
                     // — its oper line reads as a service, not an operator.
