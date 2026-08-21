@@ -1671,7 +1671,7 @@ mod tests {
         s.snotice_c('c', "CONNMSG");
         let lines: Vec<String> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
         let logged = |chan: &str, needle: &str| {
-            lines.iter().any(|l| l.contains(&format!("NOTICE {chan} :")) && l.contains(needle))
+            lines.iter().any(|l| l.contains(&format!("PRIVMSG {chan} :")) && l.contains(needle))
         };
         assert!(logged("#xlog", "XLINEMSG"), "x-line notice goes to #xlog: {lines:?}");
         assert!(logged("#all", "XLINEMSG"), "x-line notice goes to #all: {lines:?}");

@@ -30,9 +30,11 @@ pub fn tee(s: &Server, cat: char, msg: &str) {
         if !s.channels.contains_key(&key) {
             continue; // channel not created yet — nothing to log into
         }
+        // Posted as a PRIVMSG from the server, so clients show it inline in the
+        // channel as a normal message rather than routing it to a notices view.
         // to_channel builds the line once and shares it by Arc across members (and
         // adds the server-time tag per recipient) instead of cloning per member.
-        let line = format!(":{} NOTICE {chan} :{msg}", s.name);
+        let line = format!(":{} PRIVMSG {chan} :{msg}", s.name);
         s.to_channel(&key, &line, None);
     }
 }
