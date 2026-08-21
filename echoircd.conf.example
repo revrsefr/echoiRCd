@@ -293,8 +293,13 @@ amu_target    = both
 # hidewhois_hide_idle = yes    # hide 317
 # hidewhois_hide_secure = yes  # hide 671
 # --- chanlog: mirror the oper server-notice stream into a channel so
-#     staff can watch it in a normal window. Set the channel (create/keep it opped):
-# chanlog = #snotices
+#     staff can watch it in a normal window. Set the channel (create/keep it opped).
+#     Add snomask category letters after the channel to log only those categories
+#     (x x-lines, d dnsbl, c connects, o oper, q quit, k kill, …); no letters logs
+#     everything. Repeatable, so different snomasks can go to different channels:
+# chanlog = #snotices          # everything
+# chanlog = #bans      xdk     # only x-lines, dnsbl hits, and kills
+# chanlog = #conns     cq      # only connects and quits
 # --- extbanbanlist: no config — adds the matching extban
 #     `b:<#channel>`, so `+b b:#staff` catches everyone banned in #staff (shares a
 #     ban list between channels).

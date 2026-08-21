@@ -1034,7 +1034,7 @@ impl Server {
         for o in opers {
             self.deliver_server_notice(o, msg, &jval);
         }
-        crate::modules::chanlog::tee(self, msg);
+        crate::modules::chanlog::tee(self, cat, msg);
         crate::modules::syslog::tee(self, msg);
         crate::modules::log_json::tee(self, msg);
     }
@@ -1653,6 +1653,30 @@ mod tests {
             "remove timed shows remaining: {joined}"
         );
         assert!(joined.contains("XLINE: Z-line on 192.0.2.5 expired"), "expire: {joined}");
+    }
+
+    #[test]
+    fn chanlog_routes_by_snomask() {
+        use crate::channels::{Channel, Member};
+        let mut s = srv();
+        // #xlog takes only x-line (x) notices; #all takes every category
+        s.raw_config.insert("chanlog".to_string(), vec!["#xlog x".to_string(), "#all".to_string()]);
+        let rx = add_user(&mut s, 1, "logbot");
+        for name in ["#xlog", "#all"] {
+            let mut c = Channel::new(name);
+            c.members.insert(1, Member::default());
+            s.channels.insert(name.to_string(), c);
+        }
+        s.snotice_c('x', "XLINEMSG");
+        s.snotice_c('c', "CONNMSG");
+        let lines: Vec<String> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        let logged = |chan: &str, needle: &str| {
+            lines.iter().any(|l| l.contains(&format!("NOTICE {chan} :")) && l.contains(needle))
+        };
+        assert!(logged("#xlog", "XLINEMSG"), "x-line notice goes to #xlog: {lines:?}");
+        assert!(logged("#all", "XLINEMSG"), "x-line notice goes to #all: {lines:?}");
+        assert!(!logged("#xlog", "CONNMSG"), "connect notice filtered out of #xlog: {lines:?}");
+        assert!(logged("#all", "CONNMSG"), "connect notice goes to #all: {lines:?}");
     }
 
     #[test]
