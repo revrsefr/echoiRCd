@@ -44,10 +44,12 @@ pub fn now() -> u64 {
 
 /// Format a unix timestamp as an IRCv3 `server-time` tag value
 /// (`2026-08-05T07:58:03.000Z`), computing the civil date with std only.
-pub fn iso_time(secs: u64) -> String {
+/// The UTC civil date/time for a unix timestamp: `(year, month, day, hour,
+/// minute, second)`. Howard Hinnant's days-from-civil, inverted — the single
+/// place the calendar conversion lives, shared by `iso_time` and `long_date`.
+fn civil(secs: u64) -> (i64, i64, i64, u64, u64, u64) {
     let days = (secs / 86400) as i64;
     let (h, mi, s) = ((secs % 86400) / 3600, (secs % 3600) / 60, secs % 60);
-    // civil date from days since 1970-01-01
     let z = days + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
     let doe = z - era * 146097;
@@ -58,30 +60,24 @@ pub fn iso_time(secs: u64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d, h, mi, s)
+}
+
+pub fn iso_time(secs: u64) -> String {
+    let (y, m, d, h, mi, s) = civil(secs);
     format!("{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}.000Z")
 }
 
 /// A unix time as `Fri 28 Aug 2026 13:45:29` (UTC) — the long form used in the
-/// XLINE server notice for a ban's absolute expiry. Shares the civil-date
-/// arithmetic with [`iso_time`], plus the weekday (1970-01-01 was a Thursday).
+/// XLINE server notice for a ban's absolute expiry: the shared [`civil`]
+/// conversion plus a weekday (1970-01-01 was a Thursday).
 pub fn long_date(secs: u64) -> String {
     const WD: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const MO: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
-    let days = (secs / 86400) as i64;
-    let (h, mi, s) = ((secs % 86400) / 3600, (secs % 3600) / 60, secs % 60);
-    let z = days + 719468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = z - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    let wd = ((days % 7 + 4) % 7 + 7) % 7; // 0 = Sunday
+    let (y, m, d, h, mi, s) = civil(secs);
+    let wd = (secs / 86400 + 4) % 7; // days since the epoch Thursday; 0 = Sunday
     format!(
         "{} {d:02} {} {y:04} {h:02}:{mi:02}:{s:02}",
         WD[wd as usize],
