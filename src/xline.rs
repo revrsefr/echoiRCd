@@ -294,9 +294,17 @@ impl Server {
         self.enforce_xlines();
     }
 
-    /// Remove an x-line by kind + mask; announces it (snomask +x, like the add) and
-    /// returns whether one was found. `remover` is who took it off.
+    /// Remove an x-line by kind + mask; announces it (snomask +x, like the add) —
+    /// reporting how long a timed ban had left to run, so opers see what they cut
+    /// short — and returns whether one was found. `remover` is who took it off.
     pub fn remove_xline(&mut self, kind: XKind, mask: &str, remover: &str) -> bool {
+        let n = now();
+        // capture the target's expiry before dropping it, to report the time left
+        let expires = self
+            .xlines
+            .iter()
+            .find(|x| x.kind == kind && x.mask.eq_ignore_ascii_case(mask))
+            .map(|x| x.expires);
         let before = self.xlines.len();
         // case-insensitive: nick/host/channel masks match case-insensitively when
         // enforced, so removal must too (e.g. remove `CBAN #foo` for a `#Foo` ban).
@@ -304,7 +312,15 @@ impl Server {
             .retain(|x| !(x.kind == kind && x.mask.eq_ignore_ascii_case(mask)));
         let removed = self.xlines.len() < before;
         if removed {
-            self.snotice_c('x', &format!("XLINE: {remover} removed a {}-line on {mask}", kind.tag()));
+            let tag = kind.tag();
+            let detail = match expires {
+                Some(e) if e > n => {
+                    format!("timed {tag}-line on {mask} ({} remaining)", human_duration(e - n))
+                }
+                Some(e) if e != 0 => format!("timed {tag}-line on {mask} (already expired)"),
+                _ => format!("permanent {tag}-line on {mask}"),
+            };
+            self.snotice_c('x', &format!("XLINE: {remover} removed a {detail}"));
             self.save_xlines();
         }
         removed

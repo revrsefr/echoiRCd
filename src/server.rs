@@ -1629,12 +1629,15 @@ mod tests {
             u.flags.snomask = true;
             u.flags.snomask_cats = "x".to_string();
         }
-        // permanent G-line, then removed
+        // permanent G-line, then removed → "permanent", no remaining clause
         s.add_xline(crate::xline::XKind::Gline, "*@bad.example", 0, "op", "spam");
         assert!(s.remove_xline(crate::xline::XKind::Gline, "*@bad.example", "op"));
         assert!(!s.remove_xline(crate::xline::XKind::Gline, "*@bad.example", "op")); // gone: no re-announce
+        // timed K-line removed early → reports the time it had left
+        s.add_xline(crate::xline::XKind::Kline, "*@foo.example", 604800, "op", "temp");
+        assert!(s.remove_xline(crate::xline::XKind::Kline, "*@foo.example", "op"));
         // a timed Z-line whose expiry is forced into the past, then purged
-        s.add_xline(crate::xline::XKind::Zline, "192.0.2.5", 3600, "op", "temp");
+        s.add_xline(crate::xline::XKind::Zline, "192.0.2.5", 3600, "op", "temp2");
         for x in s.xlines.iter_mut() {
             if x.mask == "192.0.2.5" {
                 x.expires = 1;
@@ -1644,7 +1647,11 @@ mod tests {
         let joined: String =
             std::iter::from_fn(|| orx.try_recv().ok()).collect::<Vec<_>>().join("\n");
         assert!(joined.contains("XLINE: op added a permanent G-line on *@bad.example: spam"), "add: {joined}");
-        assert!(joined.contains("XLINE: op removed a G-line on *@bad.example"), "remove: {joined}");
+        assert!(joined.contains("XLINE: op removed a permanent G-line on *@bad.example"), "remove permanent: {joined}");
+        assert!(
+            joined.contains("XLINE: op removed a timed K-line on *@foo.example (") && joined.contains("remaining)"),
+            "remove timed shows remaining: {joined}"
+        );
         assert!(joined.contains("XLINE: Z-line on 192.0.2.5 expired"), "expire: {joined}");
     }
 
