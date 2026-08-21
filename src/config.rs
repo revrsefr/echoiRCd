@@ -113,7 +113,7 @@ pub struct Config {
     pub amu: AntiMixedCfg,             // antimixedutf8 module config
     pub resolve_hosts: bool,           // reverse-DNS clients on connect (default on)
     pub use_resolved_host: bool,       // put the resolved hostname in the hostmask (default on)
-    pub dnsbl_zones: Vec<String>,      // DNS blocklist zones to check on connect
+    pub dnsbl_zones: Vec<crate::modules::dnsbl::DnsblZone>, // DNS blocklists to check on connect
     pub dnsbl_action: String,          // mark | kline | gline | zline (on a hit)
     pub dnsbl_reason: String,          // ban reason for a DNSBL hit
     pub sasl_server: String,           // linked services server that handles SASL ("" = none)
@@ -301,8 +301,8 @@ impl Config {
                     )
                 }
                 "dnsbl" | "dnsbl_zone" => {
-                    if !v.is_empty() {
-                        c.dnsbl_zones.push(v.to_string());
+                    if let Some(z) = crate::modules::dnsbl::parse_zone(v) {
+                        c.dnsbl_zones.push(z);
                     }
                 }
                 "dnsbl_action" => c.dnsbl_action = v.to_ascii_lowercase(),

@@ -61,6 +61,34 @@ pub fn iso_time(secs: u64) -> String {
     format!("{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}.000Z")
 }
 
+/// A unix time as `Fri 28 Aug 2026 13:45:29` (UTC) — the long form used in the
+/// XLINE server notice for a ban's absolute expiry. Shares the civil-date
+/// arithmetic with [`iso_time`], plus the weekday (1970-01-01 was a Thursday).
+pub fn long_date(secs: u64) -> String {
+    const WD: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const MO: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let days = (secs / 86400) as i64;
+    let (h, mi, s) = ((secs % 86400) / 3600, (secs % 3600) / 60, secs % 60);
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    let wd = ((days % 7 + 4) % 7 + 7) % 7; // 0 = Sunday
+    format!(
+        "{} {d:02} {} {y:04} {h:02}:{mi:02}:{s:02}",
+        WD[wd as usize],
+        MO[(m - 1) as usize]
+    )
+}
+
 /// Parse an IRCv3 `server-time` value (`2026-08-08T19:52:42.000Z`) back to unix
 /// seconds — the inverse of [`iso_time`], for CHATHISTORY `timestamp=` selectors.
 pub fn parse_iso(s: &str) -> Option<u64> {
@@ -153,7 +181,7 @@ pub struct Server {
     pub amu: crate::config::AntiMixedCfg,          // antimixedutf8 module config
     pub resolve_hosts: bool,                       // reverse-DNS clients on connect
     pub use_resolved_host: bool,                   // apply the resolved name to the hostmask
-    pub dnsbl_zones: Vec<String>,                  // DNS blocklist zones checked on connect
+    pub dnsbl_zones: Vec<crate::modules::dnsbl::DnsblZone>, // DNS blocklists checked on connect
     pub dnsbl_action: String,                      // mark | kline | gline | zline
     pub dnsbl_reason: String,                      // ban reason on a DNSBL hit
     pub sasl_server: String,                       // services server that handles SASL
@@ -439,7 +467,9 @@ impl Server {
         crate::modules::ident::dispatch(self, uid);
         // a connection class may opt out of reverse-DNS (resolvehostnames=no)
         let do_rdns = self.resolve_hosts && crate::modules::connclass::resolve_hostnames(self, uid);
-        let zones = self.dnsbl_zones.clone(); // DNSBL runs if any zones are configured
+        // The resolver worker only needs the zone domains to reverse the IP under;
+        // per-zone action/reason are looked up back on the core thread on a hit.
+        let zones: Vec<String> = self.dnsbl_zones.iter().map(|z| z.domain.clone()).collect();
         if do_rdns {
             self.notice_star(uid, "Looking up your hostname...");
         }
@@ -1582,6 +1612,63 @@ mod tests {
         );
         assert_eq!(s.users[&2].host, "localhost");
         assert!(!s.users[&2].dns_pending); // registration still un-held either way
+    }
+
+    #[test]
+    fn long_date_formats_weekday_and_month() {
+        // 1970-01-01 was a Thursday; step across a day and a month boundary.
+        assert_eq!(super::long_date(0), "Thu 01 Jan 1970 00:00:00");
+        assert_eq!(super::long_date(86400), "Fri 02 Jan 1970 00:00:00");
+        assert_eq!(super::long_date(86400 * 31), "Sun 01 Feb 1970 00:00:00");
+    }
+
+    #[test]
+    fn dnsbl_hit_emits_expected_snotices() {
+        use std::net::Ipv4Addr;
+        let mut s = srv();
+        s.name = "irc.test".to_string();
+        s.conf_path = std::env::temp_dir().join("echo-dnsbl-test").display().to_string();
+        // an operator watching the xline (x) and dnsbl (d) snomasks
+        let orx = add_user(&mut s, 1, "watcher");
+        if let Some(u) = s.users.get_mut(&1) {
+            u.flags.oper = true;
+            u.flags.snomask = true;
+            u.flags.snomask_cats = "xd".to_string();
+        }
+        // the connecting user tripping the blocklist — a distinct IP so the ban
+        // doesn't also match the watcher (add_user gives everyone 127.0.0.1).
+        let _brx = add_user(&mut s, 2, "badguy");
+        if let Some(u) = s.users.get_mut(&2) {
+            u.addr = "[2a06:1700:0:12::1]:6667".parse().unwrap();
+        }
+        s.dnsbl_zones = vec![crate::modules::dnsbl::parse_zone(
+            "domain=torexit.dan.me.uk name=\"Tor exit node\" action=zline duration=1w \
+             reason=\"Tor exit nodes are not allowed on this network. \
+             See https://metrics.torproject.org/rs.html#search/%ip% for more information.\"",
+        )
+        .unwrap()];
+        crate::modules::dnsbl::report(
+            &mut s,
+            2,
+            crate::modules::dnsbl::Outcome::Hit {
+                zone: "torexit.dan.me.uk".to_string(),
+                reply: Ipv4Addr::new(127, 0, 0, 2),
+            },
+        );
+        let joined: String =
+            std::iter::from_fn(|| orx.try_recv().ok()).collect::<Vec<_>>().join("\n");
+        assert!(
+            joined.contains(
+                "XLINE: dnsbl@irc.test added a timed Z-line on 2a06:1700:0:12::1, expires in 1 week (on "
+            ),
+            "xline notice: {joined}"
+        );
+        assert!(
+            joined.contains("detected as being on the 'torexit.dan.me.uk' DNSBL: Tor exit node"),
+            "dnsbl notice: {joined}"
+        );
+        assert!(joined.contains("search/2a06:1700:0:12::1 for more information."), "%ip% substituted: {joined}");
+        assert!(!joined.contains("%ip%"), "no literal %ip% left: {joined}");
     }
 
     #[test]

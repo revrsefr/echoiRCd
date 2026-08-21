@@ -61,7 +61,9 @@ Rejected before any per-connection state is allocated — the cheapest point:
 - **Reputation** — every address accrues a score over time; the `y:<score>`
   extban bans by it (`+b y:<100`).
 - **DNSBL** — check connecting IPs against DNS blocklists (`mark` / `kill` /
-  `kline` / `gline` / `zline`).
+  `kline` / `gline` / `zline`). Each `dnsbl` zone may carry its own
+  `name` / `action` / `duration` / `reason` (the reason supports `%ip%`), or fall
+  back to the global defaults.
 - **X-lines** — persistent `K` / `G` / `Z` / `Q` / `CBAN` / `RLINE` bans (see
   [operators](operators.md)).
 

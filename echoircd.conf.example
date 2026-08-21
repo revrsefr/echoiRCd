@@ -109,12 +109,17 @@ use_resolved_host = on
 # for multiple zones. On a listing, `dnsbl_action` decides what happens:
 #   mark  = just show the "*** ... LISTED" notice, let them in (default, safe)
 #   kill  = disconnect them (no persistent ban)
-#   kline / gline / zline = add a 1-day ban and disconnect
+#   kline / gline / zline = add a ban (dnsbl_duration) and disconnect
 # (leave commented to disable DNSBL entirely)
 # dnsbl = dnsbl.dronebl.org
 # dnsbl = rbl.efnetrbl.org
 # dnsbl_action = mark
 # dnsbl_reason = Your host is listed in a DNS blocklist
+#
+# Per-blocklist form: attributes on one line override the globals above (unset
+# ones fall back to them). name= is the label in the DNSBL notice; reason= is the
+# ban reason and may contain %ip% (the client address). Values may be "quoted".
+# dnsbl = domain=torexit.dan.me.uk name="Tor exit node" action=zline duration=1w reason="Tor exit nodes are not allowed on this network. See https://metrics.torproject.org/rs.html#search/%ip% for more information."
 
 # antimixedutf8 — block spam that mixes look-alike scripts within words.
 # action = block | kill | gline | kline | zline ; target = both | channel | private

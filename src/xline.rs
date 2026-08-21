@@ -83,6 +83,23 @@ pub fn parse_duration(s: &str) -> Option<u64> {
     Some(n.saturating_mul(mul))
 }
 
+/// Render a duration (seconds) as a human phrase — `1 week`, `1 day 2 hours`,
+/// `30 minutes` — largest non-zero units first. Used in the XLINE server notice.
+pub fn human_duration(mut secs: u64) -> String {
+    if secs == 0 {
+        return "0 seconds".to_string();
+    }
+    let mut parts = Vec::new();
+    for (size, label) in [(604800, "week"), (86400, "day"), (3600, "hour"), (60, "minute"), (1, "second")] {
+        let n = secs / size;
+        if n > 0 {
+            parts.push(format!("{n} {label}{}", if n == 1 { "" } else { "s" }));
+            secs -= n * size;
+        }
+    }
+    parts.join(" ")
+}
+
 impl Server {
     /// Whether an active x-line of `kind` matches this `user@host` / `ip`.
     fn xmatch(&self, kind: XKind, uh: &str, ip: &str) -> bool {
@@ -254,17 +271,25 @@ impl Server {
     ) {
         let n = now();
         self.xlines.retain(|x| !(x.kind == kind && x.mask == mask));
+        let expires = if duration == 0 { 0 } else { n.saturating_add(duration) };
         self.xlines.push(XLine {
             kind,
             mask: mask.to_string(),
             reason: reason.to_string(),
             setter: setter.to_string(),
-            expires: if duration == 0 { 0 } else { n.saturating_add(duration) },
+            expires,
         });
-        self.snotice_c('x', &format!(
-            "{setter} added a {}-line on {mask}: {reason}",
-            kind.tag()
-        ));
+        let detail = if duration == 0 {
+            format!("permanent {}-line on {mask}", kind.tag())
+        } else {
+            format!(
+                "timed {}-line on {mask}, expires in {} (on {})",
+                kind.tag(),
+                human_duration(duration),
+                crate::server::long_date(expires)
+            )
+        };
+        self.snotice_c('x', &format!("XLINE: {setter} added a {detail}: {reason}"));
         self.save_xlines();
         self.enforce_xlines();
     }
@@ -383,5 +408,15 @@ mod tests {
         fn parse_duration_never_panics(s in ".*") {
             let _ = parse_duration(&s);
         }
+    }
+
+    #[test]
+    fn human_duration_reads_naturally() {
+        assert_eq!(human_duration(604800), "1 week");
+        assert_eq!(human_duration(86400), "1 day");
+        assert_eq!(human_duration(2 * 604800), "2 weeks");
+        assert_eq!(human_duration(90061), "1 day 1 hour 1 minute 1 second");
+        assert_eq!(human_duration(3600), "1 hour");
+        assert_eq!(human_duration(0), "0 seconds");
     }
 }
