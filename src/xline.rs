@@ -100,6 +100,21 @@ pub fn human_duration(mut secs: u64) -> String {
     parts.join(" ")
 }
 
+/// The " (expires in …)" tail appended to the reason a banned user is shown, or
+/// empty for a permanent ban (`expires` is the absolute unix expiry, 0 = permanent).
+/// Lets someone who hits a K/G/Z/R-line see when it lifts, not just why.
+fn ban_expiry_suffix(expires: u64, now: u64) -> String {
+    if expires > now {
+        format!(
+            " (expires in {} on {})",
+            human_duration(expires - now),
+            crate::server::long_date(expires)
+        )
+    } else {
+        String::new()
+    }
+}
+
 impl Server {
     /// Whether an active x-line of `kind` matches this `user@host` / `ip`.
     fn xmatch(&self, kind: XKind, uh: &str, ip: &str) -> bool {
@@ -192,7 +207,7 @@ impl Server {
         for kind in [XKind::Kline, XKind::Gline, XKind::Zline] {
             if self.xmatch(kind, &uh, ip) {
                 let n = now();
-                let reason = self
+                let (reason, expires) = self
                     .xlines
                     .iter()
                     .find(|x| {
@@ -203,9 +218,9 @@ impl Server {
                                 _ => glob_match(&x.mask, &uh),
                             }
                     })
-                    .map(|x| x.reason.clone())
+                    .map(|x| (x.reason.clone(), x.expires))
                     .unwrap_or_default();
-                return Some(format!("{}-lined: {reason}", kind.tag()));
+                return Some(format!("{}-lined: {reason}{}", kind.tag(), ban_expiry_suffix(expires, n)));
             }
         }
         None
@@ -234,7 +249,7 @@ impl Server {
                         .map(|re| re.is_match(&hostform) || re.is_match(&ipform))
                         .unwrap_or(false)
             })
-            .map(|x| format!("R-lined: {}", x.reason))
+            .map(|x| format!("R-lined: {}{}", x.reason, ban_expiry_suffix(x.expires, n)))
     }
 
     /// Kill every registered local user matched by R-line `pattern` (called after an

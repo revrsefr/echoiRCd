@@ -1656,6 +1656,21 @@ mod tests {
     }
 
     #[test]
+    fn banned_user_message_shows_expiry() {
+        let mut s = srv();
+        s.conf_path = std::env::temp_dir().join("echo-ban-expiry-test").display().to_string();
+        // permanent K-line: reason only, no expiry tail
+        s.add_xline(crate::xline::XKind::Kline, "*@perm.example", 0, "op", "spam");
+        let perm = s.matched_xline("bob", "perm.example", "1.2.3.4").unwrap();
+        assert_eq!(perm, "K-lined: spam", "permanent ban shows no expiry: {perm}");
+        // timed Z-line: reason + when it lifts
+        s.add_xline(crate::xline::XKind::Zline, "5.6.7.8", 604800, "op", "botnet");
+        let timed = s.matched_xline("bob", "any.host", "5.6.7.8").unwrap();
+        assert!(timed.starts_with("Z-lined: botnet (expires in "), "timed ban shows expiry: {timed}");
+        assert!(timed.contains(" on ") && timed.ends_with(')'), "with an absolute date: {timed}");
+    }
+
+    #[test]
     fn dnsbl_hit_emits_expected_snotices() {
         use std::net::Ipv4Addr;
         let mut s = srv();
