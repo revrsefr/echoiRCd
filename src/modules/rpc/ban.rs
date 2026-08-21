@@ -78,7 +78,8 @@ pub fn handle(s: &mut Server, action: &str, params: &str) -> Result<String, RpcE
             let mask = json::get_str(params, "mask")
                 .or_else(|| json::get_str(params, "name"))
                 .ok_or_else(|| RpcError::invalid_params("missing 'mask'"))?;
-            let removed = s.remove_xline(kind, &mask);
+            let setter = json::get_str(params, "setter").unwrap_or_else(|| "RPC".into());
+            let removed = s.remove_xline(kind, &mask, &setter);
             if removed {
                 Ok(obj(&[("result", "true".into())]))
             } else {

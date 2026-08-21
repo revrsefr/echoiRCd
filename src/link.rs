@@ -659,7 +659,8 @@ impl Server {
             return;
         };
         if msg.params.len() == 1 {
-            self.remove_xline(crate::xline::XKind::Svshold, &nick);
+            let setter = self.link_setter(msg);
+            self.remove_xline(crate::xline::XKind::Svshold, &nick, &setter);
         } else if msg.params.len() >= 3 {
             let Some(dur) = crate::xline::parse_duration(&msg.params[1]) else {
                 return;
@@ -1448,7 +1449,8 @@ impl Server {
         let Some(kind) = crate::xline::XKind::from_tag(&msg.params[0]) else {
             return;
         };
-        if self.remove_xline(kind, &msg.params[1]) {
+        let remover = self.link_setter(msg);
+        if self.remove_xline(kind, &msg.params[1], &remover) {
             self.propagate(&msg.to_wire(), Some(via));
         }
     }

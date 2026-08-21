@@ -1619,6 +1619,36 @@ mod tests {
     }
 
     #[test]
+    fn xline_add_remove_expire_all_notify() {
+        let mut s = srv();
+        s.name = "irc.test".to_string();
+        s.conf_path = std::env::temp_dir().join("echo-xline-notify-test").display().to_string();
+        let orx = add_user(&mut s, 1, "op");
+        if let Some(u) = s.users.get_mut(&1) {
+            u.flags.oper = true;
+            u.flags.snomask = true;
+            u.flags.snomask_cats = "x".to_string();
+        }
+        // permanent G-line, then removed
+        s.add_xline(crate::xline::XKind::Gline, "*@bad.example", 0, "op", "spam");
+        assert!(s.remove_xline(crate::xline::XKind::Gline, "*@bad.example", "op"));
+        assert!(!s.remove_xline(crate::xline::XKind::Gline, "*@bad.example", "op")); // gone: no re-announce
+        // a timed Z-line whose expiry is forced into the past, then purged
+        s.add_xline(crate::xline::XKind::Zline, "192.0.2.5", 3600, "op", "temp");
+        for x in s.xlines.iter_mut() {
+            if x.mask == "192.0.2.5" {
+                x.expires = 1;
+            }
+        }
+        s.purge_xlines();
+        let joined: String =
+            std::iter::from_fn(|| orx.try_recv().ok()).collect::<Vec<_>>().join("\n");
+        assert!(joined.contains("XLINE: op added a permanent G-line on *@bad.example: spam"), "add: {joined}");
+        assert!(joined.contains("XLINE: op removed a G-line on *@bad.example"), "remove: {joined}");
+        assert!(joined.contains("XLINE: Z-line on 192.0.2.5 expired"), "expire: {joined}");
+    }
+
+    #[test]
     fn dnsbl_hit_emits_expected_snotices() {
         use std::net::Ipv4Addr;
         let mut s = srv();

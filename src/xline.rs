@@ -294,8 +294,9 @@ impl Server {
         self.enforce_xlines();
     }
 
-    /// Remove an x-line by kind + mask; returns whether one was found.
-    pub fn remove_xline(&mut self, kind: XKind, mask: &str) -> bool {
+    /// Remove an x-line by kind + mask; announces it (snomask +x, like the add) and
+    /// returns whether one was found. `remover` is who took it off.
+    pub fn remove_xline(&mut self, kind: XKind, mask: &str, remover: &str) -> bool {
         let before = self.xlines.len();
         // case-insensitive: nick/host/channel masks match case-insensitively when
         // enforced, so removal must too (e.g. remove `CBAN #foo` for a `#Foo` ban).
@@ -303,6 +304,7 @@ impl Server {
             .retain(|x| !(x.kind == kind && x.mask.eq_ignore_ascii_case(mask)));
         let removed = self.xlines.len() < before;
         if removed {
+            self.snotice_c('x', &format!("XLINE: {remover} removed a {}-line on {mask}", kind.tag()));
             self.save_xlines();
         }
         removed
@@ -335,14 +337,24 @@ impl Server {
         }
     }
 
-    /// Drop expired x-lines (called on the background tick).
+    /// Drop expired x-lines (called on the background tick), announcing each one
+    /// (snomask +x) so the XLINE notices cover a ban's whole life: add → expire.
     pub fn purge_xlines(&mut self) {
         let n = now();
-        let before = self.xlines.len();
-        self.xlines.retain(|x| x.expires == 0 || x.expires > n);
-        if self.xlines.len() != before {
-            self.save_xlines(); // an expiry changed the set — persist it
+        let expired: Vec<(XKind, String)> = self
+            .xlines
+            .iter()
+            .filter(|x| x.expires != 0 && x.expires <= n)
+            .map(|x| (x.kind, x.mask.clone()))
+            .collect();
+        if expired.is_empty() {
+            return;
         }
+        self.xlines.retain(|x| x.expires == 0 || x.expires > n);
+        for (kind, mask) in &expired {
+            self.snotice_c('x', &format!("XLINE: {}-line on {mask} expired", kind.tag()));
+        }
+        self.save_xlines(); // an expiry changed the set — persist it
     }
 
     /// Path of the on-disk x-line db (beside the config file).

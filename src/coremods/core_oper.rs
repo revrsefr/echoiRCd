@@ -726,20 +726,16 @@ fn do_xline(s: &mut Server, uid: Uid, params: &[String], kind: XKind) -> CmdResu
         .map(|u| u.nick.clone())
         .unwrap_or_default();
     if params.len() < 2 {
-        let word = if s.remove_xline(kind, &mask) {
+        // A successful removal is announced by remove_xline (snomask +x), same as the
+        // add; only tell the oper directly when there was nothing to remove.
+        if s.remove_xline(kind, &mask, &nick) {
             s.propagate_delline(kind.tag(), &mask);
-            "removed"
         } else {
-            "not found"
-        };
-        s.send(
-            uid,
-            format!(
-                ":{} NOTICE {nick} :{}-line {word}: {mask}",
-                s.name,
-                kind.tag()
-            ),
-        );
+            s.send(
+                uid,
+                format!(":{} NOTICE {nick} :{}-line not found: {mask}", s.name, kind.tag()),
+            );
+        }
         return CmdResult::Ok;
     }
     // <mask> <duration> :<reason>; tolerate the durationless form by taking an
@@ -879,16 +875,14 @@ impl Command for Rline {
             .map(|u| u.nick.clone())
             .unwrap_or_default();
         if params.len() < 2 {
-            let word = if s.remove_xline(XKind::Rline, &pattern) {
+            if s.remove_xline(XKind::Rline, &pattern, &nick) {
                 s.propagate_delline("R", &pattern);
-                "removed"
             } else {
-                "not found"
-            };
-            s.send(
-                uid,
-                format!(":{} NOTICE {nick} :R-line {word}: {pattern}", s.name),
-            );
+                s.send(
+                    uid,
+                    format!(":{} NOTICE {nick} :R-line not found: {pattern}", s.name),
+                );
+            }
             return CmdResult::Ok;
         }
         if let Err(e) = crate::regex::Regex::new(&pattern) {
