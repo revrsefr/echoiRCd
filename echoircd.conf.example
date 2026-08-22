@@ -121,6 +121,10 @@ use_resolved_host = on
 # ban reason and may contain %ip% (the client address). Values may be "quoted".
 # dnsbl = domain=torexit.dan.me.uk name="Tor exit node" action=zline duration=1w reason="Tor exit nodes are not allowed on this network. See https://metrics.torproject.org/rs.html#search/%ip% for more information."
 
+# The pattern engine oper /FILTER rules are compiled with: glob (wildcards, the
+# default) or regex (a full regular expression). Applies to filters added after it.
+# filter_engine = glob
+
 # antimixedutf8 — block spam that mixes look-alike scripts within words.
 # action = block | kill | gline | kline | zline ; target = both | channel | private
 antimixedutf8 = off

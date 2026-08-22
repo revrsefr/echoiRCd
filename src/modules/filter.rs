@@ -2,7 +2,6 @@
 //! and, on a hit, an action is taken. The rule set lives in `Server.ext`, the
 //! `FILTER` command manages it, and the `on_pre_message` hook enforces it.
 
-use crate::channels::glob_match;
 use crate::command::{CmdResult, Command};
 use crate::module::{ModResult, Module};
 use crate::numeric::ERR_NOPRIVILEGES;
@@ -11,12 +10,29 @@ use crate::xline::{parse_duration, XKind};
 use crate::Uid;
 
 /// One filter rule.
-#[derive(Clone)]
 pub struct SpamFilter {
-    pub pattern: String, // glob matched against message text
+    pub pattern: String, // matched against message text via `engine`
+    pub engine: String,  // pattern engine: "glob" (default) or "regex"
     pub action: String,  // block | silent | kill | kline | gline | zline
     pub duration: u64,   // ban length for the *line actions (seconds; 0 = permanent)
     pub reason: String,
+    matcher: Box<dyn crate::modules::pattern::Matcher>, // compiled `pattern` for `engine`
+}
+
+impl SpamFilter {
+    /// Build a rule, compiling `pattern` with `engine` (`glob` or `regex`). Errors
+    /// (as a message string) if the engine is unknown or a regex is invalid, so a
+    /// bad rule is refused when set rather than silently never matching.
+    pub fn new(
+        pattern: String,
+        engine: String,
+        action: String,
+        duration: u64,
+        reason: String,
+    ) -> Result<SpamFilter, String> {
+        let matcher = crate::modules::pattern::compile(&engine, &pattern)?;
+        Ok(SpamFilter { pattern, engine, action, duration, reason, matcher })
+    }
 }
 
 /// The rule set, stored in `Server.ext`.
@@ -24,11 +40,11 @@ pub struct SpamFilter {
 pub struct Filters(pub Vec<SpamFilter>);
 
 impl Filters {
-    /// The (action, reason, duration) of the first rule whose glob matches `text`.
+    /// The (action, reason, duration) of the first rule whose pattern matches `text`.
     fn hit(&self, text: &str) -> Option<(String, String, u64)> {
         self.0
             .iter()
-            .find(|f| glob_match(&f.pattern, text))
+            .find(|f| f.matcher.is_match(text))
             .map(|f| (f.action.clone(), f.reason.clone(), f.duration))
     }
 }
@@ -121,7 +137,7 @@ impl Command for FilterCmd {
                     .map(|f| {
                         f.0.iter()
                             .map(|r| {
-                                format!("{} {} {} :{}", r.pattern, r.action, r.duration, r.reason)
+                                format!("{} [{}] {} {} :{}", r.pattern, r.engine, r.action, r.duration, r.reason)
                             })
                             .collect()
                     })
@@ -163,18 +179,42 @@ impl Command for FilterCmd {
                                 .unwrap_or_else(|| "Filtered".to_string()),
                         ),
                     };
+                    // Compile with the configured engine (glob default), rejecting a
+                    // bad rule now rather than having it silently never match.
+                    let engine = s.conf("filter_engine").unwrap_or("glob").to_string();
+                    let filter = match SpamFilter::new(pattern.clone(), engine.clone(), action.clone(), duration, reason) {
+                        Ok(f) => f,
+                        Err(e) => {
+                            s.send(uid, format!(":{} NOTICE {nick} :FILTER rejected ({e})", s.name));
+                            return CmdResult::Fail;
+                        }
+                    };
                     let f = s.ext.get_or_insert_with::<Filters>(Filters::default);
                     f.0.retain(|r| r.pattern != pattern);
-                    f.0.push(SpamFilter {
-                        pattern: pattern.clone(),
-                        action: action.clone(),
-                        duration,
-                        reason,
-                    });
-                    s.snotice_c('f', &format!("{nick} added FILTER {pattern} (action={action})"));
+                    f.0.push(filter);
+                    s.snotice_c('f', &format!("{nick} added FILTER {pattern} (engine={engine} action={action})"));
                 }
             }
         }
         CmdResult::Ok
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filter_matches_by_engine() {
+        let mut filters = Filters::default();
+        filters.0.push(SpamFilter::new("*buy now*".into(), "glob".into(), "block".into(), 0, "spam".into()).unwrap());
+        filters.0.push(SpamFilter::new("free.*money".into(), "regex".into(), "kill".into(), 0, "scam".into()).unwrap());
+        // glob is case-insensitive wildcard matching
+        assert!(filters.hit("hey BUY NOW cheap").is_some(), "glob rule matches");
+        // regex is a full expression (unanchored substring search)
+        assert_eq!(filters.hit("get free money here").map(|(a, _, _)| a), Some("kill".into()), "regex rule matches");
+        assert!(filters.hit("an ordinary message").is_none(), "no rule matches clean text");
+        // an invalid regex is refused when the rule is built
+        assert!(SpamFilter::new("(oops".into(), "regex".into(), "block".into(), 0, "x".into()).is_err());
     }
 }

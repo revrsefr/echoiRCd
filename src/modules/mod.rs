@@ -56,6 +56,7 @@ pub mod operlevels;
 pub mod operprefix;
 pub mod opertypes;
 pub mod password_hash;
+pub mod pattern;
 pub mod permchannels;
 pub mod profilelink;
 pub mod randquote;

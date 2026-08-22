@@ -19,6 +19,7 @@ pub fn handle(s: &mut Server, action: &str, params: &str) -> Result<String, RpcE
                         .map(|r| {
                             obj(&[
                                 ("pattern", qstr(&r.pattern)),
+                                ("engine", qstr(&r.engine)),
                                 ("reason", qstr(&r.reason)),
                                 ("action", qstr(&r.action)),
                                 ("duration", r.duration.to_string()),
@@ -36,16 +37,17 @@ pub fn handle(s: &mut Server, action: &str, params: &str) -> Result<String, RpcE
             let action = json::get_str(params, "action").unwrap_or_else(|| "block".into());
             let reason = json::get_str(params, "reason").unwrap_or_else(|| "Set via RPC".into());
             let duration = json::get_num::<u64>(params, "duration").unwrap_or(0);
+            // engine: an explicit param, else the configured default, else glob.
+            let engine = json::get_str(params, "engine")
+                .or_else(|| s.conf("filter_engine").map(str::to_string))
+                .unwrap_or_else(|| "glob".to_string());
+            let filter = SpamFilter::new(pattern, engine, action, duration, reason)
+                .map_err(|e| RpcError::invalid_params(&e))?;
             let set = s.ext.get_or_insert_with::<Filters>(Filters::default);
-            if set.0.iter().any(|f| f.pattern == pattern) {
+            if set.0.iter().any(|f| f.pattern == filter.pattern) {
                 return Err(RpcError::not_found("filter already exists"));
             }
-            set.0.push(SpamFilter {
-                pattern,
-                action,
-                duration,
-                reason,
-            });
+            set.0.push(filter);
             Ok(obj(&[("result", "true".into())]))
         }
         "del" => {
