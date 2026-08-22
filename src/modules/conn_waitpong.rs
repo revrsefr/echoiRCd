@@ -2,12 +2,17 @@
 //! PING with the exact cookie we sent, filtering bots that never PONG. Config:
 //!
 //! ```text
-//! conn_waitpong = yes                  # require the pong before registering (default off)
-//! conn_waitpong_killonbadreply = yes   # disconnect on a wrong pong (default: keep waiting)
+//! conn_waitpong = yes                       # require the pong before registering (default off)
+//! conn_waitpong_killonbadreply = yes        # disconnect on a wrong pong (default: keep waiting)
+//! conn_waitpong_exempt_localhost4 = yes     # skip the cookie for 127.0.0.0/8 (default off)
+//! conn_waitpong_exempt_localhost6 = yes     # skip the cookie for ::1 (default off)
+//! connectclass ... waitpongexempt=yes       # skip the cookie for a whole class
 //! ```
 //!
 //! The gate is the core `User.waitpong` field (checked in `try_register`); this
 //! module arms it at connect and clears it on the matching PONG.
+
+use std::net::IpAddr;
 
 use crate::server::Server;
 use crate::Uid;
@@ -19,10 +24,29 @@ fn cookie() -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
+/// Whether this client is exempt from the cookie: a per-class opt-out, or a
+/// loopback address whose family the config trusts. Both default off, so the
+/// challenge still applies everywhere unless explicitly relaxed.
+fn exempt(s: &Server, uid: Uid) -> bool {
+    if crate::modules::connclass::waitpong_exempt(s, uid) {
+        return true;
+    }
+    let Some(ip) = s.users.get(&uid).map(|u| u.addr.ip()) else {
+        return false;
+    };
+    match ip {
+        IpAddr::V4(a) if a.is_loopback() => s.conf_bool("conn_waitpong_exempt_localhost4", false),
+        IpAddr::V6(a) if a.is_loopback() => s.conf_bool("conn_waitpong_exempt_localhost6", false),
+        // a loopback client on an IPv6 listener can arrive v4-mapped (::ffff:127.0.0.1)
+        IpAddr::V6(a) => a.to_ipv4_mapped().is_some_and(|m| m.is_loopback()) && s.conf_bool("conn_waitpong_exempt_localhost4", false),
+        _ => false,
+    }
+}
+
 /// At connect: if enabled, stash a cookie on the user and PING it. `try_register`
-/// will not complete while `User.waitpong` is set.
+/// will not complete while `User.waitpong` is set. Exempt sources skip it.
 pub fn arm(s: &mut Server, uid: Uid) {
-    if !s.conf_bool("conn_waitpong", false) {
+    if !s.conf_bool("conn_waitpong", false) || exempt(s, uid) {
         return;
     }
     let c = cookie();

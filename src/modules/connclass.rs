@@ -52,6 +52,7 @@ pub struct ConnClass {
     pub requireident: bool,          // refuse if the ident lookup fails
     pub resolvehostnames: bool,      // resolve rDNS for this class (default yes)
     pub maxconnwarn: bool,           // snotice opers when a limit refuses a client
+    pub waitpongexempt: bool,        // skip the conn_waitpong cookie for this class
 }
 
 /// Split a `key=value` value on commas into non-empty pieces.
@@ -91,6 +92,7 @@ fn apply(c: &mut ConnClass, k: &str, v: &str) {
         "requireident" => c.requireident = v.eq_ignore_ascii_case("yes"),
         "resolvehostnames" => c.resolvehostnames = !v.eq_ignore_ascii_case("no"),
         "maxconnwarn" => c.maxconnwarn = v.eq_ignore_ascii_case("yes"),
+        "waitpongexempt" => c.waitpongexempt = v.eq_ignore_ascii_case("yes"),
         _ => {}
     }
 }
@@ -511,6 +513,10 @@ pub fn flood_over(s: &Server, uid: Uid) -> Option<(Option<usize>, Option<u64>, b
 /// Whether reverse-DNS should be resolved for this client's class (default yes).
 pub fn resolve_hostnames(s: &Server, uid: Uid) -> bool {
     class_of(s, uid).map(|c| c.resolvehostnames).unwrap_or(true)
+}
+/// Whether this client's class opts out of the conn_waitpong cookie.
+pub fn waitpong_exempt(s: &Server, uid: Uid) -> bool {
+    class_of(s, uid).map(|c| c.waitpongexempt).unwrap_or(false)
 }
 /// `(useident, requireident)` for this client's class.
 pub fn ident_policy(s: &Server, uid: Uid) -> (bool, bool) {
