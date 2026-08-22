@@ -16,6 +16,7 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(Time),
         Box::new(Admin),
         Box::new(Info),
+        Box::new(Modules),
         Box::new(Stats),
         Box::new(Map),
         Box::new(Help),
@@ -269,6 +270,28 @@ impl Command for Info {
             s.numeric(uid, RPL_INFO, &format!(":{line}"));
         }
         s.numeric(uid, RPL_ENDOFINFO, ":End of /INFO list");
+        CmdResult::Ok
+    }
+}
+
+struct Modules;
+impl Command for Modules {
+    fn name(&self) -> &'static str {
+        "MODULES"
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, _params: &[String]) -> CmdResult {
+        if !s.is_oper(uid) {
+            s.numeric(
+                uid,
+                ERR_NOPRIVILEGES,
+                ":Permission Denied- You're not an IRC operator",
+            );
+            return CmdResult::Fail;
+        }
+        for name in crate::modules::module_names() {
+            s.numeric(uid, RPL_MODLIST, &format!("{name} :loaded"));
+        }
+        s.numeric(uid, RPL_ENDOFMODLIST, ":End of MODULES list");
         CmdResult::Ok
     }
 }
