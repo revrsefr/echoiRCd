@@ -599,6 +599,18 @@ fn emit_block(out: &mut String, name: &str, fields: &[(String, String)]) {
             if let Some(v) = get("key") {
                 emit_line(out, "cloak_key", v);
             }
+            if let Some(v) = get("method") {
+                emit_line(out, "cloak_method", v);
+            }
+            if let Some(v) = get("static_host").or_else(|| get("static")) {
+                emit_line(out, "cloak_static_host", v);
+            }
+            if let Some(v) = get("account_prefix") {
+                emit_line(out, "cloak_account_prefix", v);
+            }
+            if let Some(v) = get("cert_prefix") {
+                emit_line(out, "cloak_cert_prefix", v);
+            }
         }
         "listen" => {
             if let (Some(ip), Some(port)) = (get("ip"), get("port")) {
@@ -668,6 +680,10 @@ fn emit_block(out: &mut String, name: &str, fields: &[(String, String)]) {
                     line.push_str(" autoconnect");
                 }
                 emit_line(out, "link", &line);
+                // `services yes` also marks the peer as a U-lined services server.
+                if get("services").is_some_and(yesish) || get("uline").is_some_and(yesish) {
+                    emit_line(out, "uline", nm);
+                }
             }
         }
         "webirc" => {
@@ -790,6 +806,51 @@ mod tests {
         assert_eq!(flat.opers.len(), block.opers.len());
         assert_eq!(flat.opers[0].password, block.opers[0].password);
         assert_eq!(flat.opers[0].oper_type, block.opers[0].oper_type);
+    }
+
+    #[test]
+    fn shipped_example_parses() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/echoircd.conf.example");
+        let text = std::fs::read_to_string(path).expect("example config present");
+        let c = cfg(&text);
+        assert_eq!(c.servername, "irc.example.net");
+        assert_eq!(c.network, "ExampleNet");
+        assert!(c.bind.iter().any(|b| b.ends_with(":6667")));
+        assert!(c.bind_tls.iter().any(|b| b.ends_with(":6697")));
+        assert!(c.bind_server.iter().any(|b| b.ends_with(":7000")));
+        assert_eq!(c.tls_cert.as_deref(), Some("./tls/cert.pem"));
+        assert_eq!(c.opers.len(), 1);
+        assert_eq!(c.opers[0].name, "admin");
+        assert_eq!(c.opers[0].oper_type.as_deref(), Some("netadmin"));
+        assert!(c.motd.len() >= 2);
+        assert_eq!(
+            c.raw.get("resolve_hosts").map(|v| v[0].as_str()),
+            Some("yes")
+        );
+    }
+
+    #[test]
+    fn block_cloak_and_uline() {
+        let c = cfg(r#"
+            cloak { key "s3cret"; method "sha256"; static_host "user.example.org"; }
+            link { name "svc.example.org"; ip 127.0.0.1; port 7700; password "p"; services yes; }
+        "#);
+        assert_eq!(c.cloak_key.as_deref(), Some("s3cret"));
+        assert_eq!(c.raw.get("cloak_method").map(|v| v[0].as_str()), Some("sha256"));
+        assert_eq!(
+            c.raw.get("cloak_static_host").map(|v| v[0].as_str()),
+            Some("user.example.org")
+        );
+        assert_eq!(c.raw.get("uline").map(|v| v[0].as_str()), Some("svc.example.org"));
+    }
+
+    #[test]
+    fn block_repeated_list_field() {
+        let c = cfg("modules { alias \"NS NickServ\"; alias \"CS ChanServ\"; }");
+        let al = c.raw.get("alias").unwrap();
+        assert_eq!(al.len(), 2);
+        assert_eq!(al[0], "NS NickServ");
+        assert_eq!(al[1], "CS ChanServ");
     }
 
     #[test]

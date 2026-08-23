@@ -1,553 +1,506 @@
-# echoIRCd config — simple key = value (repeat `motd` for extra lines).
-# Copy this file to `echoircd.conf` and fill in your own values.
-# NOTE: echoircd.conf is gitignored because it holds secrets (oper password,
-# cloak key, link password). Never commit your real config.
+###############################################################################
+#  echoIRCd configuration
+#
+#  Syntax:  section { field value; field value; ... }
+#    * one field per `;`             * comments: #  //  and  /* ... */
+#    * booleans are  yes / no        * quote values with spaces or #, e.g. "a b"
+#    * repeat a block (oper, listen, link) or a field (alias, motd) as needed
+#
+#  Every option below is shown with its BUILT-IN DEFAULT; uncomment a line only to
+#  change it. Nothing is hardcoded — all values are read at runtime and most apply
+#  again on `./echoircd rehash` (SIGHUP) without a restart.
+#
+#  Copy this file to `echoircd.conf` and fill in your own values. NOTE:
+#  echoircd.conf is gitignored because it holds secrets (oper password, cloak key,
+#  link password). Never commit your real config.
+#
+#  (The legacy flat `key = value` format is still accepted; a top-level `name {`
+#   selects this block format.)
+###############################################################################
 
-servername = irc.example.net
-network    = ExampleNet
-# Write this server's PID here on boot so `echoircd rehash` (and `kill -HUP`) can
-# find and signal it to reload the config in place. Omit to disable the pidfile.
-pidfile    = echoircd.pid
-# Listener addresses. `bind`, `bind_tls` and `bind_server` are all REPEATABLE — add a
-# line per address/port. A bare `[::]` binds IPv4 and IPv6 at once (dual-stack), and an
-# IPv4 client on it is normalized back to its real v4 address (not ::ffff:...). So a
-# single `[::]` line serves both families; use explicit lines to pin specific IPs/ports.
-bind       = 0.0.0.0:6667
-# bind     = [::]:6667        # dual-stack (IPv4 + IPv6) on one line
-# bind     = 0.0.0.0:6668     # an extra plaintext port
 
-# TLS listener. Generate a cert/key first, e.g.:
+# ═══ server identity ═════════════════════════════════════════════════════════
+server {
+    name        "irc.example.net";   # this server's unique name on the network
+    network     "ExampleNet";        # network name shown to clients
+    sid         "0AA";               # 3-char server id for S2S (digit + 2 alnum)
+    description "echoIRCd server";    # shown in LINKS / WHOIS 312
+    # Write this server's PID here on boot so `echoircd rehash` (and `kill -HUP`)
+    # can find and signal it to reload config in place. Omit to disable.
+    pidfile     "echoircd.pid";
+}
+
+
+# ═══ listeners ═══════════════════════════════════════════════════════════════
+# Repeatable. `ip "*"` (or "[::]") binds IPv4+IPv6 at once (dual-stack); an IPv4
+# client on it is normalized back to its real v4 address. type: client (default)
+# | server (S2S) ; tls yes = direct TLS ; wss yes = WebSocket-over-TLS.
+listen { ip "0.0.0.0"; port 6667; }              # plaintext clients
+listen { ip "0.0.0.0"; port 6697; tls yes; }     # TLS clients
+listen { ip "0.0.0.0"; port 7000; type server; } # server-to-server links
+# listen { ip "[::]";     port 6667; }            # dual-stack on one line
+# listen { ip "0.0.0.0";  port 7799; wss yes; }   # wss:// (browser IRC clients)
+# listen { ip "127.0.0.1"; port 8097; ws yes; }   # ws:// (plaintext WebSocket)
+
+
+# ═══ TLS ═════════════════════════════════════════════════════════════════════
+# Generate a cert/key first, e.g.:
 #   openssl req -x509 -newkey rsa:2048 -keyout tls/key.pem -out tls/cert.pem \
 #           -days 3650 -nodes -subj "/CN=irc.example.net"
-bind_tls   = 0.0.0.0:6697
-tls_cert   = ./tls/cert.pem
-tls_key    = ./tls/key.pem
 # The cert is re-read on REHASH, so a renewed cert applies without a restart.
-# SNI: serve a different cert for a given hostname. Repeatable.
-# tls_sni  = irc.example.net ./tls/example.crt ./tls/example.key
-# TLS backend: openssl (default) or rustls (pure-Rust, no system OpenSSL needed).
-# tls_backend = rustls
-# STS (Strict Transport Security): tell CAP 302 clients on the plaintext port to
-# upgrade to TLS and pin it. Off unless sts_duration > 0. Set sts_port to your TLS
-# port. Only enable once TLS is solid — clients will refuse plaintext for the pin.
-# sts_duration = 2592000     # seconds clients should stick to TLS (0 = off)
-# sts_port     = 6697        # the TLS port to upgrade to
-# sts_preload  = no          # advertise preload eligibility
+tls {
+    cert    "./tls/cert.pem";
+    key     "./tls/key.pem";
+    # backend openssl;   # openssl (default) | rustls (pure-Rust, no system OpenSSL)
+    # sni     "irc.example.net ./tls/example.crt ./tls/example.key";  # per-host cert (repeatable)
+}
 
-motd = Welcome to echoIRCd.
-motd = Edit the MOTD in your echoircd.conf.
 
-# --- server-to-server linking ---
-sid         = 0AA
-serverdesc  = echoIRCd server
-bind_server = 0.0.0.0:7000
-# link = <name> <ip> <port> <password> [autoconnect]   (the password is a shared secret)
-# link = peer.example.net 203.0.113.5 7000 CHANGE_THIS_LINK_SECRET autoconnect
+# ═══ MOTD ════════════════════════════════════════════════════════════════════
+motd {
+    "Welcome to echoIRCd.";
+    "Edit the MOTD in your echoircd.conf.";
+}
+# opermotd { "Welcome to the staff team."; }    # shown to opers via /OPERMOTD
 
-# services: the linked server that handles SASL (client AUTHENTICATE is relayed to
-# it). Leave unset to disable SASL. SASL EXTERNAL additionally needs the client on
-# TLS with a client certificate (its fingerprint is sent to services).
-# sasl_server = services.example.net
 
-# trusted web gateways (CGI:IRC / kiwiirc-style): they send WEBIRC to declare the
-# real client's host+ip. webirc = <password> [gateway-name] [ip-mask]; the ip-mask
-# restricts which source IP may use the password (recommended). Repeat for more.
-# webirc = CHANGE_THIS_WEBIRC_SECRET mygateway 203.0.113.9
+# ═══ operators ═══════════════════════════════════════════════════════════════
+# The password accepts plaintext, sha256:<hex>, pbkdf2:… or a bcrypt $2b$ hash.
+# Generate a bcrypt hash with:   printf '%s' 'yourpassword' | ./echoircd mkpasswd
+# Add fingerprint "<sha256>" to also (or only, with no password) require the
+# client's TLS certificate. A block with neither password nor fingerprint is
+# refused (it would let anyone oper up). type references an opertype below.
+oper {
+    name        "admin";
+    password    "CHANGE_THIS_PASSWORD";
+    type        netadmin;
+    # fingerprint "<sha256-cert-fp>";   # require this TLS client cert too (2FA)
+    # level       0;                     # operlevel (KILL protection tiers)
+}
 
-# IRC operators — oper = <name> <password> [level] [fp=<sha256>] [type=<id>]
-# The password may be positional (as below) or a named password=<hash> token;
-# both accept plaintext, sha256:<hex>, pbkdf2:… or a bcrypt $2b$ hash. Generate a
-# bcrypt hash with:  printf '%s' 'yourpassword' | ./echoircd mkpasswd
-oper = admin CHANGE_THIS_PASSWORD
-# oper = admin password=$2b$11$…hash… fp=<sha256> type=netadmin
+# Oper types (optional). No type = full access. A type is a named role (the WHOIS
+# "is a <title>") built from reusable capability classes; five ship built in:
+# helpop, globop, admin, servadmin, netadmin. Running a command your type doesn't
+# grant is refused; its modes/snomasks/vhost are applied on oper-up.
+# class    { name "helpdesk"; commands "CHECK"; snomasks "c"; }   # privs "..."
+# opertype { name "helpdesk"; classes "helpdesk"; modes "+ih"; title "Help_Desk"; level 15; }
 
-# Oper types (optional). An oper with no type= keeps full access. A type is a
-# named role (the WHOIS "is a <title>") built from reusable capability classes;
-# five ship built-in: helpop, globop, admin, servadmin, netadmin. Override or add
-# your own — see docs/operators.md. Running a command your type doesn't grant is
-# refused; the type's modes/snomasks/vhost are set automatically on oper-up.
-#   class = <id> commands=<A,B|*> [privs=<x,y|*>] [snomasks=<letters|*>]
-#   opertype = <id> classes=<a,b|*> [commands=..] [modes=+iw] [snomasks=+cg] \
-#              [vhost=host.name] [title=Nice_Title] [level=N]
-# class    = helpdesk commands=CHECK snomasks=c
-# opertype = helpdesk classes=helpdesk modes=+ih title=Help_Desk level=15
-# oper = alice sha256:<hex> type=netadmin
 
-# host-cloaking secret (+x). Use a long random hex string; keep it private.
-# Changing it re-cloaks everyone.
-cloak_key  = CHANGE_THIS_TO_A_LONG_RANDOM_HEX_STRING
+# ═══ server-to-server linking ════════════════════════════════════════════════
+# The password is a shared secret. services yes marks the peer as a U-lined
+# services server (also handles SASL if it is the sasl_server below).
+# link {
+#     name        "peer.example.net";
+#     ip          203.0.113.5;
+#     port        7000;
+#     password    "CHANGE_THIS_LINK_SECRET";
+#     autoconnect yes;      # dial it on boot / after a netsplit (default no)
+#     services    no;       # yes = U-lined services server
+# }
 
-# cloak_method — how +x cloaks are built. Repeatable/ordered: the first method
-# that applies to a user wins. Default (unset) = hmac-sha256. Methods:
-#   hmac-sha256  keyed, subnet-preserving host hash (the default)
-#   account      logged-in users show <cloak_account_prefix>/<account>
-#   fingerprint  TLS clients show <cloak_cert_prefix>/<hash of their cert>
-#   static       everyone shows the fixed cloak_static_host
-# e.g. account cloak for logged-in users, host hash for everyone else:
-# cloak_method = account
-# cloak_method = hmac-sha256
-# cloak_account_prefix = account          # default: account
-# cloak_cert_prefix    = cert             # default: cert
-# cloak_static_host    = users.example.net
+# The linked server that handles SASL (client AUTHENTICATE is relayed to it).
+# Unset = SASL disabled. SASL EXTERNAL also needs the client on TLS with a client
+# cert (its fingerprint is forwarded to services).
+# services { sasl_server "services.example.net"; }
 
-# reverse-DNS clients on connect (the "*** Looking up your hostname..." notices).
-# on (default) performs the lookup and reports the result; off skips it (bare IP).
-resolve_hosts = on
-# whether a resolved hostname is used in the hostmask (nick!user@host). on (default)
-# shows the domain; off keeps the IP in the mask even though the lookup still runs
-# and reports "Found your hostname". Only matters when resolve_hosts = on.
-use_resolved_host = on
 
-# allow a unique command prefix to resolve to its full command (e.g. WHOI -> WHOIS)
-# abbreviation = yes
+# ═══ WEBIRC gateways ═════════════════════════════════════════════════════════
+# Trusted web gateways (CGI:IRC / kiwiirc) send WEBIRC to declare the real
+# client's host+ip. mask restricts which source IP may use the password.
+# webirc { password "CHANGE_THIS_WEBIRC_SECRET"; name "mygateway"; mask "203.0.113.9"; }
 
-# customprefix — reconfigure built-in prefix tiers, or define brand-new ones.
-#   Built-in tiers (oper founder admin op halfop voice): a bare token = the sigil;
-#   ranktoset / ranktounset = min rank to grant / revoke it (a number or a tier name);
-#   depriv=no forbids removing it from yourself.
-# customprefix = op * ranktoset=admin ranktounset=admin depriv=no
-# customprefix = voice -
-#   New prefix (name is anything that isn't a built-in tier): letter + prefix required;
-#   rank (default 1), ranktoset/ranktounset (default rank), depriv (default yes).
-#   Ranks: voice=10 halfop=20 op=30 admin=40 founder=50 oper=60 (room to slot between).
-# customprefix = helper letter=V prefix=? rank=25 ranktoset=op ranktounset=op
 
-# DNS blocklist (DNSBL) checks on connect. Repeat `dnsbl`
-# for multiple zones. On a listing, `dnsbl_action` decides what happens:
-#   mark  = just show the "*** ... LISTED" notice, let them in (default, safe)
-#   kill  = disconnect them (no persistent ban)
-#   kline / gline / zline = add a ban (dnsbl_duration) and disconnect
-# (leave commented to disable DNSBL entirely)
-# dnsbl = dnsbl.dronebl.org
-# dnsbl = rbl.efnetrbl.org
-# dnsbl_action = mark
-# dnsbl_reason = Your host is listed in a DNS blocklist
-#
-# Per-blocklist form: attributes on one line override the globals above (unset
-# ones fall back to them). name= is the label in the DNSBL notice; reason= is the
-# ban reason and may contain %ip% (the client address). Values may be "quoted".
-# dnsbl = domain=torexit.dan.me.uk name="Tor exit node" action=zline duration=1w reason="Tor exit nodes are not allowed on this network. See https://metrics.torproject.org/rs.html#search/%ip% for more information."
+# ═══ host cloaking (+x) ══════════════════════════════════════════════════════
+cloak {
+    # Long random hex secret; keep it private. Changing it re-cloaks everyone.
+    key "CHANGE_THIS_TO_A_LONG_RANDOM_HEX_STRING";
+    # method — how +x cloaks are built (repeatable/ordered; first match wins).
+    # Default = hmac-sha256. Methods: hmac-sha256 (keyed subnet-preserving host
+    # hash) | account (<account_prefix>/<account>) | fingerprint
+    # (<cert_prefix>/<cert hash>) | static (everyone shows static_host).
+    # method         account;
+    # method         hmac-sha256;
+    # account_prefix "account";     # default: account
+    # cert_prefix    "cert";        # default: cert
+    # static_host    "users.example.net";
+}
 
-# The pattern engine oper /FILTER rules are compiled with: glob (wildcards, the
-# default) or regex (a full regular expression). Applies to filters added after it.
-# filter_engine = glob
 
-# antimixedutf8 — block spam that mixes look-alike scripts within words.
-# action = block | kill | gline | kline | zline ; target = both | channel | private
-antimixedutf8 = off
-amu_threshold = 8
-amu_minlen    = 10
-amu_action    = block
-amu_target    = both
+# ═══ DNS / ident ═════════════════════════════════════════════════════════════
+dns {
+    # reverse-DNS on connect (the "Looking up your hostname..." notices).
+    resolve_hosts     yes;   # yes (default) resolves + reports; no = bare IP
+    # whether a resolved name is used in the hostmask (only if resolve_hosts=yes).
+    use_resolved_host yes;   # yes (default) shows the domain; no keeps the IP
+    # ident (RFC1413): off by default; a connect class can also enable it.
+    # useident      yes;     # look up every client's ident (adds connect latency)
+    # requireident  yes;     # refuse clients whose ident can't be confirmed
+    # ident_timeout 5;       # seconds to wait for the ident reply
+}
 
-# +G censor words: `badword = <find> [replacement]` (omit replacement to block).
-# badword = examplebadword ***
 
-# --- OPERMOTD: message shown to opers via /OPERMOTD (one line per entry) ---
-# opermotd = Welcome to the staff team.
+# ═══ DNS blocklists (DNSBL) ══════════════════════════════════════════════════
+# Repeatable. On a listing, dnsbl_action decides: mark (notice only, default) |
+# kill (disconnect) | kline/gline/zline (ban for dnsbl_duration + disconnect).
+# dnsbl {
+#     dnsbl          "dnsbl.dronebl.org";
+#     dnsbl          "rbl.efnetrbl.org";
+#     dnsbl_action   "mark";
+#     dnsbl_reason   "Your host is listed in a DNS blocklist";
+#     dnsbl_duration 86400;    # ban seconds for kline/gline/zline (default 1 day)
+# }
+# Per-blocklist form (one value string; overrides the globals):
+# dnsbl { dnsbl "domain=torexit.dan.me.uk name=TorExit action=zline duration=1w reason=Tor-not-allowed"; }
 
-# --- self-service vhosts: /VHOST <user> <pass> sets your displayed host ---
-# vhost = alice s3cret alice.staff.example
 
-# --- command aliases: /NS ... -> PRIVMSG <target> :... (services shortcuts) ---
-# alias = NS NickServ
-# alias = CS ChanServ
+# ═══ limits (advertised in ISUPPORT and enforced) ════════════════════════════
+limits {
+    # maxnick            30;      # nick length (NICKLEN)
+    # maxchannel         50;      # channels a user may join (CHANLIMIT)
+    # maxbans            100;     # ban-list entries per channel (MAXLIST)
+    # maxinvites         100;     # pending invites tracked per user
+    # modes              20;      # mode changes per MODE line (MODES)
+    # max_line           16384;   # max bytes in one line / receive queue (16 KiB)
+    # max_sendq          1048576; # queued output before a slow client is dropped (1 MiB)
+    # whowas_maxentries  256;     # historical nick records retained
+    # maxwatch           128;     # WATCH entries per user
+    # maxmonitor         128;     # MONITOR entries per user
+    # maxsilence         32;      # SILENCE entries per user
+    # maxaccept          64;      # /ACCEPT (caller-id) entries per user
+    # maxsignore         64;      # server-ignore entries per user
+    # metadata_maxkeys   32;      # IRCv3 METADATA keys per target
+    # metadata_maxvalue  512;     # METADATA value length
+    # multiline_maxbytes 4096;    # draft/multiline: max bytes advertised + enforced
+    # multiline_maxlines 24;      # draft/multiline: max lines
+    # chathistory_limit  256;     # CHATHISTORY messages kept per conversation
+    # chathistory_maxage 604800;  # max age (secs) a client may request (7 days)
+    # dccallow_maxentries 20;     # /DCCALLOW list entries per user
+    # http_max_concurrent 32;     # in-flight outbound HTTP requests (API modules)
+}
 
-# --- connflood: refuse >max connections per <secs> from a single IP ---
-# connflood = 5 10
 
-# --- connectclass: per-class connection policy. Each line matches connecting
-#     clients by IP/host mask (glob OR CIDR) and optional TLS/port; the first match
-#     wins, else the global limits apply. Masks are tested against the IP at connect
-#     and re-tested against the resolved host at registration. Keys:
-#       allow=<mask[,mask]>   IP/host globs or CIDR (e.g. 10.0.0.0/8); any match hits
-#       deny=yes              reject clients matching this class
-#       parent=<name>         inherit this class's other settings (not allow/deny)
-#       requiressl=yes|trusted  require TLS; "trusted" also requires a client cert
-#       password=<pw>         client must send it via PASS; may be hashed
-#       hash=<algo>           names the hash of a hashed password (md5/sha256/…)
-#       port=<p[,p]>          only clients that connected to these listener ports
-#       localmax=<n>          max connections per IP in this class (local server)
-#       globalmax=<n>         max connections per IP across the whole network
-#       limit=<n>             max total local users in this class
-#       maxchans=<n>          max channels a member may join
-#       pingfreq=<secs>       ping frequency;  timeout=<secs>  registration timeout
-#       modes=<+modes>        usermodes set on connect
-#       recvq=<bytes>         receive-queue cap;  hardsendq=<bytes>  send-queue cap
-#       softsendq=<bytes>     send-queue level above which reads pause (backpressure)
-#       fakelag=no            disconnect flooders instead of rate-limiting them
-#       penaltythreshold=<n>  flood message cap;  commandrate=<secs>  flood window
-#       useident=yes          do an ident (RFC1413) lookup for this class
-#       requireident=yes      refuse clients whose ident can't be confirmed
-#       resolvehostnames=no   skip reverse-DNS for this class
-#       maxconnwarn=yes       snotice opers when a limit refuses a client
-#     (recvq/hardsendq/softsendq apply to plaintext clients; TLS clients and links
-#      use the global max_line/max_sendq below.)
-# connectclass = trusted allow=10.0.0.0/8   maxchans=200 pingfreq=120 fakelag=no
-# connectclass = secure  allow=*  requiressl=yes  password=sha256:<hex> hash=sha256
-# connectclass = vpn     allow=*  parent=trusted localmax=2 maxchans=20 modes=+ix
-# connectclass = banned  allow=1.2.3.0/24 deny=yes
-# connectclass_required = yes    # refuse clients that match no allow class (default no)
+# ═══ timeouts (seconds) ══════════════════════════════════════════════════════
+timeouts {
+    # registration_timeout 60;   # drop clients that never register (NICK+USER)
+    # ping_frequency       90;   # send a PING after this much idle time
+    # ping_timeout         60;   # then drop if no PONG within this much longer
+    # slow_command_ms      200;  # snotice when one core event takes >= this (0=off)
+}
 
-# --- global connection limits (per-class recvq/hardsendq/softsendq override these) ---
-# --- core-thread health (single-threaded core: nothing slow may run inline) ---
-# slow_command_ms = 200   # snotice when one event takes at least this long (0 = off)
-# watchdog_ms     = 5000  # a thread warns to the log if the core is stuck this long (0 = off)
 
-# max_line  = 16384            # max bytes in one line / receive queue (default 16 KiB)
-# max_sendq = 1048576          # max queued output before a slow client is dropped (1 MiB)
+# ═══ flood control ═══════════════════════════════════════════════════════════
+flood {
+    # flood_messages     8;    # messages allowed per window before dropping (opers exempt)
+    # flood_seconds      4;    # the flood window
+    # joinflood_duration 60;   # +j (join flood) default window
+    # nickflood_duration 60;   # +F (nick flood) default window
+    # connflood          "5 10";   # refuse > N connections per S seconds from one IP
+    # --- blockamsg: block mass /amsg and /ame ---
+    # blockamsg          yes;
+    # blockamsg_delay    3;    # same text to a different target list within N s = block
+    # blockamsg_action   block;   # block | kill | gline | kline | zline
+    # blockamsg_duration 900;  # ban seconds for a *line action
+}
 
-# --- I/O scaling ---
-# Client connections (plaintext and direct TLS) are served by a pool of reactor
-# threads that frame lines / run TLS crypto off the single state core. One acceptor
-# round-robins connections across the pool; the core stays single-threaded and lock-free.
-# io_threads = 0               # reactor workers; 0 = auto (one per core, capped at 4)
-# tls_handshake_timeout = 15   # drop a TLS conn that stalls mid-handshake (secs; 0 = off)
-# Per-IP accept-rate limit: drop connection-churn floods at the accept edge, before any
-# per-connection state is allocated (complements the connclass concurrent clone caps).
-# Off by default; a generous value never affects real clients but stops a flooder
-# opening/closing connections in a loop. Trusted proxies and server links are exempt.
-# accept_rate  = 0             # max NEW connections/sec per source IP (0 = off)
-# accept_burst = 0             # instantaneous burst allowed per IP (0 = same as accept_rate)
 
-# --- ident (RFC1413): off by default; a connection class can also enable it ---
-# useident      = yes          # look up every client's ident (adds connect latency)
-# requireident  = yes          # refuse clients whose ident can't be confirmed
-# ident_timeout = 5            # seconds to wait for the ident reply
+# ═══ connection policy ═══════════════════════════════════════════════════════
+connections {
+    # --- conn_waitpong: hold registration until the client echoes a PING cookie
+    #     (filters bots that never PONG; real clients auto-reply). ---
+    # conn_waitpong                    yes;
+    # conn_waitpong_killonbadreply     yes;  # drop on wrong pong (default: keep waiting)
+    # conn_waitpong_exempt_localhost4  yes;  # exempt 127.0.0.0/8
+    # conn_waitpong_exempt_localhost6  yes;  # exempt ::1
+    # --- connectban: z-line an IP range that opens too many connections ---
+    # connectban            yes;
+    # connectban_threshold  10;     # connections from a range before it's banned
+    # connectban_duration   21600;  # ban seconds (default 6h)
+    # connectban_bootwait   120;    # grace secs after startup (reconnect storm)
+    # connectban_gcinterval 3600;   # wipe the tally this often
+    # connectban_ipv4cidr   32;     # range width for IPv4 counting (/32)
+    # connectban_ipv6cidr   128;    # range width for IPv6 counting (/128)
+    # connectban_banmessage "Too many connections from your address";
+    # connectban_exempt     "10.0.0.0/8";   # never ban this glob/CIDR (repeatable)
+    # --- accept-rate: drop connection-churn floods at the accept edge ---
+    # accept_rate  0;   # max NEW connections/sec per source IP (0 = off)
+    # accept_burst 0;   # instantaneous burst per IP (0 = same as accept_rate)
+    # --- PROXY protocol: trust HAProxy/nginx PROXY header from these sources
+    #     (glob/CIDR, repeatable) so the real client IP is used. ---
+    # proxy 127.0.0.1;
+    # proxy 10.0.0.0/8;
+}
 
-# --- RLINE: the /RLINE <regex> [<duration>] :<reason> oper command bans users whose
-#     "nick!user@host realname" matches a regex (native engine; no config to enable).
-# rline_matchonnickchange = yes   # also re-check the R-lines when a user changes nick
+# --- connectclass: per-class connection policy. Each value matches connecting
+#     clients by IP/host mask (glob OR CIDR) + optional TLS/port; first match
+#     wins, else the global limits apply. One quoted value string per class:
+#       allow=<mask[,mask]> deny=yes parent=<name> requiressl=yes|trusted
+#       password=<pw> hash=<algo> port=<p[,p]> localmax=<n> globalmax=<n>
+#       limit=<n> maxchans=<n> pingfreq=<s> timeout=<s> modes=<+modes>
+#       recvq=<bytes> softsendq=<bytes> hardsendq=<bytes> fakelag=no
+#       penaltythreshold=<n> commandrate=<s> useident=yes requireident=yes
+#       resolvehostnames=no maxconnwarn=yes
+# classes {
+#     connectclass "trusted allow=10.0.0.0/8 maxchans=200 pingfreq=120 fakelag=no";
+#     connectclass "secure  allow=* requiressl=yes password=sha256:<hex> hash=sha256";
+#     connectclass "vpn     allow=* parent=trusted localmax=2 maxchans=20 modes=+ix";
+#     connectclass "banned  allow=1.2.3.0/24 deny=yes";
+#     connectclass_required yes;   # refuse clients that match no allow class (default no)
+# }
 
-# --- syslog: mirror the server-notice / log stream to the system logger ---
-# syslog          = yes
-# syslog_target   = /dev/log        # a Unix socket path, or host:port for UDP
-# syslog_facility = daemon          # kern user mail daemon auth ... local0..local7
-# syslog_tag      = echoircd
 
-# --- log_json: append the server-notice / log stream to a file as JSONL ---
-# log_json = /var/log/echoircd/events.jsonl
+# ═══ STS (Strict Transport Security) ═════════════════════════════════════════
+# Tell CAP-302 clients on the plaintext port to upgrade to TLS and pin it. Off
+# unless sts_duration > 0. Only enable once TLS is solid — clients will then
+# refuse plaintext for the pinned duration.
+# sts {
+#     sts_duration 2592000;   # seconds clients should stick to TLS (0 = off)
+#     sts_port     6697;      # the TLS port to upgrade to
+#     sts_preload  no;        # advertise preload eligibility
+# }
 
-# --- metrics: OpenMetrics/Prometheus scrape endpoint (plaintext HTTP GET). Off
-#     unless bound; expose it only on a private/loopback address or behind a proxy. ---
-# metrics_bind = 127.0.0.1:9109
 
-# --- rpc: token-authenticated JSON-RPC control plane over HTTP (admin tooling).
-#     Off unless rpc = yes AND rpc_bind is set. Bind privately; the token is a
-#     shared secret sent as HTTP Basic (rpc_user:rpc_token) or Bearer. ---
-# rpc       = yes
-# rpc_bind  = 127.0.0.1:8080
-# rpc_user  = admin
-# rpc_token = CHANGE_THIS_RPC_TOKEN
+# ═══ oper / staff behaviour ══════════════════════════════════════════════════
+opers {
+    # operprefix        yes;  # give every oper a `!` prefix (mode y, above owner)
+    # ojoin             yes;  # /OJOIN <#chan> — join as network staff with `!`
+    # ojoin_op          yes;  # also grant channel op on OJOIN (default yes)
+    # oper_svslogin     yes;  # allow services to SVSLOGIN opers to an oper block
+    # maphide           yes;  # hide LINKS / MAP from non-opers
+    # hideservices      yes;  # hide U-lined services from MAP/LINKS/STATS for non-opers
+    # rline_matchonnickchange yes;  # re-check /RLINE regex bans on nick change
+    # --- hidewhois: hide sensitive WHOIS lines from ordinary users ---
+    # hidewhois             yes;
+    # hidewhois_opers       yes;  # opers still see everything (default yes)
+    # hidewhois_selfview    yes;  # a user sees their own full WHOIS (default yes)
+    # hidewhois_hide_server yes;  # hide 312 server line (default yes)
+    # hidewhois_hide_idle   yes;  # hide 317 idle (default yes)
+    # hidewhois_hide_secure yes;  # hide 671 secure-connection (default yes)
+}
 
-# --- PROXY protocol: trust the HAProxy/nginx PROXY header (v1 or v2) from these
-#     sources (glob or CIDR, repeatable), so the real client IP is used instead of
-#     the proxy's. A connection from a trusted proxy MUST lead with a PROXY header.
-#     Applies to the plaintext and TLS client listeners (WebSocket uses XFF instead).
-# proxy = 127.0.0.1
-# proxy = 10.0.0.0/8
+# --- hidemode / hidelist: restrict who sees a mode change / list mode, by rank
+#     (owner|admin|op|halfop|voice). Opers/setter/links always see it. Repeatable.
+# channelvis {
+#     hidemode "b op";   # hide ban changes below op
+#     hidelist "b op";   # only ops may view the ban list
+# }
 
-# --- WebSocket transport (browser IRC clients connect straight to echoIRCd) ---
-# bind_ws               = 127.0.0.1:8097   # ws:// listener
-# bind_wss              = 0.0.0.0:7799      # wss:// listener (uses tls_cert/tls_key)
-# ws_origin             = https://x.example # (repeatable) allowed Origin globs; empty = any
-# ws_defaultmode        = text              # frame mode with no subprotocol: text|binary|reject
-# ws_proxyranges        = 127.0.0.1         # (repeatable) glob/CIDR of proxies whose
-#                                           # X-Real-IP / X-Forwarded-For we trust (scoped)
-# ws_trust_proxy        = no                # trust those headers from ANY peer (simpler but
-#                                           # allows IP spoofing; prefer ws_proxyranges)
-# ws_allowmissingorigin = yes               # allow clients that send no Origin header
-# ws_nativeping         = yes               # liveness via WebSocket pings (no = IRC PING)
-# ws_handshake_timeout  = 10                # seconds to complete the HTTP Upgrade
-# ws_ping_interval      = 60                # seconds between WebSocket keepalive pings
-# ws_timeout            = 120               # drop after this many seconds of silence
 
-# --- security groups: securitygroup = <name> [criteria...]
-#     criteria: public tls insecure account unregistered oper exclude-oper
-#     bot exclude-bot webirc exclude-webirc mask=<glob> exclude=<glob>
-#     scoremin=<n> scoremax=<n>   — use as an extban: MODE #c +b g:<name>
-# securitygroup = trusted account tls public
-# securitygroup = newbies scoremax=10 public
+# ═══ channels ════════════════════════════════════════════════════════════════
+channels {
+    # announce_channels yes;  # snotice opers when a brand-new channel is created
+    # chancreate        yes;  # (alias of announce_channels)
+    # channames_deny    "";   # forbid these chars in NEW channel names (control codes, etc.)
+    # permchannels_database "permchannels.db";  # +P permanent channels (default <conf>.permchannels)
+    # markread_database     "markread.db";      # draft/read-marker persistence (default <conf>.markread)
+    # --- restrictchans: only opers may CREATE channels (all may still join) ---
+    # restrictchans yes;
+    # restrictchan  "#public-*";   # glob whitelist ordinary users may create (repeatable)
+    # --- denychans: forbid joining channels matching a glob ---
+    # badchan  "#evil* reason=Off-limits redirect=#lobby allowopers=yes";
+    # goodchan "#evilgenius";      # whitelist back out of a broad badchan (repeatable)
+}
 
-# --- reputation: per-address scoring + y: score extban ---
-# reputation_database = reputation.db      # default: <conf>.reputation
-# reputation_ipv4prefix = 32               # CIDR bits used to key IPv4 scores
-# reputation_ipv6prefix = 64               # CIDR bits used to key IPv6 scores
-# reputation_bumpinterval = 5m             # how often a score bumps (+1, +2 if logged in)
-# reputation_expireinterval = 605          # how often decay rules run
-# reputation_saveinterval = 902            # how often the db is written
-# reputation_minchanmembers = 3            # only bump if in a channel this big
-# reputation_scorecap = 10000              # max score
-# reputation_whois = all                   # all | opers | self | none
-# reputationexpire = 2 1h                  # score<=2 decays after 1h  (repeatable; * = any)
-# reputationexpire = * 90d                 # any score decays after 90d
-# extban usage:  MODE #chan +b y:<100   (ban score below 100)   +b y:>500 (above 500)
 
-# --- permanent channels (+P): oper-only mode; the channel survives an empty
-#     member list AND a restart (its modes, topic, TS and ban lists are saved). ---
-# permchannels_database = permchannels.db  # default: <conf>.permchannels
+# ═══ users: on-connect behaviour ═════════════════════════════════════════════
+users {
+    # connbanner  "This network is for authorized users only.";  # NOTICE at connect (repeatable)
+    # conn_umodes "+ix";     # user modes auto-set on every client at connect (alias autoumodes)
+    # autojoin    "#lobby,#help";  # channels every client auto-joins (alias conn_join; repeatable)
+    # seenicks    yes;       # snotice opers on every nick change (default no)
+    # --- applied on successful OPER ---
+    # opermodes   "+ws";     # extra user modes set on oper-up (alias oper_umodes)
+    # operjoin    "#opers";  # channels an oper auto-joins on oper-up (repeatable)
+    # --- self-service vhosts: /VHOST <user> <pass> sets your displayed host ---
+    # vhost "alice s3cret alice.staff.example";   # (repeatable)
+}
 
-# --- read markers (IRCv3 draft/read-marker): account-keyed "last read" positions
-#     are persisted so they survive a restart, not just reconnects. ---
-# markread_database = markread.db          # default: <conf>.markread
 
-# --- whoisport: opers see the target's listener port in WHOIS (always on) ---
-# --- ircv3_network_icon: advertise a network icon via draft/ICON ISUPPORT ---
-# network_icon = https://example.org/icon.png
-# --- profileLink: a profile URL in WHOIS for logged-in users ---
-# profilelink_baseurl = https://example.org/profile/
-# --- hidewhois: hide sensitive WHOIS lines from ordinary users ---
-# hidewhois = yes
-# hidewhois_opers = yes        # opers still see everything
-# hidewhois_selfview = yes     # a user sees their own full WHOIS
-# hidewhois_hide_server = yes  # hide 312
-# hidewhois_hide_idle = yes    # hide 317
-# hidewhois_hide_secure = yes  # hide 671
-# --- chanlog: mirror the oper server-notice stream into a channel so
-#     staff can watch it in a normal window. Set the channel (create/keep it opped).
-#     Add snomask category letters after the channel to log only those categories
-#     (x x-lines, d dnsbl, c connects, o oper, q quit, k kill, …); no letters logs
-#     everything. Repeatable, so different snomasks can go to different channels:
-# chanlog = #snotices          # everything
-# chanlog = #bans      xdk     # only x-lines, dnsbl hits, and kills
-# chanlog = #conns     cq      # only connects and quits
-# --- extbanbanlist: no config — adds the matching extban
-#     `b:<#channel>`, so `+b b:#staff` catches everyone banned in #staff (shares a
-#     ban list between channels).
-# --- relaymsg (draft/relaymsg): an OPERATOR whose client negotiated the capability
-#     and who is in the channel can /RELAYMSG <#chan> <nick> <text> to speak under a spoofed relay
-#     nick (for bridges). The nick must contain a separator and not collide.
-# relaymsg_separators = /
-# relaymsg_ident = relay
-# relaymsg_host = relay.example.com     # default: the server name
-# --- operprefix: give every oper a `!` prefix (mode y, above owner)
-#     in all their channels — visible staff, and ops can't kick/deop them. Applied
-#     on oper-up/join, removed on de-oper.
-# operprefix = yes
-# --- ojoin: the /OJOIN <#chan> oper command — join as network staff with
-#     the `!` prefix (and channel op unless ojoin_op = no).
-# ojoin = yes
-# ojoin_op = yes
-# --- helpmode: no config — adds oper-settable user mode +h (helpop),
-#     which shows "is available for help" in the user's WHOIS.
-# --- globops: no config — adds the oper command /GLOBOPS <message>,
-#     broadcasting to all opers (like the server-notice stream).
-# --- autodrop: silently drop a not-yet-registered client that sends
-#     any of these commands (HTTP scanners blurt GET/POST before NICK/USER):
-# autodrop_commands = GET POST HEAD CONNECT PUT DELETE OPTIONS TRACE PATCH
-# --- hidemode: hide changes to a mode from members below a rank
-#     (the setter, opers and links always see it). Repeatable,
-#     `hidemode = <modechar> <rank>` (owner|admin|op|halfop|voice). e.g. hide bans:
-# hidemode = b op
-# --- hidelist: list modes (+b/+e/+I/…) are viewable by members by
-#     default; this restricts a given list to a minimum rank. Repeatable,
-#     `hidelist = <modechar> <rank>` (rank: owner|admin|op|halfop|voice). Opers see
-#     everything. e.g. only ops may view the ban list:
-# hidelist = b op
-# --- autoop: no config needed — it's the channel list mode +w. Grant a
-#     status prefix to matching users on join, `+w <prefix>:<hostmask>`, e.g.
-#       /MODE #chan +w o:*!*@trusted.host   (auto-op)
-#       /MODE #chan +w v:*!*@*.friend.net   (auto-voice)
-#     /MODE #chan +w  lists the entries.
-# --- banredirect: no config needed — it extends ban syntax. A
-#     ban `+b <mask>$<#channel>` bounces a matching user into #channel instead of
-#     refusing them, e.g.  /MODE #main +b *!*@*.spammer.net$#quarantine
-#     The redirect fires at most once (never loops).
-# --- solvemsg: an un-vouched user must answer one arithmetic
-#     question before their private messages are delivered (opers & logged-in
-#     accounts are exempt). Cheap anti-spam-bot gate.
-# solvemsg = yes
-# --- dccallow: block unwanted DCC transfers unless the recipient
-#     ran /DCCALLOW +<nick>. Blocked file globs are repeatable; blockchat also
-#     gates DCC CHAT. Recipients manage their allow-list with DCCALLOW +/-/LIST.
-# dccallow_blockfile = *.exe
-# dccallow_blockfile = *.scr
-# dccallow_blockchat = yes
-# dccallow_maxentries = 20
-# --- conn_waitpong: hold registration until the client answers
-#     a server PING with the exact cookie — filters bots that never PONG. Real
-#     clients auto-reply, so it's transparent to them.
-# conn_waitpong = yes
-# conn_waitpong_killonbadreply = yes   # drop on a wrong pong (default: keep waiting)
-# --- showfile: serve a text file as its own command. One line per
-#     file: `showfile = <COMMAND> <path>`. The file is read fresh each use, so
-#     edits show without a rehash. e.g. make /RULES stream a rules file:
-# showfile = RULES /etc/echoircd/rules.txt
-# --- geoip: native MaxMind .mmdb country lookup. Enables the
-#     G:<cc> ban extban (e.g. +b G:CN,RU), the oper GEOIP <nick|ip> command and
-#     a country line in WHOIS (opers). Point at a GeoLite2-Country.mmdb file:
-# geoip_database = /etc/echoircd/GeoLite2-Country.mmdb
-
-# --- tunable limits & timeouts (every one shown with its built-in default; set a
-#     line only to override it). None of these are hardcoded — all read at runtime.
-
-# flood: allow this many messages per this many seconds before dropping (opers exempt)
-# flood_messages = 8
-# flood_seconds  = 4
-
-# dnsbl: ban length in seconds when dnsbl_action is kline/gline/zline (default 1 day)
-# dnsbl_duration = 86400
-
-# draft/multiline: the max-bytes / max-lines advertised in the cap AND enforced
-# multiline_maxbytes = 4096
-# multiline_maxlines = 24
-
-# CHATHISTORY: messages kept per conversation (also the ceiling a client may request)
-# chathistory_limit = 256
-
-# EXTJWT: token line-chunk size (bytes) when splitting a long token across lines
-# extjwt_chunk = 200
-
-# per-user list sizes (advertised in ISUPPORT WATCH/MONITOR/SILENCE where applicable)
-# maxwatch    = 128
-# maxmonitor  = 128
-# maxsilence  = 32
-# maxaccept   = 64
-
-# WHOWAS: number of historical nick records retained
-# whowas_maxentries = 256
-
-# nick / channel name length limits (advertised as NICKLEN / CHANNELLEN)
-# maxnick    = 30
-# maxchannel = 50
-
-# connection timeouts, in seconds
-# registration_timeout = 60   # drop clients that never register (NICK+USER) in time
-# ping_frequency       = 90   # send a PING after this much idle time
-# ping_timeout         = 60   # then drop if no PONG within this much longer
-
-# =============================================================================
-#  on-connect behaviour
-# =============================================================================
-# connbanner: a NOTICE line sent to every connecting client (repeatable).
-# connbanner = This network is for authorized users only.
-# conn_umodes (alias autoumodes): user modes auto-set on every client at connect.
-# conn_umodes = +ix
-# autojoin (alias conn_join): channels every client auto-joins on connect
-# (comma/space separated; repeatable).
-# autojoin = #lobby,#help
-# seenicks: snotice opers every time a user changes nick (off by default).
-# seenicks = yes
-# chancreate (alias announce_channels): snotice opers when a brand-new channel
-# is created (off by default).
-# chancreate = yes
-# --- oper on-connect (applied on successful OPER) ---
-# opermodes (alias oper_umodes): extra user modes set when a user opers up.
-# opermodes = +ws
-# operjoin: channels an oper auto-joins on oper-up (comma/space separated, repeatable).
-# operjoin = #opers
-
-# =============================================================================
-#  account registration (IRCv3 draft/account-registration -> HTTP accounts API)
-# =============================================================================
+# ═══ account registration (IRCv3 draft/account-registration → HTTP API) ══════
 # Bridges REGISTER / VERIFY to an HTTP backend (POST form-encoded + X-API-Key).
-# account_registration    = yes            # master switch (default no)
-# acctregister_registerurl = https://accounts.example/register   # required
-# acctregister_verifyurl   = https://accounts.example/verify     # required for VERIFY
-# acctregister_apikey      = CHANGE_THIS_API_KEY                  # sent as X-API-Key
-# acctregister_autologin      = yes         # log the user in on successful register (default yes)
-# acctregister_beforeconnect  = yes         # allow REGISTER before registration completes (default yes)
-# acctregister_emailrequired  = yes         # require an email address (default yes)
-# acctregister_requiretls     = yes         # only over TLS (default yes)
-# acctregister_ratecount      = 3           # max register attempts per IP ...
-# acctregister_ratetime       = 3600        # ... per this many seconds
+# accounts {
+#     account_registration       yes;   # master switch (default no)
+#     acctregister_registerurl   "https://accounts.example/register";  # required
+#     acctregister_verifyurl     "https://accounts.example/verify";    # required for VERIFY
+#     acctregister_apikey        "CHANGE_THIS_API_KEY";                # sent as X-API-Key
+#     acctregister_autologin     yes;   # log in on successful register (default yes)
+#     acctregister_beforeconnect yes;   # allow REGISTER pre-registration (default yes)
+#     acctregister_emailrequired yes;   # require an email address (default yes)
+#     acctregister_requiretls    yes;   # only over TLS (default yes)
+#     acctregister_ratecount     3;     # max register attempts per IP ...
+#     acctregister_ratetime      3600;  # ... per this many seconds
+# }
 
-# =============================================================================
-#  human-verification gates at registration (anti-bot)
-# =============================================================================
-# --- recaptcha: hand an unverified user a token + URL; they solve it and send
-#     CAPTCHA <token>. JWT-only by default (no backend call needed). ---
-# recaptcha            = yes
-# recaptcha_secret     = CHANGE_THIS_HS256_SECRET   # signs the IP-bound token
-# recaptcha_url        = https://example.org/captcha?token=      # where to solve it
-# recaptcha_issuer     = echoIRCd                   # JWT issuer (default echoIRCd)
-# recaptcha_ttl        = 1800                        # token lifetime, secs (default 1800)
-# recaptcha_message    = Please verify you are human:
-# recaptcha_whitelistports = 6697                    # listener ports exempt (repeatable)
-# --- cloudflare_challenge: same idea via VERIFYCHALLENGE <token> ---
-# cloudflare_challenge = yes
-# cloudflare_secret    = CHANGE_THIS_HS256_SECRET
-# cloudflare_url       = https://example.org/challenge?token=
-# cloudflare_issuer    = echoIRCd
-# cloudflare_ttl       = 1800
-# cloudflare_message   = Solve the challenge:
-# cloudflare_whitelistports = 6697                   # (repeatable)
 
-# =============================================================================
-#  anti-spam / anti-drone
-# =============================================================================
-# --- antirandom: score random-looking nick/ident/realname (spam drones) ---
-# antirandom           = yes
-# antirandom_threshold = 10          # score at/above this acts (default 10)
-# antirandom_checkfull = yes         # also score ident + realname (default yes)
-# antirandom_action    = kill        # block | kill | gline | kline | zline
-# antirandom_duration  = 86400       # ban seconds for a *line action
-# antirandom_reason    = Random-looking connection rejected
-# antirandom_showfailed = no         # snotice opers on a hit (default no)
-# --- blockamsg: block mass /amsg and /ame (advertise/flood vector) ---
-# blockamsg          = yes
-# blockamsg_delay    = 3             # secs; same text to a different target list = block (default 3)
-# blockamsg_action   = block         # block | kill | gline | kline | zline
-# blockamsg_duration = 900           # ban seconds for a *line action (default 900)
-# --- connectban: z-line an IP range that opens too many connections ---
-# connectban            = yes
-# connectban_threshold  = 10         # connections from a range before it's banned (default 10)
-# connectban_duration   = 21600      # ban seconds (default 6h)
-# connectban_bootwait   = 120        # grace secs after startup (reconnect storm) (default 120)
-# connectban_gcinterval = 3600       # wipe the tally this often (default 3600)
-# connectban_ipv4cidr   = 32         # range width for IPv4 counting (default /32)
-# connectban_ipv6cidr   = 128        # range width for IPv6 counting (default /128)
-# connectban_banmessage = Too many connections from your address
-# connectban_exempt     = 10.0.0.0/8   # never ban this glob/CIDR (repeatable);
-#                                       # loopback (127.0.0.0/8, ::1) is always exempt
-# --- hashident: replace ident with a stable opaque token per IP ---
-# hashident     = yes
-# hashident_key = CHANGE_THIS_SECRET # HMAC key; makes the mapping unforgeable
+# ═══ human-verification gates (anti-bot) ═════════════════════════════════════
+# recaptcha: hand an unverified user a token+URL; they send CAPTCHA <token>.
+# cloudflare_challenge: same idea via VERIFYCHALLENGE <token>. JWT-only by default.
+# verification {
+#     recaptcha                 yes;
+#     recaptcha_secret          "CHANGE_THIS_HS256_SECRET";  # signs the IP-bound token
+#     recaptcha_url             "https://example.org/captcha?token=";
+#     recaptcha_issuer          "echoIRCd";   # JWT issuer (default echoIRCd)
+#     recaptcha_ttl             1800;         # token lifetime secs (default 1800)
+#     recaptcha_message         "Please verify you are human:";
+#     recaptcha_whitelistports  6697;         # listener ports exempt (repeatable)
+#     cloudflare_challenge      yes;
+#     cloudflare_secret         "CHANGE_THIS_HS256_SECRET";
+#     cloudflare_url            "https://example.org/challenge?token=";
+#     cloudflare_issuer         "echoIRCd";
+#     cloudflare_ttl            1800;
+#     cloudflare_message        "Solve the challenge:";
+#     cloudflare_whitelistports 6697;
+# }
 
-# =============================================================================
-#  access restrictions
-# =============================================================================
-# --- restrictmsg: only opers/services may be PM'd by ordinary users ---
-# restrictmsg = yes
-# --- restrictchans: only opers may CREATE channels (all may still join) ---
-# restrictchans = yes
-# restrictchan  = #public-*          # glob whitelist ordinary users may create (repeatable)
-# --- restrictcommand: hold a command back from new/unregistered users ---
-# restrictcommand = LIST connectdelay=60 exemptidentified=yes exemptwebirc=yes exempttls=no exemptscore=24 reason="Please wait a bit."
-# --- disable: refuse commands to ordinary users (opers bypass); reply 421 ---
-# disabled_commands = KNOCK          # space-separated; repeatable
-# --- denychans: forbid joining channels matching a glob ---
-# badchan  = #evil* reason="Off-limits." redirect=#lobby allowopers=yes
-# goodchan = #evilgenius             # whitelist back out of a broad badchan (repeatable)
-# --- channames: forbid characters in NEW channel names ---
-# channames_deny = 　                # e.g. control codes / unwanted Unicode
-# --- maphide: hide LINKS / MAP from non-opers ---
-# maphide = yes
-# --- securelist: delay /LIST for new connections (defeats list-spam bots) ---
-# securelist                  = yes
-# securelist_waittime         = 60    # seconds connected before /LIST works (default 60)
-# securelist_exemptregistered = yes   # logged-in users are exempt (default yes)
-# securelist_exception        = *!*@trusted.example   # exempt host glob (repeatable)
-# securelist_showmsg          = yes   # tell the early lister to wait (default yes)
-# securelist_fakechans        = 5     # size of the throwaway fake list shown (default 5)
-# securelist_fakechanprefix   = #     # prefix for the fake channels
-# securelist_fakechantopic    = ...   # topic shown on the fake channels
 
-# =============================================================================
-#  extra features
-# =============================================================================
-# --- customtitle: /TITLE <name> <pass> grants a WHOIS title (+ optional vhost) ---
-# customtitle = staff s3cret staff.example.net Network Staff
-# --- randquote: greet each connecting user with a random line (repeatable) ---
-# randquote = "The best way out is always through." — Robert Frost
-# --- extjwt: /EXTJWT issues a signed token proving IRC identity to a service ---
-# extjwt_secret   = CHANGE_THIS_HS256_SECRET       # required to enable
-# extjwt_duration = 30                              # token lifetime, seconds
-# extjwt_service  = myservice CHANGE_THIS_SERVICE_SECRET   # per-service key (repeatable)
-# --- filehost: advertise a file-upload service + hand logged-in users a token ---
-# filehost_website      = https://files.example.net
-# filehost_jwt_secret   = CHANGE_THIS_HS256_SECRET
-# filehost_jwt_issuer   = echoIRCd
-# filehost_requiressl   = yes         # only issue upload tokens to TLS users (default yes)
-# filehost_token_expiry = 3600        # upload-token lifetime, secs (default 3600)
-# filehost_auth_message = Upload here:
+# ═══ anti-spam / anti-drone ══════════════════════════════════════════════════
+antiabuse {
+    # --- antirandom: score random-looking nick/ident/realname (spam drones) ---
+    # antirandom            yes;
+    # antirandom_threshold  10;     # score at/above this acts (default 10)
+    # antirandom_checkfull  yes;    # also score ident + realname (default yes)
+    # antirandom_action     kill;   # block | kill | gline | kline | zline
+    # antirandom_duration   86400;  # ban seconds for a *line action
+    # antirandom_reason     "Random-looking connection rejected";
+    # antirandom_showfailed no;     # snotice opers on a hit (default no)
+    # --- hashident: replace ident with a stable opaque token per IP ---
+    # hashident     yes;
+    # hashident_key "CHANGE_THIS_SECRET";   # HMAC key; makes the mapping unforgeable
+    # --- solvemsg: unvouched users answer one arithmetic question before their
+    #     PMs are delivered (opers & logged-in accounts exempt). ---
+    # solvemsg yes;
+    # --- antimixedutf8: block spam mixing look-alike scripts within words ---
+    # antimixedutf8 yes;
+    # amu_threshold 8;
+    # amu_minlen    10;
+    # amu_action    block;   # block | kill | gline | kline | zline
+    # amu_target    both;    # both | channel | private
+    # amu_reason    "Mixed-script spam blocked";
+    # --- +G censor words: badword "<find> [replacement]" (omit = block) ---
+    # badword "examplebadword ***";
+}
+
+
+# ═══ access restrictions ═════════════════════════════════════════════════════
+restrictions {
+    # restrictmsg      yes;    # only opers/services may be PM'd by ordinary users
+    # disabled_commands "KNOCK";   # refuse these commands to ordinary users (repeatable)
+    # restrictcommand  "LIST connectdelay=60 exemptidentified=yes exempttls=no reason=Please-wait";
+    # --- securelist: delay /LIST for new connections (defeats list-spam bots) ---
+    # securelist                  yes;
+    # securelist_waittime         60;   # seconds connected before /LIST works
+    # securelist_exemptregistered yes;  # logged-in users are exempt (default yes)
+    # securelist_exception        "*!*@trusted.example";  # exempt host glob (repeatable)
+    # securelist_showmsg          yes;  # tell the early lister to wait (default yes)
+    # securelist_fakechans        5;    # size of the throwaway fake list shown
+    # securelist_fakechanprefix   "#";  # prefix for the fake channels
+    # securelist_fakechantopic    "";   # topic shown on the fake channels
+    # --- autodrop: silently drop a pre-registration client that sends any of
+    #     these (HTTP scanners blurt GET/POST before NICK/USER): ---
+    # autodrop_commands "GET POST HEAD CONNECT PUT DELETE OPTIONS TRACE PATCH";
+}
+
+
+# ═══ reputation & security groups ════════════════════════════════════════════
+# reputation: per-address scoring + y: score extban (MODE #c +b y:<100 / y:>500).
+# reputation {
+#     reputation_database       "reputation.db";  # default <conf>.reputation
+#     reputation_minchanmembers 3;      # only bump if in a channel this big
+#     reputation_scorecap       10000;  # max score
+#     reputation_whois          all;    # all | opers | self | none
+#     reputationexpire          "2 1h"; # score<=2 decays after 1h (repeatable; * = any)
+#     reputationexpire          "* 90d";
+# }
+# security groups — use as an extban: MODE #c +b g:<name>. criteria: public tls
+# insecure account unregistered oper exclude-oper bot webirc mask=<glob>
+# exclude=<glob> scoremin=<n> scoremax=<n>.
+# securitygroups {
+#     securitygroup "trusted account tls public";
+#     securitygroup "newbies scoremax=10 public";
+# }
+
+
+# ═══ logging & observability ═════════════════════════════════════════════════
+logging {
+    # --- syslog: mirror the server-notice / log stream to the system logger ---
+    # syslog          yes;
+    # syslog_target   "/dev/log";   # a Unix socket path, or host:port for UDP
+    # syslog_facility daemon;       # kern user mail daemon auth ... local0..local7
+    # syslog_tag      echoircd;
+    # --- log_json: append the log stream to a file as JSONL ---
+    # log_json "/var/log/echoircd/events.jsonl";
+    # --- snoop_stderr: also echo the server-notice stream to stderr ---
+    # snoop_stderr yes;
+    # --- metrics: OpenMetrics/Prometheus scrape endpoint (plaintext HTTP GET);
+    #     bind privately or behind a proxy. ---
+    # metrics_bind "127.0.0.1:9109";
+    # --- chanlog: mirror the oper snotice stream into a channel. Add snomask
+    #     letters after the channel to log only those (x x-lines, d dnsbl,
+    #     c connects, o oper, q quit, k kill …); none = everything. Repeatable. ---
+    # chanlog "#snotices";      # everything
+    # chanlog "#bans xdk";      # only x-lines, dnsbl hits, kills
+}
+
+
+# ═══ extra features / modules ════════════════════════════════════════════════
+modules {
+    # abbreviation yes;   # a unique command prefix resolves to its command (WHOI→WHOIS)
+    # --- command aliases: /NS ... → PRIVMSG <target> (services shortcuts) ---
+    # alias "NS NickServ";
+    # alias "CS ChanServ";
+    # --- customprefix: reconfigure built-in prefix tiers, or add new ones ---
+    #   Built-ins (oper founder admin op halfop voice): bare token = sigil;
+    #   ranktoset/ranktounset = min rank to grant/revoke; depriv=no locks self-removal.
+    # customprefix "op * ranktoset=admin ranktounset=admin depriv=no";
+    #   New tier: letter+prefix required; rank default 1 (voice=10 halfop=20 op=30
+    #   admin=40 founder=50 oper=60).
+    # customprefix "helper letter=V prefix=? rank=25 ranktoset=op ranktounset=op";
+    # --- customtitle: /TITLE <name> <pass> grants a WHOIS title (+ optional vhost) ---
+    # customtitle "staff s3cret staff.example.net Network Staff";
+    # --- randquote: greet each connecting user with a random line (repeatable) ---
+    # randquote "The best way out is always through. — Robert Frost";
+    # --- showfile: serve a text file as its own command (read fresh each use) ---
+    # showfile "RULES /etc/echoircd/rules.txt";
+    # --- filter (oper /FILTER): pattern engine for rules added after it ---
+    # filter_engine glob;   # glob (wildcards, default) | regex
+    # --- geoip: MaxMind .mmdb country lookup. Enables +b G:<cc>, GEOIP, WHOIS country ---
+    # geoip_database "/etc/echoircd/GeoLite2-Country.mmdb";
+    # --- network_icon: advertise a network icon via draft/ICON ISUPPORT ---
+    # network_icon "https://example.org/icon.png";
+    # --- profilelink: a profile URL in WHOIS for logged-in users ---
+    # profilelink_baseurl "https://example.org/profile/";
+    # --- relaymsg (draft/relaymsg): opers can /RELAYMSG under a spoofed nick (bridges) ---
+    # relaymsg_separators "/";
+    # relaymsg_ident      "relay";
+    # relaymsg_host       "relay.example.com";   # default: the server name
+    # --- extjwt: /EXTJWT issues a signed token proving IRC identity to a service ---
+    # extjwt_secret   "CHANGE_THIS_HS256_SECRET";   # required to enable
+    # extjwt_duration 30;     # token lifetime, seconds
+    # extjwt_chunk    200;    # token line-chunk size (bytes) when splitting
+    # extjwt_service  "myservice CHANGE_THIS_SERVICE_SECRET";   # per-service key (repeatable)
+    # --- filehost: advertise a file-upload service + hand logged-in users a token ---
+    # filehost_website      "https://files.example.net";
+    # filehost_jwt_secret   "CHANGE_THIS_HS256_SECRET";
+    # filehost_jwt_issuer   "echoIRCd";
+    # filehost_requiressl   yes;    # only issue upload tokens to TLS users (default yes)
+    # filehost_token_expiry 3600;   # upload-token lifetime, secs
+    # filehost_auth_message "Upload here:";
+    # --- dccallow: block unwanted DCC unless the recipient ran /DCCALLOW +<nick> ---
+    # dccallow_blockfile "*.exe";   # (repeatable)
+    # dccallow_blockchat yes;       # also gate DCC CHAT
+    # --- HTTP client (API modules): verify upstream TLS certificates ---
+    # http_tls_verify yes;
+}
+
+
+# ═══ WebSocket tuning (only if a ws/wss listener is defined) ══════════════════
+# websocket {
+#     ws_origin             "https://x.example";  # allowed Origin globs (repeatable); empty = any
+#     ws_proxyranges        "127.0.0.1";          # proxies whose X-Real-IP/XFF we trust (repeatable)
+#     ws_trust_proxy        no;    # trust those headers from ANY peer (allows spoofing)
+#     ws_allowmissingorigin yes;   # allow clients that send no Origin header
+#     ws_defaultmode        text;  # frame mode with no subprotocol: text|binary|reject
+#     ws_nativeping         yes;   # liveness via WebSocket pings (no = IRC PING)
+#     ws_handshake_timeout  10;    # seconds to complete the HTTP Upgrade
+#     ws_ping_interval      60;    # seconds between WebSocket keepalive pings
+#     ws_timeout            120;   # drop after this many seconds of silence
+# }
