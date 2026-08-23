@@ -5,6 +5,9 @@
 
 servername = irc.example.net
 network    = ExampleNet
+# Write this server's PID here on boot so `echoircd rehash` (and `kill -HUP`) can
+# find and signal it to reload the config in place. Omit to disable the pidfile.
+pidfile    = echoircd.pid
 # Listener addresses. `bind`, `bind_tls` and `bind_server` are all REPEATABLE — add a
 # line per address/port. A bare `[::]` binds IPv4 and IPv6 at once (dual-stack), and an
 # IPv4 client on it is normalized back to its real v4 address (not ::ffff:...). So a
