@@ -38,18 +38,21 @@ fn rehash_cli(cfgpath: &str) -> i32 {
             return 1;
         }
     };
-    if pid.parse::<u32>().is_err() {
-        eprintln!("echoircd: bad pidfile {pidfile} (contents: {pid:?})");
+    // Verify the pid is a live echoircd — guards a stale pidfile or a reused pid.
+    let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default();
+    if pid.parse::<u32>().is_err() || comm.trim() != "echoircd" {
+        eprintln!("echoircd: no running echoircd for pid {pid} (stale {pidfile}?) — start the server first.");
         return 1;
     }
     println!("rehashing server config file.");
     let sent = std::process::Command::new("kill")
         .args(["-s", "HUP", &pid])
+        .stderr(std::process::Stdio::null())
         .status()
         .map(|st| st.success())
         .unwrap_or(false);
     if !sent {
-        eprintln!("echoircd: could not signal pid {pid} — is the server running?");
+        eprintln!("echoircd: could not signal pid {pid}.");
         return 1;
     }
     println!("server configuration is reloaded.");
@@ -102,15 +105,13 @@ fn main() {
         std::process::exit(1);
     }
 
-    // Write a pidfile (default echoircd.pid) so `echoircd rehash` can find us.
-    let pidfile = cfg
-        .raw
-        .get("pidfile")
-        .and_then(|v| v.first())
-        .cloned()
-        .unwrap_or_else(|| "echoircd.pid".to_string());
-    if let Err(e) = std::fs::write(&pidfile, format!("{}\n", std::process::id())) {
-        eprintln!("echoircd: could not write pidfile {pidfile}: {e}");
+    // Write a pidfile only when `pidfile` is configured, so throwaway instances in
+    // the same directory (e.g. the integration-test harness) can't clobber a real
+    // server's pidfile and leave `echoircd rehash` pointing at a dead process.
+    if let Some(pidfile) = cfg.raw.get("pidfile").and_then(|v| v.first()).filter(|p| !p.is_empty()) {
+        if let Err(e) = std::fs::write(pidfile, format!("{}\n", std::process::id())) {
+            eprintln!("echoircd: could not write pidfile {pidfile}: {e}");
+        }
     }
 
     // global queue limits (per-class overrides layer on top of these in the reactor)
