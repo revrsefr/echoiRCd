@@ -101,6 +101,8 @@ pub enum Event {
     },
     /// Background timer tick — drives ping/idle timeouts.
     Tick,
+    /// Re-read the config file and apply it live (from SIGHUP / the `rehash` CLI).
+    Rehash,
 }
 
 /// Insert an extra IRCv3 tag into a wire line's tag block, creating the `@…`
@@ -323,6 +325,7 @@ impl Ircd {
                 let _ = reply.send(resp);
             }
             Event::Tick => self.on_tick(),
+            Event::Rehash => self.on_rehash(),
         }
         self.drain_hooks();
     }
@@ -643,6 +646,24 @@ impl Ircd {
 
     /// Background timer: PING idle clients, reap the unresponsive and the
     /// never-registered.
+    /// SIGHUP / `rehash` CLI: re-read the config and apply it live, keeping the
+    /// running config if the file can't be read (same policy as /REHASH).
+    fn on_rehash(&mut self) {
+        let path = self.server.conf_path.clone();
+        eprintln!("rehashing server config file.");
+        match Config::try_load(&path) {
+            Some(fresh) => {
+                self.server.announce("The server is rehashing its configuration.");
+                self.server.apply_config(fresh);
+                self.server.announce("Server configuration reloaded.");
+                eprintln!("server configuration is reloaded.");
+            }
+            None => {
+                eprintln!("rehash: could not read {path} — the running configuration was kept.");
+            }
+        }
+    }
+
     fn on_tick(&mut self) {
         self.server.ping_links(); // keepalive on every server link
         self.server.purge_xlines(); // drop expired server bans

@@ -14,6 +14,8 @@ name = "echoircd"
 path = "src/lib.rs"
 
 [dependencies]
+# SIGHUP → config rehash, without unsafe (the crate keeps signal setup internal).
+signal-hook = "0.3"
 # TLS backend: openssl. The crate keeps all `unsafe` internal, so the daemon
 # stays `#![forbid(unsafe_code)]`. A pure-Rust `rustls` backend can slot in beside it.
 openssl = "0.10"

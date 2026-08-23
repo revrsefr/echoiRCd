@@ -22,3 +22,6 @@ bin/
 # local backups / scratch config copies
 *.bak-*
 echoircd.conf.*
+
+# runtime pidfile
+*.pid

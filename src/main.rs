@@ -20,10 +20,51 @@ use echoircd::ircd::{Event, Ircd};
 use echoircd::socketengine;
 use echoircd::tls::{OpensslBackend, TlsBackend};
 
+/// `echoircd rehash [config]`: read the running server's pidfile and send it
+/// SIGHUP so it reloads its config in place, then exit. No unsafe — the signal is
+/// sent via the `kill` command.
+fn rehash_cli(cfgpath: &str) -> i32 {
+    let cfg = Config::load(cfgpath);
+    let pidfile = cfg
+        .raw
+        .get("pidfile")
+        .and_then(|v| v.first())
+        .cloned()
+        .unwrap_or_else(|| "echoircd.pid".to_string());
+    let pid = match std::fs::read_to_string(&pidfile) {
+        Ok(s) => s.trim().to_string(),
+        Err(_) => {
+            eprintln!("echoircd: no pidfile at {pidfile} — is the server running?");
+            return 1;
+        }
+    };
+    if pid.parse::<u32>().is_err() {
+        eprintln!("echoircd: bad pidfile {pidfile} (contents: {pid:?})");
+        return 1;
+    }
+    println!("rehashing server config file.");
+    let sent = std::process::Command::new("kill")
+        .args(["-s", "HUP", &pid])
+        .status()
+        .map(|st| st.success())
+        .unwrap_or(false);
+    if !sent {
+        eprintln!("echoircd: could not signal pid {pid} — is the server running?");
+        return 1;
+    }
+    println!("server configuration is reloaded.");
+    0
+}
+
 fn main() {
-    let path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "echoircd.conf".to_string());
+    let mut args = std::env::args().skip(1);
+    let first = args.next();
+    // `echoircd rehash [config]` signals a running server instead of booting one.
+    if first.as_deref() == Some("rehash") {
+        let cfgpath = args.next().unwrap_or_else(|| "echoircd.conf".to_string());
+        std::process::exit(rehash_cli(&cfgpath));
+    }
+    let path = first.unwrap_or_else(|| "echoircd.conf".to_string());
     let cfg = Config::load(&path);
 
     // precompute the bcrypt constants off-thread so the first hash never stalls the core
@@ -59,6 +100,17 @@ fn main() {
     if client_listeners.is_empty() {
         eprintln!("echoircd: no plaintext listener could bind; exiting");
         std::process::exit(1);
+    }
+
+    // Write a pidfile (default echoircd.pid) so `echoircd rehash` can find us.
+    let pidfile = cfg
+        .raw
+        .get("pidfile")
+        .and_then(|v| v.first())
+        .cloned()
+        .unwrap_or_else(|| "echoircd.pid".to_string());
+    if let Err(e) = std::fs::write(&pidfile, format!("{}\n", std::process::id())) {
+        eprintln!("echoircd: could not write pidfile {pidfile}: {e}");
     }
 
     // global queue limits (per-class overrides layer on top of these in the reactor)
@@ -121,6 +173,21 @@ fn main() {
             break;
         }
     });
+
+    // SIGHUP → live config rehash (the mechanism the `rehash` CLI uses).
+    match signal_hook::iterator::Signals::new([signal_hook::consts::SIGHUP]) {
+        Ok(mut signals) => {
+            let sig_tx = tx.clone();
+            thread::spawn(move || {
+                for _ in signals.forever() {
+                    if sig_tx.send(Event::Rehash).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        Err(e) => eprintln!("echoircd: SIGHUP handler unavailable: {e}"),
+    }
 
     // reactor worker pool: shared by the plaintext acceptor and the direct-TLS
     // acceptor, so client I/O (framing + TLS crypto) spreads across cores.
