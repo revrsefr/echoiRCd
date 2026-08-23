@@ -197,6 +197,15 @@ impl Config {
 
     /// Parse `key = value` lines into `c`; unknown keys and comments are ignored.
     fn parse_into(c: &mut Config, text: &str) {
+        // Two accepted syntaxes: the brace/block format and the legacy flat
+        // `key = value` format. A top-level `name {` selects blocks, which are
+        // translated to the flat form and re-parsed through this same path, so
+        // the two formats can never diverge.
+        if looks_like_blocks(text) {
+            let flat = blocks_to_flat(text);
+            Self::parse_into(c, &flat);
+            return;
+        }
         for line in text.lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
@@ -353,6 +362,341 @@ impl Config {
     }
 }
 
+// ─── block/brace config parser ──────────────────────────────────────────────
+// The brace format (`server { name "x"; ... }`) is translated to the flat
+// `key = value` text that `parse_into` already understands, so both syntaxes
+// funnel through one code path and can never diverge. Structural blocks map
+// their short field names onto the internal keys / entity line grammars; every
+// other block (`set`, `limits`, …) is cosmetic grouping whose fields are flat
+// keys, so the long tail of module options needs no per-key mapping.
+
+#[derive(PartialEq)]
+enum Tok {
+    Open,
+    Close,
+    Semi,
+    Word(String),
+}
+
+/// A file is in block format if some non-comment line is `identifier {` — the
+/// flat `key = value` format never puts a bare identifier before an unquoted `{`.
+fn looks_like_blocks(text: &str) -> bool {
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty()
+            || line.starts_with('#')
+            || line.starts_with("//")
+            || line.starts_with(';')
+        {
+            continue;
+        }
+        if let Some(pos) = line.find('{') {
+            let head = line[..pos].trim();
+            if !head.is_empty()
+                && !head.contains('=')
+                && head
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Tokenize the block format: `{ } ;`, quoted strings, and bare words. Line
+/// (`#`, `//`) and block (`/* */`) comments are skipped.
+fn tokenize(text: &str) -> Vec<Tok> {
+    let c: Vec<char> = text.chars().collect();
+    let n = c.len();
+    let mut i = 0;
+    let mut toks = Vec::new();
+    while i < n {
+        let ch = c[i];
+        if ch.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        if ch == '#' || (ch == '/' && i + 1 < n && c[i + 1] == '/') {
+            while i < n && c[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if ch == '/' && i + 1 < n && c[i + 1] == '*' {
+            i += 2;
+            while i + 1 < n && !(c[i] == '*' && c[i + 1] == '/') {
+                i += 1;
+            }
+            i = (i + 2).min(n);
+            continue;
+        }
+        match ch {
+            '{' => {
+                toks.push(Tok::Open);
+                i += 1;
+            }
+            '}' => {
+                toks.push(Tok::Close);
+                i += 1;
+            }
+            ';' => {
+                toks.push(Tok::Semi);
+                i += 1;
+            }
+            '"' => {
+                i += 1;
+                let mut s = String::new();
+                while i < n {
+                    if c[i] == '\\' && i + 1 < n {
+                        s.push(match c[i + 1] {
+                            'n' => '\n',
+                            't' => '\t',
+                            o => o,
+                        });
+                        i += 2;
+                        continue;
+                    }
+                    if c[i] == '"' {
+                        i += 1;
+                        break;
+                    }
+                    s.push(c[i]);
+                    i += 1;
+                }
+                toks.push(Tok::Word(s));
+            }
+            _ => {
+                let mut s = String::new();
+                while i < n {
+                    let x = c[i];
+                    if x.is_whitespace() || x == '{' || x == '}' || x == ';' || x == '"' {
+                        break;
+                    }
+                    if x == '#' {
+                        break;
+                    }
+                    if x == '/' && i + 1 < n && (c[i + 1] == '/' || c[i + 1] == '*') {
+                        break;
+                    }
+                    s.push(x);
+                    i += 1;
+                }
+                toks.push(Tok::Word(s));
+            }
+        }
+    }
+    toks
+}
+
+/// Translate block syntax into the equivalent flat `key = value` text.
+fn blocks_to_flat(text: &str) -> String {
+    let toks = tokenize(text);
+    let n = toks.len();
+    let mut i = 0;
+    let mut out = String::new();
+    while i < n {
+        let name = match &toks[i] {
+            Tok::Word(w) => w.clone(),
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+        i += 1;
+        if i < n && toks[i] == Tok::Open {
+            i += 1;
+            let mut fields: Vec<(String, String)> = Vec::new();
+            while i < n && toks[i] != Tok::Close {
+                let field = match &toks[i] {
+                    Tok::Word(w) => w.clone(),
+                    _ => {
+                        i += 1;
+                        continue;
+                    }
+                };
+                i += 1;
+                let mut vals = Vec::new();
+                while i < n && toks[i] != Tok::Semi && toks[i] != Tok::Close {
+                    if let Tok::Word(w) = &toks[i] {
+                        vals.push(w.clone());
+                    }
+                    i += 1;
+                }
+                if i < n && toks[i] == Tok::Semi {
+                    i += 1;
+                }
+                fields.push((field, vals.join(" ")));
+            }
+            if i < n {
+                i += 1; // consume `}`
+            }
+            emit_block(&mut out, &name, &fields);
+        } else {
+            // top-level `key value... ;` with no braces
+            let mut vals = Vec::new();
+            while i < n && toks[i] != Tok::Semi {
+                if let Tok::Word(w) = &toks[i] {
+                    vals.push(w.clone());
+                }
+                i += 1;
+            }
+            if i < n {
+                i += 1;
+            }
+            emit_line(&mut out, &name, &vals.join(" "));
+        }
+    }
+    out
+}
+
+fn emit_line(out: &mut String, key: &str, value: &str) {
+    out.push_str(key);
+    out.push_str(" = ");
+    out.push_str(&value.replace('\n', " "));
+    out.push('\n');
+}
+
+/// Expand one block into flat `key = value` lines.
+fn emit_block(out: &mut String, name: &str, fields: &[(String, String)]) {
+    let get = |k: &str| {
+        fields
+            .iter()
+            .find(|(f, _)| f.eq_ignore_ascii_case(k))
+            .map(|(_, v)| v.as_str())
+    };
+    match name.to_ascii_lowercase().as_str() {
+        "server" => {
+            if let Some(v) = get("name") {
+                emit_line(out, "servername", v);
+            }
+            if let Some(v) = get("network") {
+                emit_line(out, "network", v);
+            }
+            if let Some(v) = get("sid") {
+                emit_line(out, "sid", v);
+            }
+            if let Some(v) = get("description").or_else(|| get("desc")) {
+                emit_line(out, "description", v);
+            }
+            if let Some(v) = get("pidfile") {
+                emit_line(out, "pidfile", v);
+            }
+        }
+        "tls" => {
+            if let Some(v) = get("backend") {
+                emit_line(out, "tls_backend", v);
+            }
+            if let Some(v) = get("cert") {
+                emit_line(out, "tls_cert", v);
+            }
+            if let Some(v) = get("key") {
+                emit_line(out, "tls_key", v);
+            }
+        }
+        "cloak" => {
+            if let Some(v) = get("key") {
+                emit_line(out, "cloak_key", v);
+            }
+        }
+        "listen" => {
+            if let (Some(ip), Some(port)) = (get("ip"), get("port")) {
+                let addr = if ip.contains(':') && !ip.starts_with('[') {
+                    format!("[{ip}]:{port}")
+                } else {
+                    format!("{ip}:{port}")
+                };
+                let key = if get("type").is_some_and(|t| t.eq_ignore_ascii_case("server")) {
+                    "bind_server"
+                } else if get("wss").is_some_and(yesish) {
+                    "bind_wss"
+                } else if get("tls").is_some_and(yesish) {
+                    "bind_tls"
+                } else {
+                    "bind"
+                };
+                emit_line(out, key, &addr);
+            }
+        }
+        "oper" => {
+            if let Some(nm) = get("name") {
+                let mut line = nm.to_string();
+                if let Some(pw) = get("password") {
+                    line.push_str(" password=");
+                    line.push_str(pw);
+                }
+                if let Some(fp) = get("fingerprint")
+                    .or_else(|| get("fp"))
+                    .or_else(|| get("certfp"))
+                {
+                    line.push_str(" fp=");
+                    line.push_str(fp);
+                }
+                if let Some(t) = get("type") {
+                    line.push_str(" type=");
+                    line.push_str(t);
+                }
+                if let Some(l) = get("level") {
+                    line.push(' ');
+                    line.push_str(l);
+                }
+                emit_line(out, "oper", &line);
+            }
+        }
+        n @ ("opertype" | "class") => {
+            if let Some(nm) = get("name") {
+                let mut line = nm.to_string();
+                for (f, v) in fields {
+                    if f.eq_ignore_ascii_case("name") {
+                        continue;
+                    }
+                    line.push(' ');
+                    line.push_str(f);
+                    line.push('=');
+                    line.push_str(v);
+                }
+                emit_line(out, n, &line);
+            }
+        }
+        "link" => {
+            if let (Some(nm), Some(ip), Some(port), Some(pw)) =
+                (get("name"), get("ip"), get("port"), get("password"))
+            {
+                let mut line = format!("{nm} {ip} {port} {pw}");
+                if get("autoconnect").is_some_and(yesish) {
+                    line.push_str(" autoconnect");
+                }
+                emit_line(out, "link", &line);
+            }
+        }
+        "webirc" => {
+            if let Some(pw) = get("password") {
+                let gw = get("name").or_else(|| get("gateway")).unwrap_or("webirc");
+                let mask = get("mask").or_else(|| get("ipmask")).unwrap_or("");
+                emit_line(out, "webirc", format!("{pw} {gw} {mask}").trim_end());
+            }
+        }
+        motd @ ("motd" | "opermotd") => {
+            for (f, v) in fields {
+                let line = if v.is_empty() {
+                    f.clone()
+                } else {
+                    format!("{f} {v}")
+                };
+                emit_line(out, motd, &line);
+            }
+        }
+        // grouping blocks (set, limits, …): each field is a flat key; a bare
+        // field with no value (`operprefix;`) enables it.
+        _ => {
+            for (f, v) in fields {
+                emit_line(out, f, if v.is_empty() { "yes" } else { v });
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -361,6 +705,97 @@ mod tests {
         let mut c = Config::default();
         Config::parse_into(&mut c, text);
         c.opers
+    }
+
+    fn cfg(text: &str) -> Config {
+        let mut c = Config::default();
+        Config::parse_into(&mut c, text);
+        c
+    }
+
+    #[test]
+    fn block_server_and_set() {
+        let c = cfg(r#"
+            server {
+                name    "irc.example.org";
+                network "ExampleNet";
+                sid     0AB;
+            }
+            set {
+                operprefix yes;
+                nicklen    30;
+            }
+        "#);
+        assert_eq!(c.servername, "irc.example.org");
+        assert_eq!(c.network, "ExampleNet");
+        assert_eq!(c.sid, "0AB");
+        assert_eq!(c.raw.get("operprefix").map(|v| v[0].as_str()), Some("yes"));
+        assert_eq!(c.raw.get("nicklen").map(|v| v[0].as_str()), Some("30"));
+    }
+
+    #[test]
+    fn block_oper_and_credential_guard() {
+        let c = cfg(r#"
+            oper {
+                name     "reverse";
+                password "$2b$11$abc.def/ghi";
+                type     netadmin;
+            }
+            oper { name "ghost"; }   // no credential -> dropped
+        "#);
+        assert_eq!(c.opers.len(), 1);
+        assert_eq!(c.opers[0].name, "reverse");
+        assert_eq!(c.opers[0].password, "$2b$11$abc.def/ghi");
+        assert_eq!(c.opers[0].oper_type.as_deref(), Some("netadmin"));
+    }
+
+    #[test]
+    fn block_listen_picks_bind_key() {
+        let c = cfg(r#"
+            listen { ip "*"; port 6667; }
+            listen { ip "*"; port 6697; tls yes; }
+            listen { ip 127.0.0.1; port 7700; type server; }
+        "#);
+        assert!(c.bind.iter().any(|b| b == "*:6667"));
+        assert!(c.bind_tls.iter().any(|b| b == "*:6697"));
+        assert!(c.bind_server.iter().any(|b| b == "127.0.0.1:7700"));
+    }
+
+    #[test]
+    fn block_link_and_comments() {
+        let c = cfg(r#"
+            # a link block, mixed comment styles
+            link {
+                name        "services.example.org";
+                ip          127.0.0.1;  /* loopback */
+                port        7700;
+                password    "s3cr3t";
+                autoconnect yes;
+            }
+        "#);
+        assert_eq!(c.links.len(), 1);
+        assert_eq!(c.links[0].name, "services.example.org");
+        assert_eq!(c.links[0].port, 7700);
+        assert_eq!(c.links[0].password, "s3cr3t");
+        assert!(c.links[0].autoconnect);
+    }
+
+    #[test]
+    fn block_and_flat_agree() {
+        let flat = cfg("servername = irc.x\noper = reverse password=$2b$11$z type=netadmin\n");
+        let block = cfg(
+            "server { name \"irc.x\"; }\noper { name reverse; password \"$2b$11$z\"; type netadmin; }\n",
+        );
+        assert_eq!(flat.servername, block.servername);
+        assert_eq!(flat.opers.len(), block.opers.len());
+        assert_eq!(flat.opers[0].password, block.opers[0].password);
+        assert_eq!(flat.opers[0].oper_type, block.opers[0].oper_type);
+    }
+
+    #[test]
+    fn block_quoted_string_with_spaces() {
+        let c = cfg("server { name \"irc.x\"; description \"A friendly server\"; }");
+        assert_eq!(c.serverdesc, "A friendly server");
     }
 
     #[test]
