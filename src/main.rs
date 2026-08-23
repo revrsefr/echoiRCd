@@ -20,9 +20,51 @@ use echoircd::ircd::{Event, Ircd};
 use echoircd::socketengine;
 use echoircd::tls::{OpensslBackend, TlsBackend};
 
-/// `echoircd rehash [config]`: read the running server's pidfile and send it
-/// SIGHUP so it reloads its config in place, then exit. No unsafe — the signal is
-/// sent via the `kill` command.
+/// Is `pid` a live echoircd process?
+fn is_echoircd(pid: u32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/comm"))
+        .map(|c| c.trim() == "echoircd")
+        .unwrap_or(false)
+}
+
+/// Find the running echoircd server for `cfgpath` by scanning /proc — the fallback
+/// when the pidfile is missing or stale (a throwaway instance clobbered it).
+/// Prefers a process whose command line names the same config; else a lone server.
+fn find_server(cfgpath: &str, self_pid: u32) -> Option<u32> {
+    let want = std::fs::canonicalize(cfgpath).ok();
+    let mut servers: Vec<(u32, bool)> = Vec::new();
+    for entry in std::fs::read_dir("/proc").ok()?.flatten() {
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        if pid == self_pid || !is_echoircd(pid) {
+            continue;
+        }
+        let raw = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+        let args: Vec<String> = raw
+            .split(|&b| b == 0)
+            .filter(|s| !s.is_empty())
+            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .collect();
+        if args.iter().any(|a| a == "rehash") {
+            continue; // a `rehash` CLI invocation, not the server
+        }
+        let matches = args
+            .iter()
+            .skip(1)
+            .any(|a| a == cfgpath || (want.is_some() && std::fs::canonicalize(a).ok() == want));
+        servers.push((pid, matches));
+    }
+    servers
+        .iter()
+        .find(|(_, m)| *m)
+        .map(|(p, _)| *p)
+        .or_else(|| (servers.len() == 1).then(|| servers[0].0))
+}
+
+/// `echoircd rehash [config]`: locate the running server (pidfile fast-path, else
+/// a /proc scan) and send it SIGHUP so it reloads its config in place. No unsafe —
+/// the signal is sent via the `kill` command.
 fn rehash_cli(cfgpath: &str) -> i32 {
     let cfg = Config::load(cfgpath);
     let pidfile = cfg
@@ -31,22 +73,20 @@ fn rehash_cli(cfgpath: &str) -> i32 {
         .and_then(|v| v.first())
         .cloned()
         .unwrap_or_else(|| "echoircd.pid".to_string());
-    let pid = match std::fs::read_to_string(&pidfile) {
-        Ok(s) => s.trim().to_string(),
-        Err(_) => {
-            eprintln!("echoircd: no pidfile at {pidfile} — is the server running?");
-            return 1;
-        }
-    };
-    // Verify the pid is a live echoircd — guards a stale pidfile or a reused pid.
-    let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default();
-    if pid.parse::<u32>().is_err() || comm.trim() != "echoircd" {
-        eprintln!("echoircd: no running echoircd for pid {pid} (stale {pidfile}?) — start the server first.");
+    let self_pid = std::process::id();
+    // Trust the pidfile only if it names a live echoircd; otherwise find the server
+    // via /proc, since a throwaway instance sharing this config may have clobbered it.
+    let from_file = std::fs::read_to_string(&pidfile)
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .filter(|&p| is_echoircd(p));
+    let Some(pid) = from_file.or_else(|| find_server(cfgpath, self_pid)) else {
+        eprintln!("echoircd: no running echoircd for {cfgpath} — start the server first.");
         return 1;
-    }
+    };
     println!("rehashing server config file.");
     let sent = std::process::Command::new("kill")
-        .args(["-s", "HUP", &pid])
+        .args(["-s", "HUP", &pid.to_string()])
         .stderr(std::process::Stdio::null())
         .status()
         .map(|st| st.success())
@@ -54,6 +94,10 @@ fn rehash_cli(cfgpath: &str) -> i32 {
     if !sent {
         eprintln!("echoircd: could not signal pid {pid}.");
         return 1;
+    }
+    // Self-heal a stale/clobbered pidfile so the fast path works next time.
+    if from_file != Some(pid) && !pidfile.is_empty() {
+        let _ = std::fs::write(&pidfile, format!("{pid}\n"));
     }
     println!("server configuration is reloaded.");
     0
