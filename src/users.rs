@@ -7,7 +7,7 @@ use std::net::{SocketAddr, TcpStream};
 use crate::extensible::Extensible;
 use crate::module::Hook;
 use crate::numeric::*;
-use crate::server::{Server, VERSION};
+use crate::server::{Server, RELEASE};
 use crate::socketengine::OutSink;
 use crate::Uid;
 
@@ -464,7 +464,7 @@ impl Server {
         self.numeric(
             uid,
             RPL_YOURHOST,
-            &format!(":Your host is {}, running echoircd-{VERSION}", self.name),
+            &format!(":Your host is {}, running echoircd-{RELEASE}", self.name),
         );
         self.numeric(
             uid,
@@ -475,7 +475,7 @@ impl Server {
             uid,
             RPL_MYINFO,
             &format!(
-                "{} echoircd-{VERSION} iowxsgBkDIHrRzWhc qaohvbeIklimnpstzCTcSNORMfjFLgGuBQAPJUdKXwD",
+                "{} echoircd-{RELEASE} iowxsgBkDIHrRzWhc qaohvbeIklimnpstzCTcSNORMfjFLgGuBQAPJUdKXwD",
                 self.name
             ),
         );

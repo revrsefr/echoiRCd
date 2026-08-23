@@ -2,7 +2,7 @@
 
 use crate::command::{CmdResult, Command};
 use crate::numeric::*;
-use crate::server::{Server, VERSION};
+use crate::server::{version_comment, Server, RELEASE};
 use crate::users::User;
 use crate::Uid;
 
@@ -677,10 +677,8 @@ impl Command for VersionCmd {
         true
     }
     fn handle(&self, s: &mut Server, uid: Uid, _params: &[String]) -> CmdResult {
-        s.send(
-            uid,
-            format!(":{} 351 * echoircd-{VERSION} {} :", s.name, s.name),
-        );
+        let line = format!("echoircd-{RELEASE} {} :{}", s.name, version_comment());
+        s.numeric(uid, RPL_VERSION, &line);
         CmdResult::Ok
     }
 }

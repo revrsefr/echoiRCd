@@ -28,6 +28,19 @@ use crate::xline::XLine;
 use crate::Uid;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The wire version token, major only (e.g. `echoircd-5`), for 002/004/351.
+pub const RELEASE: &str = env!("CARGO_PKG_VERSION_MAJOR");
+// Build provenance, captured by build.rs.
+pub const GIT_HASH: &str = env!("ECHOIRCD_GIT_HASH");
+pub const GIT_DIRTY: &str = env!("ECHOIRCD_GIT_DIRTY");
+pub const COMMIT_DATE: &str = env!("ECHOIRCD_COMMIT_DATE");
+pub const RUSTC: &str = env!("ECHOIRCD_RUSTC");
+pub const TARGET: &str = env!("ECHOIRCD_TARGET");
+
+/// The `RPL_VERSION` (351) comment: full version, build, and toolchain.
+pub fn version_comment() -> String {
+    format!("echoircd {VERSION} · {GIT_HASH}{GIT_DIRTY} · built {COMMIT_DATE} · rustc {RUSTC} · {TARGET}")
+}
 
 /// Background timer cadence + idle/ping timeouts, in seconds.
 pub const TICK_SECS: u64 = 15;
@@ -1506,6 +1519,14 @@ mod tests {
     use crate::channels::valid_chan;
     use crate::users::{valid_nick, User, UserFlags};
     use std::sync::mpsc::{self, Receiver};
+
+    #[test]
+    fn version_token_and_comment() {
+        assert_eq!(RELEASE, "5");
+        let c = version_comment();
+        assert!(c.starts_with("echoircd 5.0.0 \u{b7}"), "unexpected: {c}");
+        assert!(c.contains("rustc ") && c.contains("built "));
+    }
 
     /// Insert a registered user with an output channel readable in the test.
     fn add_user(s: &mut Server, uid: Uid, nick: &str) -> Receiver<String> {

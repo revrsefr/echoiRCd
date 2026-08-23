@@ -78,6 +78,7 @@ pub const RPL_WELCOME: u16 = 1;
 pub const RPL_YOURHOST: u16 = 2;
 pub const RPL_CREATED: u16 = 3;
 pub const RPL_MYINFO: u16 = 4;
+pub const RPL_VERSION: u16 = 351;
 pub const RPL_ISUPPORT: u16 = 5;
 
 pub const RPL_UMODEIS: u16 = 221;
