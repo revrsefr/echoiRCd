@@ -55,7 +55,11 @@ bind_server = 0.0.0.0:7000
 # webirc = CHANGE_THIS_WEBIRC_SECRET mygateway 203.0.113.9
 
 # IRC operators — oper = <name> <password> [level] [fp=<sha256>] [type=<id>]
+# The password may be positional (as below) or a named password=<hash> token;
+# both accept plaintext, sha256:<hex>, pbkdf2:… or a bcrypt $2b$ hash. Generate a
+# bcrypt hash with:  printf '%s' 'yourpassword' | ./echoircd mkpasswd
 oper = admin CHANGE_THIS_PASSWORD
+# oper = admin password=$2b$11$…hash… fp=<sha256> type=netadmin
 
 # Oper types (optional). An oper with no type= keeps full access. A type is a
 # named role (the WHOIS "is a <title>") built from reusable capability classes;

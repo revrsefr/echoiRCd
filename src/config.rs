@@ -5,9 +5,10 @@
 //! network    = echoNet
 //! bind       = 127.0.0.1:6767
 //! motd       = Welcome to echoIRCd
-//! oper       = god secret                       # name + password (+ optional level)
+//! oper       = god secret                        # name + password (+ optional level)
+//! oper       = god password=<hash>               # same, named form (fp=/type= style)
 //! oper       = god * fp=<sha256-cert-fp>         # cert-only login (no password)
-//! oper       = god secret fp=<sha256-cert-fp>    # password AND matching cert
+//! oper       = god password=<hash> fp=<cert-fp>  # password AND matching cert
 //! ```
 
 use crate::map::HashMap;
@@ -18,6 +19,16 @@ pub fn yesish(v: &str) -> bool {
         v.to_ascii_lowercase().as_str(),
         "off" | "no" | "false" | "0"
     )
+}
+
+/// Whether an oper token is a `key=value` option rather than the positional
+/// password (so `oper = <name> password=<hash> fp=<fp>` isn't misread as having
+/// the literal password `password=<hash>`).
+fn is_oper_option(tok: &str) -> bool {
+    tok.starts_with("password=")
+        || tok.starts_with("fp=")
+        || tok.starts_with("certfp=")
+        || tok.starts_with("type=")
 }
 
 /// A server-link block: how to authenticate a peer named `name` (and, if
@@ -31,9 +42,11 @@ pub struct LinkBlock {
     pub autoconnect: bool,
 }
 
-/// An oper login: `oper = <name> <password|*> [level] [fp=<sha256-fingerprint>]`.
-/// `password = *` means no password is checked (cert-only login); a `fp=` token
-/// requires the user's TLS client-certificate SHA-256 fingerprint to match.
+/// An oper login: `oper = <name> [<password|*> | password=<hash>] [level]
+/// [fp=<sha256-fingerprint>] [type=<id>]`. The password may be given positionally
+/// or as a `password=` token; `*` (or an absent password with a `fp=`) means no
+/// password is checked (cert-only login); a `fp=` token requires the user's TLS
+/// client-certificate SHA-256 fingerprint to match.
 #[derive(Clone, Default)]
 pub struct OperBlock {
     pub name: String,
@@ -227,20 +240,28 @@ impl Config {
                 }
                 "motd" => c.motd.push(v.to_string()),
                 "oper" => {
-                    let mut it = v.split_whitespace();
-                    if let (Some(n), Some(p)) = (it.next(), it.next()) {
+                    let mut it = v.split_whitespace().peekable();
+                    if let Some(n) = it.next() {
                         let mut b = OperBlock {
                             name: n.to_string(),
-                            password: p.to_string(),
-                            level: 0,
-                            fingerprint: None,
-                            oper_type: None,
+                            ..Default::default()
                         };
-                        // trailing tokens (any order): a number is the operlevel, a
-                        // `fp=`/`certfp=` token is the required TLS cert fingerprint,
-                        // a `type=` token names the oper type (see modules::opertypes).
+                        // Back-compat: a bare second token (not a `key=value` option)
+                        // is the positional password (`*` = cert-only), matching the
+                        // old `oper = <name> <password|*> ...` form.
+                        if let Some(tok) = it.peek() {
+                            if !is_oper_option(tok) {
+                                b.password = tok.to_string();
+                                it.next();
+                            }
+                        }
+                        // Named options in any order: `password=` (preferred),
+                        // `fp=`/`certfp=` the required TLS cert fingerprint, `type=`
+                        // the oper type; a bare number is the operlevel.
                         for tok in it {
-                            if let Some(fp) =
+                            if let Some(pw) = tok.strip_prefix("password=") {
+                                b.password = pw.to_string();
+                            } else if let Some(fp) =
                                 tok.strip_prefix("fp=").or_else(|| tok.strip_prefix("certfp="))
                             {
                                 b.fingerprint = Some(fp.to_ascii_lowercase());
@@ -250,7 +271,12 @@ impl Config {
                                 b.level = l;
                             }
                         }
-                        c.opers.push(b);
+                        // A block with no credential at all (no password, no cert
+                        // fingerprint) would let anyone oper up — refuse it, as the
+                        // old parser did by requiring a password token.
+                        if !b.password.is_empty() || b.fingerprint.is_some() {
+                            c.opers.push(b);
+                        }
                     }
                 }
                 // +G censor word: `badword = <find> [replace]` (no replace ⇒ block)
@@ -324,5 +350,68 @@ impl Config {
                 _ => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn opers(text: &str) -> Vec<OperBlock> {
+        let mut c = Config::default();
+        Config::parse_into(&mut c, text);
+        c.opers
+    }
+
+    #[test]
+    fn positional_password_still_parses() {
+        let o = opers("oper = god secret 5 fp=ABC type=netadmin");
+        assert_eq!(o.len(), 1);
+        assert_eq!(o[0].name, "god");
+        assert_eq!(o[0].password, "secret");
+        assert_eq!(o[0].level, 5);
+        assert_eq!(o[0].fingerprint.as_deref(), Some("abc"));
+        assert_eq!(o[0].oper_type.as_deref(), Some("netadmin"));
+    }
+
+    #[test]
+    fn star_positional_is_cert_only() {
+        let o = opers("oper = god * fp=abc");
+        assert_eq!(o[0].password, "*");
+        assert_eq!(o[0].fingerprint.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn numeric_positional_password_is_not_a_level() {
+        // a bare second token is the password even when numeric (back-compat)
+        let o = opers("oper = god 12345");
+        assert_eq!(o[0].password, "12345");
+        assert_eq!(o[0].level, 0);
+    }
+
+    #[test]
+    fn named_password_token() {
+        let o = opers("oper = reverse password=$2b$11$abc.def/ghi fp=FF type=netadmin");
+        assert_eq!(o.len(), 1);
+        assert_eq!(o[0].name, "reverse");
+        assert_eq!(o[0].password, "$2b$11$abc.def/ghi");
+        assert_eq!(o[0].fingerprint.as_deref(), Some("ff"));
+        assert_eq!(o[0].oper_type.as_deref(), Some("netadmin"));
+    }
+
+    #[test]
+    fn named_password_order_independent() {
+        let o = opers("oper = reverse type=admin fp=aa password=hunter2 3");
+        assert_eq!(o[0].password, "hunter2");
+        assert_eq!(o[0].level, 3);
+        assert_eq!(o[0].fingerprint.as_deref(), Some("aa"));
+        assert_eq!(o[0].oper_type.as_deref(), Some("admin"));
+    }
+
+    #[test]
+    fn credential_less_block_is_rejected() {
+        // no password and no fp would let anyone oper up — must be dropped
+        assert!(opers("oper = nobody").is_empty());
+        assert!(opers("oper = nobody type=netadmin").is_empty());
     }
 }
