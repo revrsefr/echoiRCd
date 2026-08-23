@@ -132,6 +132,26 @@ fn mkpasswd_cli(cost_arg: Option<&str>) -> i32 {
     }
 }
 
+/// `echoircd checkconfig [config]`: parse a config and print a deterministic,
+/// sorted dump of every key/value it produces. Two configs (e.g. flat vs block
+/// format) that dump identically parse identically.
+fn checkconfig_cli(path: &str) -> i32 {
+    match echoircd::config::Config::try_load(path) {
+        Some(c) => {
+            print!("{}", c.dump());
+            if c.servername.is_empty() {
+                eprintln!("echoircd: WARNING — servername is empty");
+                return 2;
+            }
+            0
+        }
+        None => {
+            eprintln!("echoircd: cannot read config {path}");
+            1
+        }
+    }
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let first = args.next();
@@ -143,6 +163,12 @@ fn main() {
     // `echoircd mkpasswd [cost]` hashes a password (from stdin) and exits.
     if first.as_deref() == Some("mkpasswd") {
         std::process::exit(mkpasswd_cli(args.next().as_deref()));
+    }
+    // `echoircd checkconfig [config]` parses a config and prints a sorted dump
+    // of every key/value (for validating a config or diffing two of them).
+    if first.as_deref() == Some("checkconfig") {
+        let cfgpath = args.next().unwrap_or_else(|| "echoircd.conf".to_string());
+        std::process::exit(checkconfig_cli(&cfgpath));
     }
     let path = first.unwrap_or_else(|| "echoircd.conf".to_string());
     let cfg = Config::load(&path);

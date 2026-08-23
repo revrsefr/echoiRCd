@@ -193,6 +193,23 @@ impl Config {
         Some(c)
     }
 
+    /// A deterministic text dump of every parsed key/value (sorted), used by
+    /// `echoircd checkconfig` to compare two configs regardless of source format.
+    pub fn dump(&self) -> String {
+        let mut keys: Vec<&String> = self.raw.keys().collect();
+        keys.sort();
+        let mut out = String::new();
+        for k in keys {
+            for v in &self.raw[k] {
+                out.push_str(k);
+                out.push_str(" = ");
+                out.push_str(v);
+                out.push('\n');
+            }
+        }
+        out
+    }
+
     // small helper is defined at module scope (see `yesish`).
 
     /// Parse `key = value` lines into `c`; unknown keys and comments are ignored.
@@ -585,14 +602,17 @@ fn emit_block(out: &mut String, name: &str, fields: &[(String, String)]) {
             }
         }
         "tls" => {
-            if let Some(v) = get("backend") {
-                emit_line(out, "tls_backend", v);
-            }
-            if let Some(v) = get("cert") {
-                emit_line(out, "tls_cert", v);
-            }
-            if let Some(v) = get("key") {
-                emit_line(out, "tls_key", v);
+            // backend/cert/key map to their tls_ keys; any other field (sni,
+            // handshake_timeout, …) passes through as tls_<field>, repeatable.
+            for (f, v) in fields {
+                let fl = f.to_ascii_lowercase();
+                let key = match fl.as_str() {
+                    "backend" => "tls_backend".to_string(),
+                    "cert" => "tls_cert".to_string(),
+                    "key" => "tls_key".to_string(),
+                    other => format!("tls_{other}"),
+                };
+                emit_line(out, &key, v);
             }
         }
         "cloak" => {
