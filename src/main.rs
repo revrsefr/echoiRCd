@@ -103,6 +103,35 @@ fn rehash_cli(cfgpath: &str) -> i32 {
     0
 }
 
+/// `echoircd mkpasswd [cost]`: read a password from stdin and print its bcrypt
+/// hash — a config-ready oper password value. Reads stdin (not argv) so the
+/// password never lands in `ps`/shell history via the command line.
+fn mkpasswd_cli(cost_arg: Option<&str>) -> i32 {
+    use std::io::Read;
+    let cost: u32 = cost_arg.and_then(|c| c.parse().ok()).unwrap_or(11);
+    let mut pw = String::new();
+    if std::io::stdin().read_to_string(&mut pw).is_err() {
+        eprintln!("echoircd: could not read password from stdin");
+        return 1;
+    }
+    let pw = pw.trim_end_matches(['\n', '\r']);
+    if pw.is_empty() {
+        eprintln!("echoircd: empty password");
+        return 1;
+    }
+    match echoircd::bcrypt::hash(cost, pw) {
+        // self-check: only emit a hash our own verify accepts
+        Some(h) if echoircd::bcrypt::verify(&h, pw) => {
+            println!("{h}");
+            0
+        }
+        _ => {
+            eprintln!("echoircd: bcrypt hashing failed");
+            1
+        }
+    }
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let first = args.next();
@@ -110,6 +139,10 @@ fn main() {
     if first.as_deref() == Some("rehash") {
         let cfgpath = args.next().unwrap_or_else(|| "echoircd.conf".to_string());
         std::process::exit(rehash_cli(&cfgpath));
+    }
+    // `echoircd mkpasswd [cost]` hashes a password (from stdin) and exits.
+    if first.as_deref() == Some("mkpasswd") {
+        std::process::exit(mkpasswd_cli(args.next().as_deref()));
     }
     let path = first.unwrap_or_else(|| "echoircd.conf".to_string());
     let cfg = Config::load(&path);
