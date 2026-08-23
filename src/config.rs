@@ -387,7 +387,7 @@ impl Config {
 // other block (`set`, `limits`, …) is cosmetic grouping whose fields are flat
 // keys, so the long tail of module options needs no per-key mapping.
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 enum Tok {
     Open,
     Close,
