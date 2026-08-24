@@ -163,12 +163,12 @@ fn build_config(
     let verifier = Arc::new(AcceptAnyClientCert {
         provider: provider.clone(),
     });
-    // Mirror the openssl backend's version policy (mozilla_intermediate = TLS 1.2)
-    // so rustls is a true drop-in: every client negotiates the same protocol it did
-    // on openssl. Offering 1.3 here pushed clients onto a 1.3 handshake openssl never
-    // served, and some couldn't complete it.
+    // Offer TLS 1.3 (preferred) and TLS 1.2. Modern clients land on 1.3 with an AEAD
+    // suite (AES-GCM / ChaCha20-Poly1305); older clients fall back to 1.2 ECDHE-AEAD.
+    // The post-quantum X25519MLKEM768 key-exchange group needs the aws-lc-rs provider
+    // (the ring provider has no ML-KEM); the openssl backend already offers it.
     let cfg = ServerConfig::builder_with_provider(provider.clone())
-        .with_protocol_versions(&[&rustls::version::TLS12])
+        .with_protocol_versions(&[&rustls::version::TLS13, &rustls::version::TLS12])
         .map_err(err)?
         .with_client_cert_verifier(verifier)
         .with_cert_resolver(resolver);
