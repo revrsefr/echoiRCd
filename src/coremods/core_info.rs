@@ -416,15 +416,14 @@ impl Command for Whois {
                 &format!("{nick} :is using a secure connection{detail}"),
             );
         }
-        // client-cert fingerprint (CertFP) — shown to the user themselves and opers
+        // client-cert fingerprint (CertFP) — visible to everyone; it's derived from
+        // the certificate the client presents in the handshake, not a secret.
         if let Some(fp) = &certfp {
-            if is_self || asker_oper {
-                s.numeric(
-                    uid,
-                    RPL_WHOISCERTFP,
-                    &format!("{nick} :has client certificate fingerprint {fp}"),
-                );
-            }
+            s.numeric(
+                uid,
+                RPL_WHOISCERTFP,
+                &format!("{nick} :has client certificate fingerprint {fp}"),
+            );
         }
         // 317: idle time + signon time (hidewhois may suppress it)
         if !(hide && crate::modules::hidewhois::hide_idle(s)) {
