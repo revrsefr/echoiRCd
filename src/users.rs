@@ -230,6 +230,7 @@ pub struct User {
     pub vhost: Option<String>, // displayed-host override (CHGHOST/SETHOST vhost)
     pub secure: bool,  // connected over TLS (drives WHOIS 671 / sslinfo)
     pub certfp: Option<String>, // TLS client-cert fingerprint (SASL EXTERNAL / CertFP)
+    pub tls_info: Option<String>, // negotiated TLS version/group/cipher (WHOIS 671)
     pub account: Option<String>, // logged-in account name (set by services)
     pub signon: u64,   // unix secs at registration (WHOIS 317)
     pub nick_ts: u64,  // unix secs the current nick was taken (nick-collision arbitration)

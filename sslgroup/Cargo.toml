@@ -1,0 +1,12 @@
+[package]
+name = "sslgroup"
+version = "0.1.0"
+edition = "2021"
+description = "Read the negotiated TLS key-exchange group name via SSL_get0_group_name (not exposed by the safe openssl crate)."
+license = "MIT"
+
+[dependencies]
+# Same versions echoircd resolves, so the SslRef / SSL pointer types match.
+openssl = "0.10"
+openssl-sys = "0.9"
+foreign-types = "0.3"

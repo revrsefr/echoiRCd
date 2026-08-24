@@ -374,6 +374,7 @@ mod tests {
                 vhost: None,
                 secure: false,
                 certfp: None,
+                tls_info: None,
                 account: Some("reverse".into()),
                 signon: 0,
                 nick_ts: 0,

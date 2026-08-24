@@ -74,6 +74,7 @@ impl Node {
                 vhost: None,
                 secure: false,
                 certfp: None,
+                tls_info: None,
                 account: None,
                 signon: 0,
                 nick_ts: 0,

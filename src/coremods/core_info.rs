@@ -200,6 +200,7 @@ impl Command for Whois {
             last_active: u64,
             signon: u64,
             certfp: Option<String>,
+            tls_info: Option<String>,
             swhois: Option<String>,
             showwhois: bool,
         }
@@ -219,6 +220,7 @@ impl Command for Whois {
             last_active,
             signon,
             certfp,
+            tls_info,
             swhois,
             showwhois,
         } = {
@@ -239,6 +241,7 @@ impl Command for Whois {
                 last_active: u.last_active,
                 signon: u.signon,
                 certfp: u.certfp.clone(),
+                tls_info: u.tls_info.clone(),
                 swhois: u
                     .ext
                     .get::<crate::coremods::core_oper::Swhois>()
@@ -399,12 +402,18 @@ impl Command for Whois {
                 &format!("{nick} {acct} :is logged in as"),
             );
         }
-        // sslinfo: advertise a secure (TLS) connection
+        // sslinfo: advertise a secure (TLS) connection, with the negotiated
+        // version/group/cipher (e.g. TLSv1.3/X25519MLKEM768/TLS_CHACHA20_POLY1305_SHA256)
+        // when the backend could report it.
         if secure && !(hide && crate::modules::hidewhois::hide_secure(s)) {
+            let detail = match &tls_info {
+                Some(t) if !t.is_empty() => format!(" [{t}]"),
+                _ => String::new(),
+            };
             s.numeric(
                 uid,
                 RPL_WHOISSECURE,
-                &format!("{nick} :is using a secure connection"),
+                &format!("{nick} :is using a secure connection{detail}"),
             );
         }
         // client-cert fingerprint (CertFP) — shown to the user themselves and opers

@@ -15,7 +15,7 @@ use mio::net::TcpStream as MioStream;
 use openssl::hash::MessageDigest;
 use openssl::ssl::{
     ErrorCode, NameType, SniError, Ssl, SslAcceptor, SslAcceptorBuilder, SslContext, SslFiletype,
-    SslMethod, SslMode, SslStream, SslVerifyMode,
+    SslMethod, SslMode, SslRef, SslStream, SslVerifyMode,
 };
 
 /// A hot-reloadable TLS certificate source (implemented by the openssl backend);
@@ -41,6 +41,11 @@ pub trait TlsConn: Send {
     /// SHA-256 fingerprint (lowercase hex) of the peer's certificate, if it sent
     /// one. Drives SASL EXTERNAL / CertFP.
     fn peer_cert_fp(&self) -> Option<String>;
+    /// `<version>/<group>/<cipher>` summary of the session for the WHOIS 671
+    /// sslinfo line, if the backend can report it.
+    fn tls_info(&self) -> Option<String> {
+        None
+    }
 }
 
 /// A non-blocking TLS session the reactor drives itself over a mio socket. The
@@ -70,6 +75,10 @@ pub trait TlsSession: Send {
     fn source(&mut self) -> &mut MioStream;
     /// SHA-256 fingerprint of the peer certificate (CertFP / SASL EXTERNAL), if any.
     fn peer_cert_fp(&self) -> Option<String>;
+    /// `<version>/<group>/<cipher>` summary of the session for WHOIS 671, if any.
+    fn tls_info(&self) -> Option<String> {
+        None
+    }
     fn shutdown(&mut self);
 }
 
@@ -204,6 +213,19 @@ fn ssl_io_err(e: openssl::ssl::Error) -> io::Error {
     }
 }
 
+/// `<version>/<group>/<cipher>` for the WHOIS 671 sslinfo line, e.g.
+/// `TLSv1.3/X25519MLKEM768/TLS_CHACHA20_POLY1305_SHA256`. The key-exchange group
+/// comes from `sslgroup` (SSL_get0_group_name); it's omitted when OpenSSL can't
+/// report it (TLS 1.2, or before the handshake completes).
+fn openssl_tls_info(ssl: &SslRef) -> Option<String> {
+    let cipher = ssl.current_cipher()?.name();
+    let ver = ssl.version_str();
+    match sslgroup::group_name(ssl) {
+        Some(g) if !g.is_empty() => Some(format!("{ver}/{g}/{cipher}")),
+        _ => Some(format!("{ver}/{cipher}")),
+    }
+}
+
 impl TlsSession for OpensslSession {
     fn accept(&mut self) -> io::Result<bool> {
         match self.0.accept() {
@@ -232,6 +254,9 @@ impl TlsSession for OpensslSession {
         let cert = self.0.ssl().peer_certificate()?;
         let digest = cert.digest(MessageDigest::sha256()).ok()?;
         Some(digest.iter().map(|b| format!("{b:02x}")).collect())
+    }
+    fn tls_info(&self) -> Option<String> {
+        openssl_tls_info(self.0.ssl())
     }
     fn shutdown(&mut self) {
         // best-effort TLS close_notify, then close the socket. Non-blocking, so a
@@ -263,5 +288,8 @@ impl TlsConn for OpensslConn {
         let cert = self.0.ssl().peer_certificate()?;
         let digest = cert.digest(MessageDigest::sha256()).ok()?;
         Some(digest.iter().map(|b| format!("{b:02x}")).collect())
+    }
+    fn tls_info(&self) -> Option<String> {
+        openssl_tls_info(self.0.ssl())
     }
 }

@@ -278,6 +278,7 @@ fn ws_session<S: WsStream>(
             sock: Some(shutdown),
             secure,
             certfp: None,
+            tls_info: None,
             local_port,
             link: false,
             outbound: false,

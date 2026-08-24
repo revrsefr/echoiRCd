@@ -656,6 +656,7 @@ fn reactor_loop(
                                         sock: None,
                                         secure: false,
                                         certfp: None,
+                                        tls_info: None,
                                         local_port: a.local_port,
                                         link: false,
                                         outbound: false,
@@ -788,7 +789,8 @@ fn try_handshake(
     core: &Sender<Event>,
 ) -> bool {
     let mut close = false;
-    let mut connect: Option<(Uid, SocketAddr, u16, Option<String>, OutSink)> = None;
+    let mut connect: Option<(Uid, SocketAddr, u16, Option<String>, Option<String>, OutSink)> =
+        None;
     if let Some(c) = conns.get_mut(&t) {
         if !c.handshaking {
             return true;
@@ -798,10 +800,11 @@ fn try_handshake(
                 Ok(true) => {
                     c.handshaking = false;
                     let certfp = sess.peer_cert_fp();
+                    let tls_info = sess.tls_info();
                     connect = c
                         .pending_out
                         .take()
-                        .map(|out| (c.uid, c.addr, c.local_port, certfp, out));
+                        .map(|out| (c.uid, c.addr, c.local_port, certfp, tls_info, out));
                     set_interest(poll, c, t); // handshake done: drop the extra WRITABLE
                 }
                 Ok(false) => return false, // still negotiating
@@ -813,7 +816,7 @@ fn try_handshake(
     } else {
         return false;
     }
-    if let Some((uid, addr, local_port, certfp, out)) = connect {
+    if let Some((uid, addr, local_port, certfp, tls_info, out)) = connect {
         let _ = core.send(Event::Connect {
             uid,
             addr,
@@ -821,6 +824,7 @@ fn try_handshake(
             sock: None,
             secure: true,
             certfp,
+            tls_info,
             local_port,
             link: false,
             outbound: false,
@@ -943,6 +947,7 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
                 sock: None,
                 secure,
                 certfp,
+                tls_info: None,
                 local_port,
                 link: false,
                 outbound: false,
@@ -1096,6 +1101,7 @@ pub fn accept_loop(
                         sock: Some(shutdown),
                         secure: false,
                         certfp: None,
+                        tls_info: None,
                         local_port,
                         link,
                         outbound: false,
@@ -1180,6 +1186,7 @@ pub fn connect_link(addr: &str, core: Sender<Event>, counter: Arc<AtomicU64>, ma
             sock: Some(shutdown),
             secure: false,
             certfp: None,
+            tls_info: None,
             local_port: 0,
             link: true,
             outbound: true,
@@ -1287,6 +1294,7 @@ fn tls_conn(
         }
     };
     let certfp = conn.peer_cert_fp();
+    let tls_info = conn.tls_info();
     let (out_tx, out_rx) = mpsc::channel::<String>();
     if core
         .send(Event::Connect {
@@ -1296,6 +1304,7 @@ fn tls_conn(
             sock: Some(shutdown),
             secure: true,
             certfp,
+            tls_info,
             local_port,
             link,
             outbound: false,

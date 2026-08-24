@@ -35,6 +35,10 @@ memchr = "2"
 # ring provider (no aws-lc-rs); its `unsafe` stays internal like every other crate.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-pemfile = "2"
+# Reads the negotiated TLS group name (SSL_get0_group_name) for the WHOIS 671 line;
+# isolates the one unsafe FFI call the safe openssl crate lacks, so the daemon stays
+# `#![forbid(unsafe_code)]`.
+sslgroup = { path = "sslgroup" }
 
 [dev-dependencies]
 # integration tests spawn the built binary and act as a TLS client against it

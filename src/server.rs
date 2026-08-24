@@ -387,6 +387,7 @@ impl Server {
         sock: Option<TcpStream>,
         secure: bool,
         certfp: Option<String>,
+        tls_info: Option<String>,
         local_port: u16,
     ) {
         let uuid = self.next_uuid();
@@ -405,6 +406,7 @@ impl Server {
                 vhost: None,
                 secure,
                 certfp,
+                tls_info,
                 account: None,
                 signon: now(),
                 nick_ts: now(),
@@ -1544,6 +1546,7 @@ mod tests {
                 vhost: None,
                 secure: false,
                 certfp: None,
+                tls_info: None,
                 account: None,
                 signon: 0,
                 nick_ts: 0,
