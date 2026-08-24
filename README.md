@@ -143,6 +143,16 @@ tutorial in [`docs/api/`](docs/api/):
 - **Modules** (`src/module.rs`, `src/modules/`) — lifecycle hooks; pre-hooks can
   **Deny** a register/command/message, notify-hooks fire after.
 
+## Community
+
+echoIRCd's support network runs on echoIRCd itself — come say hi:
+
+- **Server** — `irc.devtronic.pro` (TLS `6697`, plaintext `6667`)
+- **`#echoiRCd`** — the **official support & development channel**
+- **`#devs`** — general developer chat
+
+Quick connect: `ircs://irc.devtronic.pro:6697/%23echoiRCd`
+
 ## Links
 
 - **Repository** — <https://git.devtronic.pro/fedserv/echoIRCd>
