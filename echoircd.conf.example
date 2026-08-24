@@ -64,6 +64,13 @@ motd {
 # opermotd { "Welcome to the staff team."; }    # shown to opers via /OPERMOTD
 
 
+# ═══ per-SNI branding (one daemon, multiple network identities) ══════════════
+# A client that connected via this TLS SNI host is shown `servername`/`network`
+# instead of the globals — welcome burst, ISUPPORT NETWORK=, and the source of
+# every numeric it receives. Hosts with no brand block use the global server{}.
+# Needs TLS+SNI; plaintext/IP connections fall back to the globals. Repeatable.
+# brand { host "irc.example.org"; servername "irc.example.org"; network "ExampleNet"; }
+
 # ═══ operators ═══════════════════════════════════════════════════════════════
 # The password accepts plaintext, sha256:<hex>, pbkdf2:… or a bcrypt $2b$ hash.
 # Generate a bcrypt hash with:   printf '%s' 'yourpassword' | ./echoircd mkpasswd
