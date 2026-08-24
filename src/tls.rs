@@ -115,7 +115,8 @@ fn configure(b: &mut SslAcceptorBuilder, cert: &str, key: &str) -> io::Result<()
 
 /// A standalone configured context for one SNI hostname.
 fn build_ctx(cert: &str, key: &str) -> io::Result<SslContext> {
-    let mut b = SslAcceptor::mozilla_intermediate(SslMethod::tls()).map_err(err)?;
+    // _v5 = Mozilla intermediate v5 (TLS 1.2 + 1.3); the non-v5 profile caps at 1.2.
+    let mut b = SslAcceptor::mozilla_intermediate_v5(SslMethod::tls()).map_err(err)?;
     configure(&mut b, cert, key)?;
     Ok(b.build().into_context())
 }
@@ -127,7 +128,7 @@ fn build_acceptor(primary: &CertPaths, sni: &[(String, CertPaths)]) -> io::Resul
     for (host, cp) in sni {
         map.insert(host.to_ascii_lowercase(), build_ctx(&cp.cert, &cp.key)?);
     }
-    let mut b = SslAcceptor::mozilla_intermediate(SslMethod::tls()).map_err(err)?;
+    let mut b = SslAcceptor::mozilla_intermediate_v5(SslMethod::tls()).map_err(err)?;
     configure(&mut b, &primary.cert, &primary.key)?;
     if !map.is_empty() {
         b.set_servername_callback(move |ssl, _alert| {
