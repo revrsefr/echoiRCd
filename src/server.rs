@@ -168,6 +168,7 @@ pub struct Server {
     pub channels: HashMap<String, Channel>, // lower name -> channel
     pub events: VecDeque<Hook>,
     pub opers: Vec<crate::config::OperBlock>, // oper logins from config
+    pub brands: Vec<crate::config::BrandBlock>, // per-SNI server/network branding
     pub cloak_key: Option<String>,    // host-cloaking key (see modules::cloak)
     pub line_ctags: String,           // client-only tags of the line being handled
     // --- server-to-server (see crate::link) ---
@@ -241,6 +242,7 @@ impl Server {
             channels: HashMap::default(),
             events: VecDeque::new(),
             opers: cfg.opers,
+            brands: cfg.brands,
             cloak_key: cfg.cloak_key,
             line_ctags: String::new(),
             sid: cfg.sid,
@@ -316,6 +318,7 @@ impl Server {
     pub fn apply_config(&mut self, fresh: crate::config::Config) {
         self.motd = fresh.motd;
         self.opers = fresh.opers;
+        self.brands = fresh.brands;
         self.cloak_key = fresh.cloak_key;
         self.censor = fresh.censor;
         self.amu = fresh.amu;
@@ -388,8 +391,10 @@ impl Server {
         secure: bool,
         certfp: Option<String>,
         tls_info: Option<String>,
+        sni: Option<String>,
         local_port: u16,
     ) {
+        let (brand_server, brand_network) = self.resolve_brand(sni.as_deref());
         let uuid = self.next_uuid();
         self.uuid_local.insert(uuid.clone(), uid);
         let ip = addr.ip();
@@ -407,6 +412,8 @@ impl Server {
                 secure,
                 certfp,
                 tls_info,
+                brand_server,
+                brand_network,
                 account: None,
                 signon: now(),
                 nick_ts: now(),
@@ -890,7 +897,7 @@ impl Server {
     /// the config-driven module tokens (ICON, FILEHOST). Each entry is a token block
     /// without the trailing `:are supported by this server`. Shared by the welcome
     /// burst and the `ISUPPORT` command (draft/extended-isupport).
-    pub fn isupport_lines(&self) -> Vec<String> {
+    pub fn isupport_lines(&self, network: &str) -> Vec<String> {
         // advertised limits mirror the (config-driven) values actually enforced
         let maxwatch = self.conf_num("maxwatch", crate::watch::WATCH_MAX);
         let maxmon = self.conf_num("maxmonitor", crate::watch::MONITOR_MAX);
@@ -905,7 +912,7 @@ impl Server {
         let prefix = crate::modules::customprefix::isupport(include_oper);
         let mut tokens: Vec<String> = format!(
             "CHANTYPES=# PREFIX={prefix} CHANMODES=beIgXw,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnprstuz EXTBAN=,aGbcgjmnrsy ACCOUNTEXTBAN=a BOT=B WATCH={maxwatch} MONITOR={maxmon} SILENCE={maxsil} CALLERID=g WHOX CHATHISTORY={chathist} MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN={maxnick} CHANNELLEN={maxchan} MODES={maxmodes} NETWORK={}",
-            self.network
+            network
         )
         .split(' ')
         .map(String::from)
@@ -925,7 +932,7 @@ impl Server {
     /// `draft/extended-isupport` + `batch`), wrap them in a `draft/isupport` BATCH so
     /// the multi-line set arrives atomically.
     pub fn send_isupport(&mut self, uid: Uid, batched: bool) {
-        let lines = self.isupport_lines();
+        let lines = self.isupport_lines(self.disp_network(uid));
         if batched {
             let nick = self
                 .users
@@ -956,22 +963,53 @@ impl Server {
         }
     }
 
-    pub fn numeric(&self, uid: Uid, code: u16, rest: &str) {
-        let target = self
-            .users
+    /// The server name shown to `uid`: its per-SNI brand, or the global name.
+    pub fn disp_name(&self, uid: Uid) -> &str {
+        self.users
             .get(&uid)
-            .map(|u| {
-                if u.nick.is_empty() {
-                    "*".to_string()
-                } else {
-                    u.nick.clone()
-                }
-            })
-            .unwrap_or_else(|| "*".to_string());
-        self.send(
-            uid,
-            format!(":{} {:03} {} {}", self.name, code, target, rest),
-        );
+            .and_then(|u| u.brand_server.as_deref())
+            .unwrap_or(&self.name)
+    }
+
+    /// The network name shown to `uid`: its per-SNI brand, or the global network.
+    pub fn disp_network(&self, uid: Uid) -> &str {
+        self.users
+            .get(&uid)
+            .and_then(|u| u.brand_network.as_deref())
+            .unwrap_or(&self.network)
+    }
+
+    /// Resolve the per-SNI brand for a new connection: match its TLS SNI host
+    /// against the configured `brand` blocks, returning the display servername +
+    /// network (each `None` = no brand, use the globals).
+    fn resolve_brand(&self, sni: Option<&str>) -> (Option<String>, Option<String>) {
+        let host = match sni {
+            Some(h) if !h.is_empty() => h.to_ascii_lowercase(),
+            _ => return (None, None),
+        };
+        for b in &self.brands {
+            if b.host == host {
+                let sv = (!b.servername.is_empty()).then(|| b.servername.clone());
+                let nw = (!b.network.is_empty()).then(|| b.network.clone());
+                return (sv, nw);
+            }
+        }
+        (None, None)
+    }
+
+    pub fn numeric(&self, uid: Uid, code: u16, rest: &str) {
+        let line = {
+            let u = self.users.get(&uid);
+            let target = u
+                .map(|u| if u.nick.is_empty() { "*" } else { u.nick.as_str() })
+                .unwrap_or("*");
+            // per-SNI brand as the message source (falls back to the global name)
+            let srv = u
+                .and_then(|u| u.brand_server.as_deref())
+                .unwrap_or(&self.name);
+            format!(":{srv} {code:03} {target} {rest}")
+        };
+        self.send(uid, line);
     }
 
     /// Send a server notice to every operator who has snomask (+s) on.
@@ -1547,6 +1585,8 @@ mod tests {
                 secure: false,
                 certfp: None,
                 tls_info: None,
+                brand_server: None,
+                brand_network: None,
                 account: None,
                 signon: 0,
                 nick_ts: 0,
@@ -1894,7 +1934,7 @@ mod tests {
     #[test]
     fn isupport_advertises_bot_and_account_extban() {
         let s = srv();
-        let joined = s.isupport_lines().join(" ");
+        let joined = s.isupport_lines(&s.network).join(" ");
         assert!(joined.contains("BOT=B"), "bot-mode letter: {joined}");
         assert!(joined.contains("ACCOUNTEXTBAN=a"), "account-extban token: {joined}");
         assert!(joined.contains("EXTBAN=,aG"), "'a' listed in EXTBAN: {joined}");

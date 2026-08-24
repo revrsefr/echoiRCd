@@ -56,6 +56,16 @@ pub struct OperBlock {
     pub oper_type: Option<String>,
 }
 
+/// Per-SNI branding: a client that connected via `host` (TLS SNI) is shown
+/// `servername`/`network` instead of the global ones — one daemon, multiple
+/// network identities. Repeatable.
+#[derive(Clone, Default)]
+pub struct BrandBlock {
+    pub host: String,
+    pub servername: String,
+    pub network: String,
+}
+
 /// A trusted WEBIRC gateway: after presenting `password` it may rewrite a client's
 /// real host + IP. `ipmask` (empty = any) restricts which source addresses may use
 /// this block.
@@ -116,6 +126,7 @@ pub struct Config {
     pub tls_key: Option<String>,  // PEM private key
     pub motd: Vec<String>,
     pub opers: Vec<OperBlock>,                 // oper logins (see OperBlock)
+    pub brands: Vec<BrandBlock>,               // per-SNI server/network branding
     pub cloak_key: Option<String>,             // secret key for host cloaking (+x); None = off
     pub sid: String,                           // this server's 3-char server id (S2S)
     pub serverdesc: String,                    // this server's description
@@ -147,6 +158,7 @@ impl Default for Config {
             tls_key: None,
             motd: Vec::new(),
             opers: Vec::new(),
+            brands: Vec::new(),
             cloak_key: None,
             sid: "0AA".to_string(),
             serverdesc: "echoIRCd server".to_string(),
@@ -265,6 +277,24 @@ impl Config {
                     }
                 }
                 "motd" => c.motd.push(v.to_string()),
+                "brand" => {
+                    // brand = <host> [servername=<sv>] [network=<nw>]
+                    let mut it = v.split_whitespace();
+                    if let Some(host) = it.next() {
+                        let mut b = BrandBlock {
+                            host: host.to_ascii_lowercase(),
+                            ..Default::default()
+                        };
+                        for tok in it {
+                            if let Some(s) = tok.strip_prefix("servername=") {
+                                b.servername = s.to_string();
+                            } else if let Some(n) = tok.strip_prefix("network=") {
+                                b.network = n.to_string();
+                            }
+                        }
+                        c.brands.push(b);
+                    }
+                }
                 "oper" => {
                     let mut it = v.split_whitespace().peekable();
                     if let Some(n) = it.next() {
@@ -630,6 +660,20 @@ fn emit_block(out: &mut String, name: &str, fields: &[(String, String)]) {
             }
             if let Some(v) = get("cert_prefix") {
                 emit_line(out, "cloak_cert_prefix", v);
+            }
+        }
+        "brand" => {
+            if let Some(host) = get("host") {
+                let mut line = host.to_string();
+                if let Some(v) = get("servername") {
+                    line.push_str(" servername=");
+                    line.push_str(v);
+                }
+                if let Some(v) = get("network") {
+                    line.push_str(" network=");
+                    line.push_str(v);
+                }
+                emit_line(out, "brand", &line);
             }
         }
         "listen" => {

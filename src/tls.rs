@@ -46,6 +46,10 @@ pub trait TlsConn: Send {
     fn tls_info(&self) -> Option<String> {
         None
     }
+    /// The SNI hostname the client requested during the TLS handshake, if any.
+    fn sni(&self) -> Option<String> {
+        None
+    }
 }
 
 /// A non-blocking TLS session the reactor drives itself over a mio socket. The
@@ -77,6 +81,10 @@ pub trait TlsSession: Send {
     fn peer_cert_fp(&self) -> Option<String>;
     /// `<version>/<group>/<cipher>` summary of the session for WHOIS 671, if any.
     fn tls_info(&self) -> Option<String> {
+        None
+    }
+    /// The SNI hostname the client requested during the TLS handshake, if any.
+    fn sni(&self) -> Option<String> {
         None
     }
     fn shutdown(&mut self);
@@ -258,6 +266,9 @@ impl TlsSession for OpensslSession {
     fn tls_info(&self) -> Option<String> {
         openssl_tls_info(self.0.ssl())
     }
+    fn sni(&self) -> Option<String> {
+        self.0.ssl().servername(NameType::HOST_NAME).map(String::from)
+    }
     fn shutdown(&mut self) {
         // best-effort TLS close_notify, then close the socket. Non-blocking, so a
         // WouldBlock just means the alert is queued — we don't wait for the peer's.
@@ -291,5 +302,8 @@ impl TlsConn for OpensslConn {
     }
     fn tls_info(&self) -> Option<String> {
         openssl_tls_info(self.0.ssl())
+    }
+    fn sni(&self) -> Option<String> {
+        self.0.ssl().servername(NameType::HOST_NAME).map(String::from)
     }
 }

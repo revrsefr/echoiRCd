@@ -279,6 +279,7 @@ fn ws_session<S: WsStream>(
             secure,
             certfp: None,
             tls_info: None,
+            sni: None,
             local_port,
             link: false,
             outbound: false,

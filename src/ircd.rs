@@ -29,6 +29,7 @@ pub enum Event {
         secure: bool,
         certfp: Option<String>, // TLS client-cert fingerprint (clients only)
         tls_info: Option<String>, // negotiated TLS version/group/cipher (WHOIS 671)
+        sni: Option<String>,      // TLS SNI hostname the client used (per-SNI branding)
         local_port: u16,        // the listener port the client connected to
         link: bool,             // a server-to-server connection, not a client
         outbound: bool,         // (link) we dialed them
@@ -191,6 +192,7 @@ impl Ircd {
                 secure,
                 certfp,
                 tls_info,
+                sni,
                 local_port,
                 link,
                 outbound,
@@ -200,7 +202,7 @@ impl Ircd {
                     self.server.add_link(uid, addr, out, sock, outbound);
                 } else {
                     self.server
-                        .add_conn(uid, addr, out, sock, secure, certfp, tls_info, local_port);
+                        .add_conn(uid, addr, out, sock, secure, certfp, tls_info, sni, local_port);
                     if websocket {
                         if let Some(u) = self.server.users.get_mut(&uid) {
                             u.flags.via_websocket = true;
