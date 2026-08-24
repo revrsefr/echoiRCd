@@ -1,8 +1,10 @@
 # Configuration
 
-The config is a plain `key = value` text file (default `./echoircd.conf`). Some
-keys repeat to build a list (`motd`, `oper`, `link`, `connectclass`, `dnsbl`,
-`securitygroup`, …). Comments start with `#`.
+echoircd reads a single config file (default `./echoircd.conf`), written in a
+brace/block format (below); the original flat `key = value` form also works and is
+auto-detected. Some keys repeat to build a list (`motd`, `oper`, `link`,
+`connectclass`, `dnsbl`, `securitygroup`, …). Comments start with `#` (also `//`
+and `/* */`).
 
 The shipped [`echoircd.conf.example`](../echoircd.conf.example) is the fully
 annotated master reference — every key with its default. This page organizes those
@@ -11,6 +13,33 @@ Most settings apply on `REHASH` without a restart.
 
 > `echoircd.conf` is gitignored because it holds secrets (oper password, cloak
 > key, link password). Never commit your live config.
+
+## File format
+
+Structural entities and grouped settings go in `{ }` blocks; values end with `;`,
+booleans are `yes`/`no`:
+
+```text
+server { name "irc.example.net"; network "ExampleNet"; sid "0AA"; }
+listen { ip "*"; port 6667; }
+listen { ip "*"; port 6697; tls yes; }
+oper   { name "admin"; password "$2b$…"; type netadmin; }
+link   { name "hub.example.net"; ip 10.0.0.1; port 7000; password "…"; services yes; }
+```
+
+Structural blocks — `server`, `listen`, `tls`, `oper`, `opertype`, `class`,
+`link`, `cloak`, `webirc`, `motd`, `opermotd` — take the short field names shown
+throughout this page. Any other block name (`set`, `limits`, `modules`, …) is just
+a group whose fields are the flat keys documented below, so the scalar settings can
+be organized however you like. The flat and block forms are equivalent.
+
+Three subcommands help manage a config:
+
+| Command | Purpose |
+|---------|---------|
+| `echoircd mkpasswd [cost]` | Read a password from stdin, print a bcrypt hash for an `oper` block. |
+| `echoircd checkconfig [file]` | Parse a config and print a sorted key/value dump — validate one, or diff two. |
+| `echoircd rehash [file]` | Signal the running server (found via its `pidfile`) to reload config in place. |
 
 ## Server identity
 
@@ -93,7 +122,7 @@ connectclass_required = yes    # refuse clients matching no allow class (default
 
 | Key | Meaning |
 |-----|---------|
-| `oper = <name> <password> [level]` | An oper account; the password may be hashed (see `MKPASSWD`). Optional numeric [oper level](operators.md). |
+| `oper { name; password; type; fingerprint; level }` | An oper account. `password` takes plaintext, `sha256:<hex>`, `pbkdf2:…` or a bcrypt `$2b$` hash (make one with `echoircd mkpasswd`, or `MKPASSWD` in-band); `fingerprint` requires a matching TLS client-cert SHA-256 (with, or instead of, a password); `type` names an [opertype](operators.md); `level` is a numeric [oper level](operators.md). |
 | `opermotd` | A line shown to opers via `/OPERMOTD` (repeatable). |
 | `operprefix` | Give every oper a `!` prefix in their channels. |
 | `ojoin` / `ojoin_op` | Enable `/OJOIN` (join as staff, with op unless `ojoin_op = no`). |

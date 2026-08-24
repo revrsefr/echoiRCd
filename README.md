@@ -57,8 +57,10 @@ operational limit exposed as a config key.
 ```sh
 git clone https://git.devtronic.pro/fedserv/echoIRCd
 cd echoIRCd
-cp echoircd.conf.example echoircd.conf     # edit: oper pass, cloak_key, TLS paths
-cargo run --release                        # reads ./echoircd.conf
+cargo build --release
+cp echoircd.conf.example echoircd.conf     # edit: servername, cloak_key, TLS paths
+printf '%s' 'my-oper-pass' | ./target/release/echoircd mkpasswd   # → bcrypt hash for the oper block
+./target/release/echoircd                  # start (reads ./echoircd.conf)
 ```
 
 Then point a client at it: `/server 127.0.0.1 6667` (or `6697` for TLS once a
@@ -75,13 +77,27 @@ The full manual lives in [`docs/`](docs/):
 
 ## Configuration
 
-Configuration is a plain `key = value` file; see
-[`echoircd.conf.example`](echoircd.conf.example) for the full, annotated set of
-keys. Every operational limit is a config key with a built-in default, and most
-settings apply on `REHASH` without a restart. Your live `echoircd.conf` is
-gitignored — it holds secrets (oper password, cloak key, link password), so never
-commit it. Generate a TLS certificate into `tls/` with the one-liner in the example
-config.
+Configuration is a single file (default `./echoircd.conf`) in a **brace/block
+format** — or the original flat `key = value` form; both are accepted and the
+parser auto-detects which one a file uses:
+
+```text
+server { name "irc.example.net"; network "ExampleNet"; }
+listen { ip "*"; port 6697; tls yes; }
+oper   { name "admin"; password "$2b$…"; type netadmin; }
+```
+
+See [`echoircd.conf.example`](echoircd.conf.example) for the full, annotated set of
+keys — every operational limit is a config key with a built-in default, and most
+settings apply on `REHASH` without a restart. Three helper subcommands round it out:
+
+- `echoircd mkpasswd` — read a password from stdin, print a bcrypt hash for an `oper` block.
+- `echoircd checkconfig [file]` — parse a config and dump its keys, to validate one or diff two.
+- `echoircd rehash` — signal the running server to reload its config in place.
+
+Your live `echoircd.conf` is gitignored — it holds secrets (oper password, cloak
+key, link password), so never commit it. Generate a TLS certificate into `tls/`
+with the one-liner in the example config.
 
 ## Architecture
 
