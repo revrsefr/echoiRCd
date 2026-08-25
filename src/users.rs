@@ -460,21 +460,15 @@ impl Server {
             .get(&uid)
             .map(|u| u.nick.clone())
             .unwrap_or_default();
-        self.numeric(
-            uid,
-            RPL_WELCOME,
-            &format!(":Welcome to the {} IRC Network, {nick}", self.disp_network(uid)),
-        );
-        self.numeric(
-            uid,
-            RPL_YOURHOST,
-            &format!(":Your host is {}, running echoircd-{RELEASE}", self.disp_name(uid)),
-        );
-        self.numeric(
-            uid,
-            RPL_CREATED,
-            &format!(":This server was created at unix {}", self.created),
-        );
+        let net = self.disp_network(uid).to_string();
+        let welcome = self.trf("Welcome to the {0} IRC Network, {1}", &[net.as_str(), nick.as_str()]);
+        self.numeric(uid, RPL_WELCOME, &format!(":{welcome}"));
+        let host = self.disp_name(uid).to_string();
+        let yourhost = self.trf("Your host is {0}, running echoircd-{1}", &[host.as_str(), RELEASE]);
+        self.numeric(uid, RPL_YOURHOST, &format!(":{yourhost}"));
+        let created = self.created.to_string();
+        let created_msg = self.trf("This server was created at unix {0}", &[created.as_str()]);
+        self.numeric(uid, RPL_CREATED, &format!(":{created_msg}"));
         self.numeric(
             uid,
             RPL_MYINFO,
@@ -491,11 +485,9 @@ impl Server {
             .map(|u| u.caps.ext_isupport && u.caps.batch)
             .unwrap_or(false);
         self.send_isupport(uid, batched);
-        self.numeric(
-            uid,
-            RPL_LUSERCLIENT,
-            &format!(":There are {} users on 1 server", self.users.len()),
-        );
+        let count = self.users.len().to_string();
+        let lusers = self.trf("There are {0} users on 1 server", &[count.as_str()]);
+        self.numeric(uid, RPL_LUSERCLIENT, &format!(":{lusers}"));
         self.send_motd(uid);
         // connbanner: NOTICE lines to every connecting client
         for line in self.conf_all("connbanner").to_vec() {
