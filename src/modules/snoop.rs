@@ -12,31 +12,25 @@ impl Module for Snoop {
         "snoop"
     }
     fn on_user_connect(&mut self, srv: &mut Server, uid: Uid) {
-        let info = srv.users.get(&uid).map(|u| {
-            (
-                u.nick.clone(),
-                u.ident.clone(),
-                u.host.clone(),
-                u.port,
-                u.sni.clone(),
-                u.account.clone(),
-            )
-        });
-        if let Some((nick, ident, host, port, sni, account)) = info {
-            if srv.conf_bool("snoop_stderr", false) {
-                eprintln!("[snoop] connect {nick} ({ident}@{host})");
-            }
-            // port is always shown; sni/account only when present, so plaintext or
-            // anonymous connects don't carry empty fields.
-            let mut extra = format!(", port: {port}");
-            if let Some(sni) = &sni {
-                extra.push_str(&format!(", sni: {sni}"));
-            }
-            if let Some(acct) = &account {
-                extra.push_str(&format!(", account: {acct}"));
-            }
-            srv.snotice_c('c', &format!("Client connecting: {nick} ({ident}@{host}){extra}"));
+        // `conf_bool`/`snotice_c` are `&self`, so we can hold the `&User` borrow and
+        // reference its fields directly instead of cloning them out.
+        let Some(u) = srv.users.get(&uid) else {
+            return;
+        };
+        if srv.conf_bool("snoop_stderr", false) {
+            eprintln!("[snoop] connect {} ({}@{})", u.nick, u.ident, u.host);
         }
+        // port is always shown; sni/account only when present, so plaintext or
+        // anonymous connects don't carry empty fields.
+        let mut extra = format!(", port: {}", u.port);
+        if let Some(sni) = &u.sni {
+            extra.push_str(&format!(", sni: {sni}"));
+        }
+        if let Some(acct) = &u.account {
+            extra.push_str(&format!(", account: {acct}"));
+        }
+        let msg = format!("Client connecting: {} ({}@{}){extra}", u.nick, u.ident, u.host);
+        srv.snotice_c('c', &msg);
     }
     fn on_join(&mut self, srv: &mut Server, uid: Uid, chan: &str) {
         if srv.conf_bool("snoop_stderr", false) {
