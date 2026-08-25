@@ -14,22 +14,36 @@ impl Module for Snoop {
     fn on_user_connect(&mut self, srv: &mut Server, uid: Uid) {
         // `conf_bool`/`snotice_c` are `&self`, so we can hold the `&User` borrow and
         // reference its fields directly instead of cloning them out.
-        let Some(u) = srv.users.get(&uid) else {
-            return;
+        let (nick, ident, host, port, sni, account) = {
+            let Some(u) = srv.users.get(&uid) else {
+                return;
+            };
+            (
+                u.nick.clone(),
+                u.ident.clone(),
+                u.host.clone(),
+                u.port,
+                u.sni.clone(),
+                u.account.clone(),
+            )
         };
         if srv.conf_bool("snoop_stderr", false) {
-            eprintln!("[snoop] connect {} ({}@{})", u.nick, u.ident, u.host);
+            eprintln!("[snoop] connect {nick} ({ident}@{host})");
         }
-        // port is always shown; sni/account only when present, so plaintext or
-        // anonymous connects don't carry empty fields.
-        let mut extra = format!(", port: {}", u.port);
-        if let Some(sni) = &u.sni {
-            extra.push_str(&format!(", sni: {sni}"));
+        // port is always shown; sni/account only when present. Prose + field labels come
+        // from the locale catalog so a translated build reads naturally.
+        let mut msg = srv.trf(
+            "Client connecting: {0} ({1}@{2})",
+            &[nick.as_str(), ident.as_str(), host.as_str()],
+        );
+        let port_s = port.to_string();
+        msg.push_str(&srv.trf(", port: {0}", &[port_s.as_str()]));
+        if let Some(sni) = &sni {
+            msg.push_str(&srv.trf(", sni: {0}", &[sni.as_str()]));
         }
-        if let Some(acct) = &u.account {
-            extra.push_str(&format!(", account: {acct}"));
+        if let Some(acct) = &account {
+            msg.push_str(&srv.trf(", account: {0}", &[acct.as_str()]));
         }
-        let msg = format!("Client connecting: {} ({}@{}){extra}", u.nick, u.ident, u.host);
         srv.snotice_c('c', &msg);
     }
     fn on_join(&mut self, srv: &mut Server, uid: Uid, chan: &str) {
@@ -56,6 +70,7 @@ impl Module for Snoop {
         if srv.conf_bool("snoop_stderr", false) {
             eprintln!("[snoop] quit uid={uid} ({reason})");
         }
-        srv.snotice_c('q', &format!("Client exiting: {nick} ({reason})"));
+        let m = srv.trf("Client exiting: {0} ({1})", &[nick.as_str(), reason]);
+        srv.snotice_c('q', &m);
     }
 }

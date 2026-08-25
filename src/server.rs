@@ -1070,6 +1070,10 @@ impl Server {
             return;
         };
         let nick = u.nick.clone();
+        // Localize the prose for the recipient; the log/chanlog/syslog tees keep the
+        // English source. Static snotice/announce text auto-translates here (like the
+        // numeric chokepoint); already-templated dynamic text passes through unchanged.
+        let msg = self.catalog.tr(msg);
         let mut tags: Vec<String> = Vec::new();
         if u.caps.server_time {
             tags.push(format!("time={}", iso_time(now())));

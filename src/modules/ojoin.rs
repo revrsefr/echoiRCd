@@ -49,7 +49,8 @@ impl Command for OjoinCmd {
         if s.conf_bool("ojoin_op", true) {
             crate::coremods::core_mode::svs_set_chan_modes(s, &chan, "+o", &[nick.clone()]);
         }
-        s.snotice_c('v', &format!("{nick} used OJOIN to enter {chan}"));
+        let m = s.trf("{0} used OJOIN to enter {1}", &[nick.as_str(), chan.as_str()]);
+        s.snotice_c('v', &m);
         CmdResult::Ok
     }
 }

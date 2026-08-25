@@ -43,7 +43,8 @@ impl Server {
         // connected. A SASL-at-connect login runs before registration completes, so
         // it's already reflected in the "Client connecting: … account: …" notice.
         if registered {
-            self.snotice_c('c', &format!("Client {nick} is now logged in as {account}"));
+            let m = self.trf("Client {0} is now logged in as {1}", &[nick.as_str(), account]);
+            self.snotice_c('c', &m);
         }
     }
 

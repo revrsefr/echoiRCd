@@ -48,27 +48,23 @@ impl Command for Rehash {
         match Config::try_load(&path) {
             Some(fresh) => {
                 // announce to everyone connected, not just opers
-                s.announce(&format!(
-                    "admin {who} has changed the configuration of the server."
-                ));
-                s.announce(&format!("{who} is rehashing the server config file."));
+                let m = s.trf("admin {0} has changed the configuration of the server.", &[who.as_str()]);
+                s.announce(&m);
+                let m = s.trf("{0} is rehashing the server config file.", &[who.as_str()]);
+                s.announce(&m);
                 s.apply_config(fresh);
                 s.announce("Server configuration reloaded.");
                 s.numeric(uid, RPL_REHASHING, &format!("{path} :Rehashing"));
             }
             None => {
                 // Unreadable config — keep what's running (do NOT reset to defaults).
-                s.announce(&format!(
-                    "{who} tried to reload the server configuration, but the config file \
-                     could not be read — no changes were made."
-                ));
-                s.send(
-                    uid,
-                    format!(
-                        ":{} NOTICE {who} :*** Could not read {path} — the running configuration was kept.",
-                        s.name
-                    ),
+                let m = s.trf(
+                    "{0} tried to reload the server configuration, but the config file could not be read — no changes were made.",
+                    &[who.as_str()],
                 );
+                s.announce(&m);
+                let m = s.trf("Could not read {0} — the running configuration was kept.", &[path.as_str()]);
+                s.send(uid, format!(":{} NOTICE {who} :*** {m}", s.name));
             }
         }
         CmdResult::Ok

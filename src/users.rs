@@ -331,7 +331,8 @@ impl Server {
             .unwrap_or_default();
         self.numeric(uid, RPL_YOUREOPER, ":You are now an IRC operator");
         self.send(uid, format!(":{} MODE {nick} :+os", self.name));
-        self.snotice_c('o', &format!("{nick} is now an IRC operator"));
+        let m = self.trf("{0} is now an IRC operator", &[nick.as_str()]);
+        self.snotice_c('o', &m);
         // operprefix: give this oper the ! prefix in every channel they're already in
         crate::modules::operprefix::grant_all(self, uid);
         // opermodes: extra umodes on oper-up
