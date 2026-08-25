@@ -398,14 +398,12 @@ impl Command for GlobOps {
             .filter(|(_, u)| u.flags.oper)
             .map(|(&u, _)| u)
             .collect();
+        let m = s.trf("GLOBOPS from {0}: {1}", &[from.as_str(), params[0].as_str()]);
         for o in opers {
             let nick = s.users.get(&o).map(|u| u.nick.clone()).unwrap_or_default();
             s.send(
                 o,
-                format!(
-                    ":{} NOTICE {nick} :*** GLOBOPS from {from}: {}",
-                    s.name, params[0]
-                ),
+                format!(":{} NOTICE {nick} :*** {m}", s.name),
             );
         }
         CmdResult::Ok
@@ -731,9 +729,10 @@ fn do_xline(s: &mut Server, uid: Uid, params: &[String], kind: XKind) -> CmdResu
         if s.remove_xline(kind, &mask, &nick) {
             s.propagate_delline(kind.tag(), &mask);
         } else {
+            let m = s.trf("{0}-line not found: {1}", &[kind.tag(), mask.as_str()]);
             s.send(
                 uid,
-                format!(":{} NOTICE {nick} :{}-line not found: {mask}", s.name, kind.tag()),
+                format!(":{} NOTICE {nick} :{m}", s.name),
             );
         }
         return CmdResult::Ok;
@@ -878,17 +877,20 @@ impl Command for Rline {
             if s.remove_xline(XKind::Rline, &pattern, &nick) {
                 s.propagate_delline("R", &pattern);
             } else {
+                let m = s.trf("R-line not found: {0}", &[pattern.as_str()]);
                 s.send(
                     uid,
-                    format!(":{} NOTICE {nick} :R-line not found: {pattern}", s.name),
+                    format!(":{} NOTICE {nick} :{m}", s.name),
                 );
             }
             return CmdResult::Ok;
         }
         if let Err(e) = crate::regex::Regex::new(&pattern) {
+            let e = e.to_string();
+            let m = s.trf("Invalid RLINE regex: {0}", &[e.as_str()]);
             s.send(
                 uid,
-                format!(":{} NOTICE {nick} :Invalid RLINE regex: {e}", s.name),
+                format!(":{} NOTICE {nick} :{m}", s.name),
             );
             return CmdResult::Fail;
         }
@@ -952,7 +954,8 @@ impl Command for NickLock {
             u.flags.nick_locked = true;
         }
         let by = oper_nick(s, uid);
-        s.snotice_c('v', &format!("{by} used NICKLOCK on {newnick}"));
+        let m = s.trf("{0} used NICKLOCK on {1}", &[by.as_str(), newnick.as_str()]);
+        s.snotice_c('v', &m);
         CmdResult::Ok
     }
 }
@@ -977,7 +980,8 @@ impl Command for NickUnlock {
             u.flags.nick_locked = false;
         }
         let by = oper_nick(s, uid);
-        s.snotice_c('v', &format!("{by} used NICKUNLOCK on {}", params[0]));
+        let m = s.trf("{0} used NICKUNLOCK on {1}", &[by.as_str(), params[0].as_str()]);
+        s.snotice_c('v', &m);
         CmdResult::Ok
     }
 }
@@ -1049,7 +1053,8 @@ impl Command for Squit {
             return CmdResult::Fail;
         };
         let by = oper_nick(s, uid);
-        s.snotice_c('l', &format!("{by} used SQUIT on {name}"));
+        let m = s.trf("{0} used SQUIT on {1}", &[by.as_str(), name.as_str()]);
+        s.snotice_c('l', &m);
         s.close_link(via, &format!("SQUIT from {by}"));
         CmdResult::Ok
     }
@@ -1209,7 +1214,9 @@ impl Command for SaMode {
         let r = apply_mode(s, uid, params);
         s.mode_sudo = false;
         let by = oper_nick(s, uid);
-        s.snotice_c('v', &format!("{by} used SAMODE: {}", params.join(" ")));
+        let joined = params.join(" ");
+        let m = s.trf("{0} used SAMODE: {1}", &[by.as_str(), joined.as_str()]);
+        s.snotice_c('v', &m);
         r
     }
 }
@@ -1248,7 +1255,8 @@ impl Command for SaTopic {
         s.to_channel(&key, &format!(":{prefix} TOPIC {chan} :{text}"), None);
         s.propagate_topic(uid, chan, &text);
         let by = oper_nick(s, uid);
-        s.snotice_c('v', &format!("{by} used SATOPIC on {chan}"));
+        let m = s.trf("{0} used SATOPIC on {1}", &[by.as_str(), chan.as_str()]);
+        s.snotice_c('v', &m);
         CmdResult::Ok
     }
 }
@@ -1313,7 +1321,8 @@ impl Command for SaKick {
         s.events
             .push_back(Hook::Part(tuid, key, "kicked".to_string()));
         let by = oper_nick(s, uid);
-        s.snotice_c('v', &format!("{by} used SAKICK on {victim} in {chan}"));
+        let m = s.trf("{0} used SAKICK on {1} in {2}", &[by.as_str(), victim.as_str(), chan.as_str()]);
+        s.snotice_c('v', &m);
         CmdResult::Ok
     }
 }
@@ -1343,7 +1352,8 @@ impl Command for SaQuit {
         s.send(tuid, format!("ERROR :Closing link: (SAQUIT: {reason})"));
         s.remove_user(tuid, &format!("Quit: {reason}"));
         let by = oper_nick(s, uid);
-        s.snotice_c('v', &format!("{by} used SAQUIT on {}: {reason}", params[0]));
+        let m = s.trf("{0} used SAQUIT on {1}: {2}", &[by.as_str(), params[0].as_str(), reason.as_str()]);
+        s.snotice_c('v', &m);
         CmdResult::Ok
     }
 }
@@ -1379,7 +1389,8 @@ impl Command for ChgName {
         }
         s.notify_peers(t, &line, |c| c.setname);
         let by = oper_nick(s, uid);
-        s.snotice_c('v', &format!("{by} used CHGNAME on {}: {realname}", params[0]));
+        let m = s.trf("{0} used CHGNAME on {1}: {2}", &[by.as_str(), params[0].as_str(), realname.as_str()]);
+        s.snotice_c('v', &m);
         CmdResult::Ok
     }
 }
@@ -1436,7 +1447,8 @@ impl Command for ClearChan {
         }
         s.channels.retain(|_, c| c.keep_alive());
         let by = oper_nick(s, uid);
-        s.snotice_c('v', &format!("{by} used CLEARCHAN on {chan}"));
+        let m = s.trf("{0} used CLEARCHAN on {1}", &[by.as_str(), chan.as_str()]);
+        s.snotice_c('v', &m);
         CmdResult::Ok
     }
 }
@@ -1553,7 +1565,8 @@ impl Command for SwhoisCmd {
             }
         }
         let by = oper_nick(s, uid);
-        s.snotice_c('v', &format!("{by} used SWHOIS on {}: {text}", params[0]));
+        let m = s.trf("{0} used SWHOIS on {1}: {2}", &[by.as_str(), params[0].as_str(), text.as_str()]);
+        s.snotice_c('v', &m);
         CmdResult::Ok
     }
 }

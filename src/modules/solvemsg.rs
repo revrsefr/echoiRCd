@@ -97,13 +97,13 @@ impl Module for SolveMsg {
                 answer: Some(ans),
             });
         }
-        s.send(
-            uid,
-            format!(
-                ":{} NOTICE {nick} :*** To cut spam, answer this to send your message — what is {a} {sym} {b} ?",
-                s.name
-            ),
+        let as_ = a.to_string();
+        let bs = b.to_string();
+        let m = s.trf(
+            "To cut spam, answer this to send your message — what is {0} {1} {2} ?",
+            &[as_.as_str(), sym, bs.as_str()],
         );
+        s.send(uid, format!(":{} NOTICE {nick} :*** {m}", s.name));
         ModResult::Deny
     }
 }

@@ -102,7 +102,8 @@ pub fn apply(s: &mut Server, uid: Uid, type_id: Option<&str>) {
         return;
     };
     let Some(r) = with_resolved(s, |m| m.get(&id).cloned()) else {
-        s.snotice_c('o', &format!("oper type '{id}' is not defined — granting full access"));
+        let m = s.trf("oper type '{0}' is not defined — granting full access", &[id.as_str()]);
+        s.snotice_c('o', &m);
         return;
     };
     if !r.modes.is_empty() {

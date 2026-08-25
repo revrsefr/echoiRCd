@@ -90,7 +90,8 @@ impl Module for BlockAmsg {
         let notify_opers = matches!(action.as_str(), "killopers" | "noticeopers" | "zlineopers");
         if notify_opers {
             let mask = srv.users.get(&uid).map(|u| u.prefix()).unwrap_or_default();
-            srv.snotice(&format!("User {mask} had an /amsg or /ame blocked"));
+            let m = srv.trf("User {0} had an /amsg or /ame blocked", &[mask.as_str()]);
+            srv.snotice(&m);
         }
         let reason = "Attempted to global message (/amsg or /ame)";
         match action.as_str() {

@@ -158,9 +158,10 @@ impl Command for VerifyChallenge {
             .unwrap_or_default();
 
         let fail = |s: &mut Server, why: &str| {
+            let m = s.trf("Cloudflare Challenge: {0}", &[why]);
             s.send(
                 uid,
-                format!(":{} NOTICE {nick} :*** Cloudflare Challenge: {why}", s.name),
+                format!(":{} NOTICE {nick} :*** {m}", s.name),
             );
             CmdResult::Fail
         };

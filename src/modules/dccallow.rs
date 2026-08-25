@@ -117,19 +117,21 @@ impl Module for DccAllow {
             return ModResult::Passthru;
         }
         let tnick = s.users.get(&tuid).map(|u| u.nick.clone()).unwrap_or_default();
+        let m1 = s.trf(
+            "Your DCC to {0} was blocked; they must /DCCALLOW +{1} first.",
+            &[tnick.as_str(), sender.as_str()],
+        );
         s.send(
             uid,
-            format!(
-                ":{} NOTICE {sender} :*** Your DCC to {tnick} was blocked; they must /DCCALLOW +{sender} first.",
-                s.name
-            ),
+            format!(":{} NOTICE {sender} :*** {m1}", s.name),
+        );
+        let m2 = s.trf(
+            "{0} tried to send you {1} — blocked. /DCCALLOW +{2} to allow it, then ask them to resend.",
+            &[sender.as_str(), what.as_str(), sender.as_str()],
         );
         s.send(
             tuid,
-            format!(
-                ":{} NOTICE {tnick} :*** {sender} tried to send you {what} — blocked. /DCCALLOW +{sender} to allow it, then ask them to resend.",
-                s.name
-            ),
+            format!(":{} NOTICE {tnick} :*** {m2}", s.name),
         );
         ModResult::Deny
     }

@@ -543,12 +543,10 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
                         .map(|u| u.nick.clone())
                         .unwrap_or_default(),
                 );
+                let m = s.trf("Cannot message {0}: a TLS connection is required (+z)", &[tn.as_str()]);
                 s.send(
                     uid,
-                    format!(
-                        ":{} NOTICE {sn} :Cannot message {tn}: a TLS connection is required (+z)",
-                        s.name
-                    ),
+                    format!(":{} NOTICE {sn} :{m}", s.name),
                 );
             }
             return CmdResult::Fail;

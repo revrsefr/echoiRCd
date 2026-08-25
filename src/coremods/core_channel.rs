@@ -66,12 +66,10 @@ impl Command for Tban {
             (u.nick.clone(), u.prefix())
         };
         if s.channels[&key].bans.iter().any(|b| b.mask == mask) {
+            let m = s.trf("{0} is already banned on {1}", &[mask.as_str(), chan.as_str()]);
             s.send(
                 uid,
-                format!(
-                    ":{} NOTICE {nick} :{mask} is already banned on {chan}",
-                    s.name
-                ),
+                format!(":{} NOTICE {nick} :{m}", s.name),
             );
             return CmdResult::Fail;
         }
@@ -127,12 +125,10 @@ impl Command for Knock {
             .cloned()
             .unwrap_or_else(|| "requesting an invite".to_string());
         let who = s.users[&uid].prefix();
+        let m = s.trf("[Knock] {0} is knocking: {1}", &[who.as_str(), reason.as_str()]);
         s.to_channel(
             &key,
-            &format!(
-                ":{} NOTICE {chan} :[Knock] {who} is knocking: {reason}",
-                s.name
-            ),
+            &format!(":{} NOTICE {chan} :{m}", s.name),
             None,
         );
         s.numeric(
@@ -314,9 +310,10 @@ impl Command for Invite {
         let maxinv = s.conf_num("maxinvites", 100usize);
         if s.channels[&key].invites.len() >= maxinv && !s.channels[&key].invites.contains(&tuid) {
             let nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
+            let m = s.trf("Channel invite list is full", &[]);
             s.send(
                 uid,
-                format!(":{} NOTICE {nick} :{chan} :Channel invite list is full", s.name),
+                format!(":{} NOTICE {nick} :{chan} :{m}", s.name),
             );
             return CmdResult::Fail;
         }
@@ -408,12 +405,10 @@ impl Command for Uninvite {
             format!(":{} NOTICE {nick} :{who} {word} {chan}", s.name),
         );
         if removed {
+            let m = s.trf("Your invite to {0} was revoked", &[chan.as_str()]);
             s.send(
                 tuid,
-                format!(
-                    ":{} NOTICE {who} :Your invite to {chan} was revoked",
-                    s.name
-                ),
+                format!(":{} NOTICE {who} :{m}", s.name),
             );
         }
         CmdResult::Ok
@@ -563,7 +558,8 @@ impl Command for Rename {
             s.fail(uid, "RENAME", "CANNOT_RENAME", "The channel cannot be renamed.");
             return CmdResult::Fail;
         }
-        s.snotice_c('a', &format!("{oldname} renamed to {new} by {prefix}"));
+        let m = s.trf("{0} renamed to {1} by {2}", &[oldname.as_str(), new.as_str(), prefix.as_str()]);
+        s.snotice_c('a', &m);
         s.propagate_rename(&uuid, &oldname, new, &reason, None);
         CmdResult::Ok
     }

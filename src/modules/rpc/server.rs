@@ -61,7 +61,8 @@ pub fn handle(s: &mut Server, action: &str, params: &str) -> Result<String, RpcE
             std::thread::spawn(move || {
                 crate::socketengine::connect_link(&addr, tx, counter, max_line)
             });
-            s.snotice_c('l', &format!("RPC initiated a link to {}", b.name));
+            let m = s.trf("RPC initiated a link to {0}", &[b.name.as_str()]);
+            s.snotice_c('l', &m);
             Ok(obj(&[("result", "true".into())]))
         }
         "disconnect" => {

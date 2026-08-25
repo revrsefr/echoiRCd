@@ -289,13 +289,13 @@ impl Command for ReputationCmd {
             e.score = val.min(cap);
             e.last_seen = n;
             save(s);
-            s.send(
-                uid,
-                format!(
-                    ":{} NOTICE {anick} :REPUTATION {nick} ({k}) set to {val}",
-                    s.name
-                ),
+            let ks = k.to_string();
+            let vals = val.to_string();
+            let m = s.trf(
+                "REPUTATION {0} ({1}) set to {2}",
+                &[nick.as_str(), ks.as_str(), vals.as_str()],
             );
+            s.send(uid, format!(":{} NOTICE {anick} :{m}", s.name));
         } else {
             let score = score_of(s, tuid);
             s.send(

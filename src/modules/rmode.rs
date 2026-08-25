@@ -99,13 +99,13 @@ impl Command for RMode {
             .map(|u| u.nick.clone())
             .unwrap_or_default();
         let plural = if removed == 1 { "y" } else { "ies" };
-        s.send(
-            uid,
-            format!(
-                ":{} NOTICE {nick} :RMODE: removed {removed} +{mode} entr{plural} from {chan}",
-                s.name
-            ),
+        let removeds = removed.to_string();
+        let modes = mode.to_string();
+        let m = s.trf(
+            "RMODE: removed {0} +{1} entr{2} from {3}",
+            &[removeds.as_str(), modes.as_str(), plural, chan.as_str()],
         );
+        s.send(uid, format!(":{} NOTICE {nick} :{m}", s.name));
         CmdResult::Ok
     }
 }

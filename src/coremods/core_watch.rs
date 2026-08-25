@@ -351,7 +351,9 @@ impl Command for Signore {
                 .map(|u| u.signore.len() >= max && !u.signore.contains(&mask))
                 .unwrap_or(true);
             if full {
-                s.send(uid, format!(":{sn} NOTICE {nick} :Your SIGNORE list is full ({max} max)."));
+                let maxs = max.to_string();
+                let m = s.trf("Your SIGNORE list is full ({0} max).", &[maxs.as_str()]);
+                s.send(uid, format!(":{sn} NOTICE {nick} :{m}"));
                 return CmdResult::Fail;
             }
             if let Some(u) = s.users.get_mut(&uid) {
@@ -359,12 +361,14 @@ impl Command for Signore {
                     u.signore.push(mask.clone());
                 }
             }
-            s.send(uid, format!(":{sn} NOTICE {nick} :SIGNORE \x02{mask}\x02 added — you and they can no longer see each other's messages."));
+            let m = s.trf("SIGNORE \x02{0}\x02 added — you and they can no longer see each other's messages.", &[mask.as_str()]);
+            s.send(uid, format!(":{sn} NOTICE {nick} :{m}"));
         } else {
             if let Some(u) = s.users.get_mut(&uid) {
                 u.signore.retain(|x| x != &mask);
             }
-            s.send(uid, format!(":{sn} NOTICE {nick} :SIGNORE \x02{mask}\x02 removed."));
+            let m = s.trf("SIGNORE \x02{0}\x02 removed.", &[mask.as_str()]);
+            s.send(uid, format!(":{sn} NOTICE {nick} :{m}"));
         }
         // Persist the change to the user's services account (no-op if not logged in).
         s.push_signore_to_services(uid);

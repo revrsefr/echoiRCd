@@ -289,7 +289,9 @@ fn pick(
         if let Some(max) = c.limit {
             if class_count(s, &c.name, uid) >= max {
                 if c.maxconnwarn {
-                    s.snotice_c('c', &format!("connect class {} is full ({max})", c.name));
+                    let max_s = max.to_string();
+                    let m = s.trf("connect class {0} is full ({1})", &[c.name.as_str(), max_s.as_str()]);
+                    s.snotice_c('c', &m);
                 }
                 continue; // full — try the next class
             }
@@ -355,7 +357,11 @@ pub fn assign(s: &mut Server, uid: Uid) -> Option<String> {
     };
     let warn = |s: &Server, why: &str| {
         if class.maxconnwarn {
-            s.snotice_c('c', &format!("connect class {} refused {ip}: {why}", class.name));
+            let m = s.trf(
+                "connect class {0} refused {1}: {2}",
+                &[class.name.as_str(), ip.as_str(), why],
+            );
+            s.snotice_c('c', &m);
         }
     };
     if let Some(max) = class.localmax {

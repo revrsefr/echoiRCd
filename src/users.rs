@@ -438,7 +438,8 @@ impl Server {
                 self.send(t, line.clone());
             }
             if self.conf_bool("seenicks", false) {
-                self.snotice_c('n', &format!("{old} is now known as {newnick}"));
+                let m = self.trf("{0} is now known as {1}", &[old.as_str(), newnick]);
+                self.snotice_c('n', &m);
             }
             // WATCH/MONITOR: the old nick is now gone, the new one is here
             self.watch_notify_offline(&old);

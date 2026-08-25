@@ -48,13 +48,14 @@ impl Command for TLine {
             .get(&uid)
             .map(|u| u.nick.clone())
             .unwrap_or_default();
-        s.send(
-            uid,
-            format!(
-                ":{} NOTICE {nick} :*** TLINE: {mask} matches {matched} of {total} local users ({pct}%)",
-                s.name
-            ),
+        let matcheds = matched.to_string();
+        let totals = total.to_string();
+        let pcts = pct.to_string();
+        let m = s.trf(
+            "TLINE: {0} matches {1} of {2} local users ({3}%)",
+            &[mask.as_str(), matcheds.as_str(), totals.as_str(), pcts.as_str()],
         );
+        s.send(uid, format!(":{} NOTICE {nick} :*** {m}", s.name));
         CmdResult::Ok
     }
 }

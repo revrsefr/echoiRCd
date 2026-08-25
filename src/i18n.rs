@@ -231,6 +231,20 @@ fn read_quoted(s: &str) -> Option<(String, &str)> {
                 't' => out.push('\t'),
                 '"' => out.push('"'),
                 '\\' => out.push('\\'),
+                // \xNN — a raw byte, so IRC formatting controls (e.g. \x02 bold) in a
+                // msgid match the literal byte the source `"\x02"` compiles to.
+                'x' => {
+                    let (h1, h2) = (chars.next()?.1, chars.next()?.1);
+                    match u8::from_str_radix(&format!("{h1}{h2}"), 16) {
+                        Ok(b) => out.push(b as char),
+                        Err(_) => {
+                            out.push('\\');
+                            out.push('x');
+                            out.push(h1);
+                            out.push(h2);
+                        }
+                    }
+                }
                 other => {
                     out.push('\\');
                     out.push(other);

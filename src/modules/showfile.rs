@@ -36,10 +36,10 @@ pub fn maybe_show(s: &mut Server, uid: Uid, cmd: &str) -> bool {
                 s.send(uid, format!(":{} NOTICE {nick} :{line}", s.name));
             }
         }
-        None => s.send(
-            uid,
-            format!(":{} NOTICE {nick} :*** {cmd}: file not available.", s.name),
-        ),
+        None => {
+            let m = s.trf("{0}: file not available.", &[cmd]);
+            s.send(uid, format!(":{} NOTICE {nick} :*** {m}", s.name));
+        }
     }
     true
 }

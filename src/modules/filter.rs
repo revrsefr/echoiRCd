@@ -185,14 +185,20 @@ impl Command for FilterCmd {
                     let filter = match SpamFilter::new(pattern.clone(), engine.clone(), action.clone(), duration, reason) {
                         Ok(f) => f,
                         Err(e) => {
-                            s.send(uid, format!(":{} NOTICE {nick} :FILTER rejected ({e})", s.name));
+                            let e_s = e.to_string();
+                            let m = s.trf("FILTER rejected ({0})", &[e_s.as_str()]);
+                            s.send(uid, format!(":{} NOTICE {nick} :{m}", s.name));
                             return CmdResult::Fail;
                         }
                     };
                     let f = s.ext.get_or_insert_with::<Filters>(Filters::default);
                     f.0.retain(|r| r.pattern != pattern);
                     f.0.push(filter);
-                    s.snotice_c('f', &format!("{nick} added FILTER {pattern} (engine={engine} action={action})"));
+                    let m = s.trf(
+                        "{0} added FILTER {1} (engine={2} action={3})",
+                        &[nick.as_str(), pattern.as_str(), engine.as_str(), action.as_str()],
+                    );
+                    s.snotice_c('f', &m);
                 }
             }
         }

@@ -45,9 +45,10 @@ pub fn grant(s: &mut Server, uid: Uid, title: &str, vhost: &str) {
         s.change_host_ident(uid, None, Some(vhost));
     }
     let nick = nick(s, uid);
+    let m = s.trf("TITLE: you are now known as \"{0}\".", &[title]);
     s.send(
         uid,
-        format!(":{} NOTICE {nick} :*** TITLE: you are now known as \"{title}\".", s.name),
+        format!(":{} NOTICE {nick} :*** {m}", s.name),
     );
 }
 

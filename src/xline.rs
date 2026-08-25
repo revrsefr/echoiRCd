@@ -304,7 +304,8 @@ impl Server {
                 crate::server::long_date(expires)
             )
         };
-        self.snotice_c('x', &format!("XLINE: {setter} added a {detail}: {reason}"));
+        let m = self.trf("XLINE: {0} added a {1}: {2}", &[setter, detail.as_str(), reason]);
+        self.snotice_c('x', &m);
         self.save_xlines();
         self.enforce_xlines();
     }
@@ -335,7 +336,8 @@ impl Server {
                 Some(e) if e != 0 => format!("timed {tag}-line on {mask} (already expired)"),
                 _ => format!("permanent {tag}-line on {mask}"),
             };
-            self.snotice_c('x', &format!("XLINE: {remover} removed a {detail}"));
+            let m = self.trf("XLINE: {0} removed a {1}", &[remover, detail.as_str()]);
+            self.snotice_c('x', &m);
             self.save_xlines();
         }
         removed
@@ -383,7 +385,8 @@ impl Server {
         }
         self.xlines.retain(|x| x.expires == 0 || x.expires > n);
         for (kind, mask) in &expired {
-            self.snotice_c('x', &format!("XLINE: {}-line on {mask} expired", kind.tag()));
+            let m = self.trf("XLINE: {0}-line on {1} expired", &[kind.tag(), mask.as_str()]);
+            self.snotice_c('x', &m);
         }
         self.save_xlines(); // an expiry changed the set — persist it
     }

@@ -199,23 +199,16 @@ impl Command for MkPasswd {
         }
         match make(&algo, &pass) {
             Some(hashed) => {
-                s.send(
-                    uid,
-                    format!(
-                        ":{} NOTICE {nick} :{algo} hashed password: {hashed}",
-                        s.name
-                    ),
-                );
+                let m = s.trf("{0} hashed password: {1}", &[algo.as_str(), hashed.as_str()]);
+                s.send(uid, format!(":{} NOTICE {nick} :{m}", s.name));
                 CmdResult::Ok
             }
             None => {
-                s.send(
-                    uid,
-                    format!(
-                        ":{} NOTICE {nick} :Unknown hash '{algo}' (try md5, sha1, sha256, sha512, pbkdf2, bcrypt)",
-                        s.name
-                    ),
+                let m = s.trf(
+                    "Unknown hash '{0}' (try md5, sha1, sha256, sha512, pbkdf2, bcrypt)",
+                    &[algo.as_str()],
                 );
+                s.send(uid, format!(":{} NOTICE {nick} :{m}", s.name));
                 CmdResult::Fail
             }
         }

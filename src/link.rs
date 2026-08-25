@@ -340,7 +340,8 @@ impl Server {
     }
 
     fn reject_link(&mut self, uid: Uid, why: &str) {
-        self.link_out(uid, format!("ERROR :Link denied: {why}"));
+        let m = self.trf("Link denied: {0}", &[why]);
+        self.link_out(uid, format!("ERROR :{m}"));
         eprintln!("[link] rejected {uid}: {why}");
         self.close_link(uid, why);
     }

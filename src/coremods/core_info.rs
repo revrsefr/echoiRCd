@@ -53,12 +53,10 @@ impl Command for SslInfo {
         };
         let tls = if secure { "yes" } else { "no" };
         let fp = certfp.unwrap_or_else(|| "none".to_string());
+        let m = s.trf("SSLINFO {0}: TLS={1} certfp={2}", &[nick.as_str(), tls, fp.as_str()]);
         s.send(
             uid,
-            format!(
-                ":{} NOTICE {asker} :SSLINFO {nick}: TLS={tls} certfp={fp}",
-                s.name
-            ),
+            format!(":{} NOTICE {asker} :{m}", s.name),
         );
         CmdResult::Ok
     }
@@ -437,9 +435,10 @@ impl Command for Whois {
         // +W showwhois — tell the target that someone looked them up
         if showwhois && !is_self {
             let by = s.users.get(&uid).map(|u| u.prefix()).unwrap_or_default();
+            let m = s.trf("{0} did a /WHOIS on you", &[by.as_str()]);
             s.send(
                 tuid,
-                format!(":{} NOTICE {nick} :*** {by} did a /WHOIS on you", s.name),
+                format!(":{} NOTICE {nick} :*** {m}", s.name),
             );
         }
         s.numeric(uid, RPL_ENDOFWHOIS, &format!("{nick} :End of /WHOIS list"));

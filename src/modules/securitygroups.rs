@@ -221,13 +221,8 @@ impl Command for SecGroupsCmd {
                 .map(|u| u.nick.clone())
                 .unwrap_or_default(),
         );
-        s.send(
-            uid,
-            format!(
-                ":{} NOTICE {anick} :{tnick} is in security groups: {list}",
-                s.name
-            ),
-        );
+        let m = s.trf("{0} is in security groups: {1}", &[tnick.as_str(), list.as_str()]);
+        s.send(uid, format!(":{} NOTICE {anick} :{m}", s.name));
         CmdResult::Ok
     }
 }

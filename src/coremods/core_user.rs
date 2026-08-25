@@ -60,9 +60,10 @@ impl Command for Vhost {
         match host {
             Some(h) => {
                 s.change_host_ident(uid, None, Some(&h));
+                let m = s.trf("Your vhost is now {0}", &[h.as_str()]);
                 s.send(
                     uid,
-                    format!(":{} NOTICE {nick} :Your vhost is now {h}", s.name),
+                    format!(":{} NOTICE {nick} :{m}", s.name),
                 );
             }
             None => {

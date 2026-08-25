@@ -175,8 +175,11 @@ impl Ircd {
             busy.store(0, Ordering::Relaxed);
             let ms = start.elapsed().as_millis() as u64;
             if slow_ms != 0 && ms >= slow_ms {
-                self.server
-                    .snotice(&format!("slow event: a command took {ms}ms on the core thread"));
+                let ms_s = ms.to_string();
+                let m = self
+                    .server
+                    .trf("slow event: a command took {0}ms on the core thread", &[ms_s.as_str()]);
+                self.server.snotice(&m);
             }
         }
     }
@@ -260,11 +263,16 @@ impl Ircd {
                     .map(|u| u.nick.clone())
                     .unwrap_or_default();
                 let line = match hash {
-                    Some(h) => format!(
-                        ":{} NOTICE {nick} :{algo} hashed password: {h}",
-                        self.server.name
-                    ),
-                    None => format!(":{} NOTICE {nick} :Could not hash with '{algo}'", self.server.name),
+                    Some(h) => {
+                        let m = self
+                            .server
+                            .trf("{0} hashed password: {1}", &[algo.as_str(), h.as_str()]);
+                        format!(":{} NOTICE {nick} :{m}", self.server.name)
+                    }
+                    None => {
+                        let m = self.server.trf("Could not hash with '{0}'", &[algo.as_str()]);
+                        format!(":{} NOTICE {nick} :{m}", self.server.name)
+                    }
                 };
                 self.server.send(uid, line);
             }

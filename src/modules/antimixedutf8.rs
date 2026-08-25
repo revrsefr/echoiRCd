@@ -285,12 +285,14 @@ impl Module for AntiMixedUtf8 {
 
         // Notify the sender even for punitive actions: the writer flushes queued
         // lines before a disconnect.
+        let block_msg = srv.amu.block_msg.clone();
+        let m = srv.trf(
+            "{0} (Flagged by the spam filter; network operators have been notified.)",
+            &[block_msg.as_str()],
+        );
         srv.send(
             uid,
-            format!(
-                ":{} NOTICE {nick} :*** {} (Flagged by the spam filter; network operators have been notified.)",
-                srv.name, srv.amu.block_msg
-            ),
+            format!(":{} NOTICE {nick} :*** {m}", srv.name),
         );
 
         let action = srv.amu.action.to_ascii_lowercase();

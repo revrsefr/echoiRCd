@@ -726,7 +726,8 @@ impl ChanMode for ListMode {
             for (m, setter, ts) in rows {
                 s.numeric(uid, entry_num, &format!("{chan} {m} {setter} {ts}"));
             }
-            s.numeric(uid, end_num, &format!("{chan} :End of channel {noun}"));
+            let m = s.trf("End of channel {0}", &[noun]);
+            s.numeric(uid, end_num, &format!("{chan} :{m}"));
             return Applied::No;
         };
         // autoop (+w) embeds a status prefix to grant on join, applied under server

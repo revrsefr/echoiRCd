@@ -245,7 +245,9 @@ impl Command for Admin {
             RPL_ADMINME,
             &format!("{} :Administrative info", s.name),
         );
-        s.numeric(uid, RPL_ADMINLOC1, &format!(":{} IRC network", s.network));
+        let network = s.network.clone();
+        let m = s.trf("{0} IRC network", &[network.as_str()]);
+        s.numeric(uid, RPL_ADMINLOC1, &format!(":{m}"));
         s.numeric(
             uid,
             RPL_ADMINLOC2,
