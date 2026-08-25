@@ -49,6 +49,11 @@ operational limit exposed as a config key.
   layer (`ws://` / `wss://`), and the PROXY protocol (v1/v2) behind a load balancer.
 - **GeoIP** — a MaxMind `.mmdb` reader with a `G:<cc>` geoban, `GEOIP` command, and
   a WHOIS country line.
+- **Localization** — a server-wide message locale: `locale fr` renders every
+  numeric, notice and server message from a `lang/<code>.conf` catalog, while
+  protocol tokens, IDs, user data and the S2S wire stay canonical. Ships **French**
+  and **Spanish**, English is a zero-cost passthrough, and it switches live on
+  `REHASH` — with no per-message cost on the broadcast hot path.
 - **Control & observability** — a token-authenticated JSON-RPC plane over HTTP, and
   an optional OpenMetrics/Prometheus endpoint.
 
@@ -94,6 +99,11 @@ settings apply on `REHASH` without a restart. Three helper subcommands round it 
 - `echoircd mkpasswd` — read a password from stdin, print a bcrypt hash for an `oper` block.
 - `echoircd checkconfig [file]` — parse a config and dump its keys, to validate one or diff two.
 - `echoircd rehash` — signal the running server to reload its config in place.
+
+Message localization is catalog-driven: set `locale fr` (or `es`) and the server
+loads `lang/<code>.conf` and renders its messages in that language, switchable live
+on `REHASH`; English is the default. Add a language by dropping in a translated
+`lang/<code>.conf` — no rebuild.
 
 Your live `echoircd.conf` is gitignored — it holds secrets (oper password, cloak
 key, link password), so never commit it. Generate a TLS certificate into `tls/`
