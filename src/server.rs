@@ -953,6 +953,9 @@ impl Server {
         if let Some(tok) = crate::modules::filehost::isupport(self) {
             tokens.push(tok);
         }
+        if let Some(tok) = crate::modules::webpush::isupport(self) {
+            tokens.push(tok);
+        }
         // at most 13 tokens per 005 line (the RFC-suggested cap) so strict clients
         // don't truncate trailing tokens
         tokens.chunks(13).map(|c| c.join(" ")).collect()

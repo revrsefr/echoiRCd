@@ -25,6 +25,7 @@ pub mod customprefix;
 pub mod customtitle;
 pub mod dccallow;
 pub mod event_playback;
+pub mod webpush;
 pub mod denychans;
 pub mod disable;
 pub mod dnsbl;
@@ -119,6 +120,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(permchannels::PermChannels::default()),
         Box::new(chathistory::ChatHistoryGc),
         Box::new(event_playback::EventPlayback),
+        Box::new(webpush::WebPush),
         Box::new(account_registration::AcctRegGc),
     ]
 }
@@ -158,5 +160,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(relaymsg::commands())
         .chain(ojoin::commands())
         .chain(namedmodes::commands())
+        .chain(webpush::commands())
         .collect()
 }

@@ -11,7 +11,7 @@ use openssl::pkey::PKey;
 use openssl::sign::Signer;
 
 /// base64url (no padding) of arbitrary bytes.
-fn b64url(data: &[u8]) -> String {
+pub(crate) fn b64url(data: &[u8]) -> String {
     let std = openssl::base64::encode_block(data);
     std.trim_end_matches('=')
         .replace('+', "-")
@@ -20,7 +20,7 @@ fn b64url(data: &[u8]) -> String {
 
 /// Decode base64url (no padding) back to bytes.
 #[allow(clippy::manual_is_multiple_of)] // is_multiple_of is unstable on our MSRV
-fn unb64url(s: &str) -> Option<Vec<u8>> {
+pub(crate) fn unb64url(s: &str) -> Option<Vec<u8>> {
     let mut std = s.replace('-', "+").replace('_', "/");
     while std.len() % 4 != 0 {
         std.push('=');

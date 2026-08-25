@@ -169,6 +169,7 @@ define_caps! {
     "draft/relaymsg" => relaymsg,
     "draft/channel-rename" => channel_rename,
     "draft/read-marker" => read_marker,
+    "draft/webpush" => webpush,
     "no-implicit-names" => no_implicit_names,
     "cap-notify" => cap_notify,
 }

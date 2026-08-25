@@ -94,6 +94,71 @@ pub fn post(
     Ok((status, out))
 }
 
+/// Like [`post`] but with a **binary** body (e.g. a Web Push `aes128gcm` payload),
+/// so the request bytes are never forced through UTF-8. Returns `(status, "")` — the
+/// response body is discarded (push endpoints just need the status).
+pub fn post_bytes(
+    url: &str,
+    content_type: &str,
+    body: &[u8],
+    headers: &[(String, String)],
+    timeout: Duration,
+    verify: bool,
+) -> Result<(u16, String), String> {
+    let (scheme, rest) = url.split_once("://").ok_or("bad url (no scheme)")?;
+    let (hostport, path) = match rest.split_once('/') {
+        Some((hp, p)) => (hp, format!("/{p}")),
+        None => (rest, "/".to_string()),
+    };
+    let https = scheme.eq_ignore_ascii_case("https");
+    let (host, port): (&str, u16) = match hostport.rsplit_once(':') {
+        Some((h, p)) => (h, p.parse().unwrap_or(if https { 443 } else { 80 })),
+        None => (hostport, if https { 443 } else { 80 }),
+    };
+    let mut head = format!(
+        "POST {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: echoIRCd\r\nAccept: */*\r\n\
+         Content-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n",
+        body.len()
+    );
+    for (k, v) in headers {
+        head.push_str(&format!("{k}: {v}\r\n"));
+    }
+    head.push_str("\r\n");
+    let mut req = head.into_bytes();
+    req.extend_from_slice(body);
+
+    let stream = TcpStream::connect((host, port)).map_err(|e| e.to_string())?;
+    stream.set_read_timeout(Some(timeout)).ok();
+    stream.set_write_timeout(Some(timeout)).ok();
+    let raw = if https {
+        let mut b = SslConnector::builder(SslMethod::tls()).map_err(|e| e.to_string())?;
+        if !verify {
+            b.set_verify(SslVerifyMode::NONE);
+        }
+        let connector = b.build();
+        let mut tls = connector.connect(host, stream).map_err(|e| e.to_string())?;
+        tls.write_all(&req).map_err(|e| e.to_string())?;
+        let mut buf = Vec::new();
+        let _ = tls.take(MAX_RESPONSE).read_to_end(&mut buf);
+        buf
+    } else {
+        let mut s = stream;
+        s.write_all(&req).map_err(|e| e.to_string())?;
+        let mut buf = Vec::new();
+        let _ = s.take(MAX_RESPONSE).read_to_end(&mut buf);
+        buf
+    };
+    let resp = String::from_utf8_lossy(&raw).into_owned();
+    let head = resp.split_once("\r\n\r\n").map(|(h, _)| h).unwrap_or(&resp);
+    let status = head
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|c| c.parse::<u16>().ok())
+        .unwrap_or(0);
+    Ok((status, String::new()))
+}
+
 /// Decode an HTTP/1.1 chunked body (best effort). Used for both outbound response
 /// bodies here and inbound request bodies in the RPC httpd.
 pub fn dechunk(body: &str) -> String {

@@ -183,6 +183,15 @@ limits {
     # chathistory_maxage 604800;  # max age (secs) a client may request (7 days)
     # event_playback     yes;     # record JOIN/PART/QUIT/NICK/MODE/TOPIC/KICK into
     #                             # history for draft/event-playback clients (no = off)
+    # --- draft/webpush: encrypted Web Push (RFC 8291/8292) for a PM/highlight while a
+    #     subscriber's tab is away. VAPID keypair auto-generated + persisted on first
+    #     start; advertised via ISUPPORT VAPID= and the draft/webpush cap. ---
+    # webpush            yes;     # master switch (no = off)
+    # webpush_away_only  yes;     # only push to users marked away (no = always)
+    # webpush_ttl        259200;  # push TTL in seconds (3 days)
+    # webpush_sub        "mailto:admin@example.net";   # VAPID contact (default mailto:webpush@<server>)
+    # webpush_vapid_file "";      # VAPID private key path (default <conf>.webpush-vapid)
+    # webpush_database   "";      # subscription store path (default <conf>.webpush)
     # dccallow_maxentries 20;     # /DCCALLOW list entries per user
     # http_max_concurrent 32;     # in-flight outbound HTTP requests (API modules)
 }
