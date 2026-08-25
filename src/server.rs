@@ -481,10 +481,8 @@ impl Server {
 
         // connflood — refuse an IP that's opening connections too fast (see modules::connflood)
         if crate::modules::connflood::over_limit(self, ip) {
-            self.send(
-                uid,
-                "ERROR :Closing link: (Too many connections from your IP)".to_string(),
-            );
+            let m = self.trf("Closing link: (Too many connections from your IP)", &[]);
+            self.send(uid, format!("ERROR :{m}"));
             self.remove_user(uid, "Connection throttled");
             return;
         }
@@ -494,7 +492,8 @@ impl Server {
 
         // connectclass — assign a connection class; a deny class or per-IP cap rejects
         if let Some(reason) = crate::modules::connclass::assign(self, uid) {
-            self.send(uid, format!("ERROR :Closing link: ({reason})"));
+            let m = self.trf("Closing link: ({0})", &[reason.as_str()]);
+            self.send(uid, format!("ERROR :{m}"));
             self.remove_user(uid, &reason);
             return;
         }

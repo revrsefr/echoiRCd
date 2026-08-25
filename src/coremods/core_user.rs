@@ -572,7 +572,8 @@ impl Command for Nick {
             });
             if let Some((nk, id, ho, ip, rn)) = info {
                 if let Some(reason) = s.matched_rline(&nk, &id, &ho, &ip, &rn) {
-                    s.send(uid, format!("ERROR :Closing link: ({reason})"));
+                    let m = s.trf("Closing link: ({0})", &[reason.as_str()]);
+                    s.send(uid, format!("ERROR :{m}"));
                     s.remove_user(uid, &reason);
                 }
             }

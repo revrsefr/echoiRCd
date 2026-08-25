@@ -55,7 +55,8 @@ impl Module for AutoDrop {
             .get::<DropCache>()
             .is_some_and(|c| c.cmds.contains(&cmd.to_ascii_uppercase()));
         if hit {
-            s.send(uid, "ERROR :Closing link (dropped)".to_string());
+            let m = s.trf("Closing link (dropped)", &[]);
+            s.send(uid, format!("ERROR :{m}"));
             s.remove_user(uid, "Autodropped");
             return ModResult::Deny;
         }

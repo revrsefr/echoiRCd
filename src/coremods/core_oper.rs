@@ -1349,7 +1349,8 @@ impl Command for SaQuit {
             .cloned()
             .unwrap_or_else(|| "Services forced quit".to_string());
         if s.uid_servprotected(tuid) { s.numeric(uid, ERR_NOPRIVILEGES, ":Cannot use an SA command on a network service"); return CmdResult::Fail; }
-        s.send(tuid, format!("ERROR :Closing link: (SAQUIT: {reason})"));
+        let m = s.trf("Closing link: (SAQUIT: {0})", &[reason.as_str()]);
+        s.send(tuid, format!("ERROR :{m}"));
         s.remove_user(tuid, &format!("Quit: {reason}"));
         let by = oper_nick(s, uid);
         let m = s.trf("{0} used SAQUIT on {1}: {2}", &[by.as_str(), params[0].as_str(), reason.as_str()]);

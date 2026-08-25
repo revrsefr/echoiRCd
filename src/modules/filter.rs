@@ -71,7 +71,8 @@ impl Module for Filter {
             "block" => s.notice_star(uid, &format!("Your message was blocked: {reason}")),
             "silent" => {}
             "kill" => {
-                s.send(uid, format!("ERROR :Closing link: ({reason})"));
+                let m = s.trf("Closing link: ({0})", &[reason.as_str()]);
+                s.send(uid, format!("ERROR :{m}"));
                 s.remove_user(uid, &reason);
             }
             "kline" => {

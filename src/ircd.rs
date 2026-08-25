@@ -569,10 +569,8 @@ impl Ircd {
         for m in &mut self.modules {
             match m.on_user_register(&mut self.server, uid) {
                 ModResult::Deny => {
-                    self.server.send(
-                        uid,
-                        "ERROR :Closing link (registration refused)".to_string(),
-                    );
+                    let m = self.server.trf("Closing link (registration refused)", &[]);
+                    self.server.send(uid, format!("ERROR :{m}"));
                     self.server.remove_user(uid, "Registration refused");
                     return;
                 }
@@ -588,15 +586,15 @@ impl Ircd {
             (u.ident.clone(), u.host.clone(), u.addr.ip().to_string())
         };
         if let Some(reason) = self.server.matched_xline(&ident, &host, &ip) {
-            self.server
-                .send(uid, format!("ERROR :Closing link: ({reason})"));
+            let m = self.server.trf("Closing link: ({0})", &[reason.as_str()]);
+            self.server.send(uid, format!("ERROR :{m}"));
             self.server.remove_user(uid, &reason);
             return;
         }
         // ident: apply a confirmed username (dropping `~`) and enforce requireident
         if let Some(reason) = crate::modules::ident::finalize(&mut self.server, uid) {
-            self.server
-                .send(uid, format!("ERROR :Closing link: ({reason})"));
+            let m = self.server.trf("Closing link: ({0})", &[reason.as_str()]);
+            self.server.send(uid, format!("ERROR :{m}"));
             self.server.remove_user(uid, &reason);
             return;
         }
@@ -613,8 +611,8 @@ impl Ircd {
             )
         };
         if let Some(reason) = rl {
-            self.server
-                .send(uid, format!("ERROR :Closing link: ({reason})"));
+            let m = self.server.trf("Closing link: ({0})", &[reason.as_str()]);
+            self.server.send(uid, format!("ERROR :{m}"));
             self.server.remove_user(uid, &reason);
             return;
         }
@@ -636,8 +634,8 @@ impl Ircd {
     fn reject_link(&mut self, uid: Uid, reason: &str) {
         self.server
             .numeric(uid, ERR_PASSWDMISMATCH, &format!(":{reason}"));
-        self.server
-            .send(uid, format!("ERROR :Closing link: ({reason})"));
+        let m = self.server.trf("Closing link: ({0})", &[reason]);
+        self.server.send(uid, format!("ERROR :{m}"));
         self.server.remove_user(uid, reason);
     }
 
@@ -705,8 +703,8 @@ impl Ircd {
             } else {
                 "Registration timeout"
             };
-            self.server
-                .send(uid, format!("ERROR :Closing link: ({reason})"));
+            let m = self.server.trf("Closing link: ({0})", &[reason]);
+            self.server.send(uid, format!("ERROR :{m}"));
             self.quit_user(uid, reason);
         }
         // republish gauges (the core owns this state; the scrape thread only reads)

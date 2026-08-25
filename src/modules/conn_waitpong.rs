@@ -68,10 +68,8 @@ pub fn on_pong(s: &mut Server, uid: Uid, params: &[String]) {
             u.waitpong = None;
         }
     } else if s.conf_bool("conn_waitpong_killonbadreply", false) {
-        s.send(
-            uid,
-            "ERROR :Closing link (incorrect ping reply)".to_string(),
-        );
+        let m = s.trf("Closing link (incorrect ping reply)", &[]);
+        s.send(uid, format!("ERROR :{m}"));
         s.remove_user(uid, "Incorrect ping reply");
     }
 }

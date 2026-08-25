@@ -58,7 +58,8 @@ impl Module for Flood {
         if over {
             if !fakelag {
                 // fakelag disabled: disconnect the flooder instead of throttling
-                srv.send(uid, "ERROR :Closing link: (Excess flood)".to_string());
+                let m = srv.trf("Closing link: (Excess flood)", &[]);
+                srv.send(uid, format!("ERROR :{m}"));
                 srv.mark_quit(uid, "Excess flood".to_string());
                 return ModResult::Deny;
             }

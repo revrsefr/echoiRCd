@@ -270,7 +270,8 @@ impl Server {
             .map(|(&uid, _)| uid)
             .collect();
         for uid in victims {
-            self.send(uid, format!("ERROR :Closing link: (R-lined: {reason})"));
+            let m = self.trf("Closing link: (R-lined: {0})", &[reason]);
+            self.send(uid, format!("ERROR :{m}"));
             self.remove_user(uid, &format!("R-lined: {reason}"));
         }
     }
@@ -365,7 +366,8 @@ impl Server {
             })
             .collect();
         for (uid, reason) in victims {
-            self.send(uid, format!("ERROR :Closing link: ({reason})"));
+            let m = self.trf("Closing link: ({0})", &[reason.as_str()]);
+            self.send(uid, format!("ERROR :{m}"));
             self.remove_user(uid, &reason);
         }
     }
