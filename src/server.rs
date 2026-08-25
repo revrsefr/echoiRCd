@@ -169,6 +169,7 @@ pub struct Server {
     pub events: VecDeque<Hook>,
     pub opers: Vec<crate::config::OperBlock>, // oper logins from config
     pub brands: Vec<crate::config::BrandBlock>, // per-SNI server/network branding
+    pub catalog: crate::i18n::Catalog, // active-locale message catalog (i18n; en = passthrough)
     pub cloak_key: Option<String>,    // host-cloaking key (see modules::cloak)
     pub line_ctags: String,           // client-only tags of the line being handled
     // --- server-to-server (see crate::link) ---
@@ -232,6 +233,13 @@ pub struct Server {
 
 impl Server {
     pub fn new(cfg: Config, event_tx: Sender<Event>, conn_counter: Arc<AtomicU64>) -> Server {
+        let (catalog, i18n_warn) = crate::i18n::Catalog::load(
+            cfg.raw.get("locale_dir").and_then(|v| v.last()).map(String::as_str).unwrap_or("lang"),
+            cfg.raw.get("locale").and_then(|v| v.last()).map(String::as_str).unwrap_or("en"),
+        );
+        for w in &i18n_warn {
+            eprintln!("echoircd: {w}");
+        }
         Server {
             name: cfg.servername,
             network: cfg.network,
@@ -243,6 +251,7 @@ impl Server {
             events: VecDeque::new(),
             opers: cfg.opers,
             brands: cfg.brands,
+            catalog,
             cloak_key: cfg.cloak_key,
             line_ctags: String::new(),
             sid: cfg.sid,
@@ -312,6 +321,19 @@ impl Server {
             .unwrap_or(default)
     }
 
+    /// Translate a whole English string to the active locale (fallback: the input).
+    /// `en`/passthrough returns the borrow unchanged — zero cost.
+    #[inline]
+    pub fn tr<'a>(&'a self, english: &'a str) -> &'a str {
+        self.catalog.tr(english)
+    }
+
+    /// Translate an English template, then fill its `{0}`/`{1}`… placeholders. Use at
+    /// call sites whose prose interpolates data (word order may differ per language).
+    pub fn trf(&self, template: &str, args: &[&str]) -> String {
+        crate::i18n::render(self.catalog.tr(template), args)
+    }
+
     /// Apply a freshly-loaded config to the running server — the shared body of
     /// REHASH and the `server.rehash` RPC. Reloads the typed fields **and**
     /// `raw_config`, so modules reading via `conf*` see the new values too.
@@ -329,6 +351,14 @@ impl Server {
         self.dnsbl_reason = fresh.dnsbl_reason;
         self.sasl_server = fresh.sasl_server;
         self.webirc = fresh.webirc;
+        let (catalog, i18n_warn) = crate::i18n::Catalog::load(
+            fresh.raw.get("locale_dir").and_then(|v| v.last()).map(String::as_str).unwrap_or("lang"),
+            fresh.raw.get("locale").and_then(|v| v.last()).map(String::as_str).unwrap_or("en"),
+        );
+        for w in &i18n_warn {
+            eprintln!("echoircd: {w}");
+        }
+        self.catalog = catalog;
         self.raw_config = fresh.raw;
         self.config_gen = self.config_gen.wrapping_add(1); // invalidate module config caches
         // Re-evaluate which linked servers are services against the fresh
@@ -1008,6 +1038,7 @@ impl Server {
             let srv = u
                 .and_then(|u| u.brand_server.as_deref())
                 .unwrap_or(&self.name);
+            let rest = self.catalog.tr_numeric(rest);
             format!(":{srv} {code:03} {target} {rest}")
         };
         self.send(uid, line);

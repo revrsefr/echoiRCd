@@ -20,6 +20,7 @@ pub mod config;
 pub mod coremods;
 pub mod extensible;
 pub mod http;
+pub mod i18n;
 pub mod ircd;
 pub mod link;
 pub mod map;

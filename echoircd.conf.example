@@ -372,6 +372,12 @@ antiabuse {
     # --- hashident: replace ident with a stable opaque token per IP ---
     # hashident     yes;
     # hashident_key "CHANGE_THIS_SECRET";   # HMAC key; makes the mapping unforgeable
+    # --- locale: server-wide language for client-facing messages. "en" (default) is
+    #     English passthrough (zero cost). Any other <code> loads lang/<code>.conf and
+    #     translates numeric/notice prose; protocol tokens & the S2S wire stay English.
+    #     Rehash to switch live. Ships with fr (Français) and es (Español). ---
+    # locale     fr;
+    # locale_dir "lang";        # directory holding <code>.conf catalogs (default: lang)
     # --- solvemsg: unvouched users answer one arithmetic question before their
     #     PMs are delivered (opers & logged-in accounts exempt). ---
     # solvemsg yes;
