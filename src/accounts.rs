@@ -26,11 +26,11 @@ impl Server {
     /// Log `uid` into `account` (services-driven): sets the account name, flips
     /// `+r`, and reflects the mode back to the user.
     pub fn set_login(&mut self, uid: Uid, account: &str) {
-        let (nick, prefix) = match self.users.get_mut(&uid) {
+        let (nick, prefix, registered) = match self.users.get_mut(&uid) {
             Some(u) => {
                 u.account = Some(account.to_string());
                 u.flags.logged_in = true;
-                (u.nick.clone(), u.prefix())
+                (u.nick.clone(), u.prefix(), u.registered)
             }
             None => return,
         };
@@ -39,6 +39,12 @@ impl Server {
         self.notify_peers(uid, &format!(":{prefix} ACCOUNT {account}"), |c| {
             c.account_notify
         });
+        // Operator notice, but only for a login that happens AFTER the user is
+        // connected. A SASL-at-connect login runs before registration completes, so
+        // it's already reflected in the "Client connecting: … account: …" notice.
+        if registered {
+            self.snotice_c('c', &format!("Client {nick} is now logged in as {account}"));
+        }
     }
 
     /// Log `uid` out of any account (services-driven): clears `+r`.

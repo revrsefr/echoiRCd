@@ -1746,6 +1746,42 @@ mod tests {
     }
 
     #[test]
+    fn post_connect_login_notifies_opers() {
+        let mut s = srv();
+        // an operator watching client (c) notices
+        let orx = add_user(&mut s, 1, "watcher");
+        if let Some(u) = s.users.get_mut(&1) {
+            u.flags.oper = true;
+            u.flags.snomask = true;
+            u.flags.snomask_cats = "c".to_string();
+        }
+        // a REGISTERED user logging in after connecting -> the notice fires
+        let _a = add_user(&mut s, 2, "alice");
+        if let Some(u) = s.users.get_mut(&2) {
+            u.registered = true;
+        }
+        s.set_login(2, "aliceacct");
+        // a not-yet-registered user (SASL at connect) -> silent, since the connect
+        // notice already carries the account
+        let _b = add_user(&mut s, 3, "bob");
+        if let Some(u) = s.users.get_mut(&3) {
+            u.registered = false;
+        }
+        s.set_login(3, "bobacct");
+        let seen: String = std::iter::from_fn(|| orx.try_recv().ok())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            seen.contains("Client alice is now logged in as aliceacct"),
+            "post-connect login fires the notice: {seen}"
+        );
+        assert!(
+            !seen.contains("bob is now logged in"),
+            "an at-connect (unregistered) login stays silent: {seen}"
+        );
+    }
+
+    #[test]
     fn banned_user_message_shows_expiry() {
         let mut s = srv();
         s.conf_path = std::env::temp_dir().join("echo-ban-expiry-test").display().to_string();
