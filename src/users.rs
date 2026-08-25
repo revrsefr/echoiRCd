@@ -231,6 +231,7 @@ pub struct User {
     pub secure: bool,  // connected over TLS (drives WHOIS 671 / sslinfo)
     pub certfp: Option<String>, // TLS client-cert fingerprint (SASL EXTERNAL / CertFP)
     pub tls_info: Option<String>, // negotiated TLS version/group/cipher (WHOIS 671)
+    pub sni: Option<String>, // TLS SNI hostname the client requested (connect notice)
     pub brand_server: Option<String>, // per-SNI display server name (None = global)
     pub brand_network: Option<String>, // per-SNI display network name (None = global)
     pub account: Option<String>, // logged-in account name (set by services)

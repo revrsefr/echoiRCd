@@ -12,15 +12,30 @@ impl Module for Snoop {
         "snoop"
     }
     fn on_user_connect(&mut self, srv: &mut Server, uid: Uid) {
-        let info = srv
-            .users
-            .get(&uid)
-            .map(|u| (u.nick.clone(), u.ident.clone(), u.host.clone()));
-        if let Some((nick, ident, host)) = info {
+        let info = srv.users.get(&uid).map(|u| {
+            (
+                u.nick.clone(),
+                u.ident.clone(),
+                u.host.clone(),
+                u.port,
+                u.sni.clone(),
+                u.account.clone(),
+            )
+        });
+        if let Some((nick, ident, host, port, sni, account)) = info {
             if srv.conf_bool("snoop_stderr", false) {
                 eprintln!("[snoop] connect {nick} ({ident}@{host})");
             }
-            srv.snotice_c('c', &format!("Client connecting: {nick} ({ident}@{host})"));
+            // port is always shown; sni/account only when present, so plaintext or
+            // anonymous connects don't carry empty fields.
+            let mut extra = format!(", port: {port}");
+            if let Some(sni) = &sni {
+                extra.push_str(&format!(", sni: {sni}"));
+            }
+            if let Some(acct) = &account {
+                extra.push_str(&format!(", account: {acct}"));
+            }
+            srv.snotice_c('c', &format!("Client connecting: {nick} ({ident}@{host}){extra}"));
         }
     }
     fn on_join(&mut self, srv: &mut Server, uid: Uid, chan: &str) {

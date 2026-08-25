@@ -75,6 +75,7 @@ impl Node {
                 secure: false,
                 certfp: None,
                 tls_info: None,
+                sni: None,
                 brand_server: None,
                 brand_network: None,
                 account: None,

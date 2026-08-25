@@ -375,6 +375,7 @@ mod tests {
                 secure: false,
                 certfp: None,
                 tls_info: None,
+                sni: None,
                 brand_server: None,
                 brand_network: None,
                 account: Some("reverse".into()),
