@@ -252,6 +252,12 @@ fn ws_session<S: WsStream>(
     shutdown: TcpStream,
     cfg: WsConfig,
 ) {
+    // An IPv4 client on the dual-stack [::] wss listener arrives v4-mapped
+    // (::ffff:1.2.3.4); collapse it so the proxy-range trust check and the fallback
+    // client IP match what the plaintext/TLS listeners already normalize to. Without
+    // this a reverse proxy on 127.0.0.1 shows up as ::ffff:127.0.0.1, fails the
+    // ws_proxyranges match, and every web user inherits the proxy's loopback IP.
+    let addr = crate::socketengine::normalize_addr(addr);
     // --- HTTP Upgrade handshake (bounded by the handshake timeout) ---
     let _ = stream.set_read_timeout(Some(cfg.handshake_timeout));
     let hs = match do_handshake(&mut stream, &cfg, addr.ip()) {
@@ -697,5 +703,68 @@ mod tests {
     fn encode_sets_fin_and_length() {
         let f = encode(OP_TEXT, b"hi");
         assert_eq!(f, vec![0x81, 0x02, b'h', b'i']);
+    }
+
+    // A minimal WsStream that replays a canned HTTP upgrade request and swallows writes.
+    struct MockStream {
+        data: Vec<u8>,
+        pos: usize,
+    }
+    impl WsStream for MockStream {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let n = (self.data.len() - self.pos).min(buf.len());
+            buf[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+            self.pos += n;
+            Ok(n)
+        }
+        fn write_all(&mut self, _buf: &[u8]) -> io::Result<()> {
+            Ok(())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+        fn set_read_timeout(&self, _dur: Option<Duration>) -> io::Result<()> {
+            Ok(())
+        }
+        fn shutdown(&mut self) {}
+    }
+
+    #[test]
+    fn proxied_ws_extracts_real_ip_from_trusted_loopback() {
+        use std::net::{Ipv4Addr, SocketAddr};
+        // the fix: an IPv4 client on the [::] wss listener reaches the proxy as
+        // ::ffff:127.0.0.1 — it must collapse to 127.0.0.1 so ws_proxyranges matches.
+        let mapped: SocketAddr = "[::ffff:127.0.0.1]:9".parse().unwrap();
+        assert_eq!(
+            crate::socketengine::normalize_addr(mapped).ip(),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            "mapped loopback collapses to 127.0.0.1"
+        );
+        // with the normalized loopback peer, a trusted proxy's X-Real-IP wins over
+        // the proxy's own address.
+        let req = "GET /irc/ HTTP/1.1\r\nHost: orbit.devtronic.pro\r\nUpgrade: websocket\r\n\
+                   Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+                   Sec-WebSocket-Version: 13\r\nOrigin: https://orbit.devtronic.pro\r\n\
+                   Sec-WebSocket-Protocol: text.ircv3.net\r\n\
+                   X-Real-IP: 203.0.113.77\r\nX-Forwarded-Proto: https\r\n\r\n";
+        let mut s = MockStream { data: req.as_bytes().to_vec(), pos: 0 };
+        let cfg = WsConfig {
+            origins: vec!["https://orbit.devtronic.pro".into()],
+            handshake_timeout: Duration::from_secs(10),
+            ping_interval: Duration::from_secs(60),
+            idle_timeout: Duration::from_secs(120),
+            trust_proxy: false,
+            proxyranges: vec!["127.0.0.1".into()],
+            default_mode: DefaultMode::Text,
+            allow_missing_origin: false,
+            native_ping: true,
+        };
+        let hs = do_handshake(&mut s, &cfg, IpAddr::V4(Ipv4Addr::LOCALHOST)).expect("handshake");
+        assert_eq!(
+            hs.real_ip,
+            Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 77))),
+            "trusted loopback proxy -> real client IP, not the proxy's loopback"
+        );
+        assert!(hs.secure, "x-forwarded-proto https marks the session secure");
     }
 }

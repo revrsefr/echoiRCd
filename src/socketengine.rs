@@ -43,7 +43,7 @@ const TLS_POLL: Duration = Duration::from_millis(100);
 /// Collapse an IPv4-mapped IPv6 peer address (`::ffff:1.2.3.4`, which is how an IPv4
 /// client shows up on a dual-stack `[::]` listener) back to a plain IPv4 `SocketAddr`,
 /// so cloaking, bans, GeoIP, DNSBL and host display all see the real IPv4 address.
-fn normalize_addr(a: SocketAddr) -> SocketAddr {
+pub(crate) fn normalize_addr(a: SocketAddr) -> SocketAddr {
     if let SocketAddr::V6(v6) = a {
         if let Some(v4) = v6.ip().to_ipv4_mapped() {
             return SocketAddr::new(IpAddr::V4(v4), a.port());
