@@ -622,7 +622,9 @@ impl Command for Kick {
                         .get(&vuuid)
                         .map(|r| r.nick.clone())
                         .unwrap_or_else(|| victim.to_string());
-                    s.to_channel(&key, &format!(":{prefix} KICK {chan} {vnick} :{reason}"), None);
+                    let kline = format!(":{prefix} KICK {chan} {vnick} :{reason}");
+                    crate::modules::chathistory::record_event(s, &key, &kline);
+                    s.to_channel(&key, &kline, None);
                     s.propagate_kick(uid, chan, victim, &reason);
                     if let Some(ch) = s.channels.get_mut(&key) {
                         ch.rmembers.remove(&vuuid);
@@ -760,7 +762,9 @@ impl Command for TopicCmd {
                 ts: now(),
             });
         }
-        s.to_channel(&key, &format!(":{prefix} TOPIC {target} :{text}"), None);
+        let tline = format!(":{prefix} TOPIC {target} :{text}");
+        crate::modules::chathistory::record_event(s, &key, &tline);
+        s.to_channel(&key, &tline, None);
         s.propagate_topic(uid, target, &text); // tell links
         CmdResult::Ok
     }

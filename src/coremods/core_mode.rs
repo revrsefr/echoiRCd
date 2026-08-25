@@ -175,11 +175,9 @@ pub fn apply_mode(s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         {
             crate::modules::hidemode::broadcast(s, &key, target, uid, &prefix, &changes);
         } else {
-            s.to_channel(
-                &key,
-                &format!(":{prefix} MODE {target} {applied}{pstr}"),
-                None,
-            );
+            let mline = format!(":{prefix} MODE {target} {applied}{pstr}");
+            crate::modules::chathistory::record_event(s, &key, &mline);
+            s.to_channel(&key, &mline, None);
         }
         // links: a timestamped FMODE sourced from the acting user's uuid
         let src_uuid = s.users[&uid].uuid.clone();

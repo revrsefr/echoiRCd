@@ -181,6 +181,8 @@ limits {
     # multiline_maxlines 24;      # draft/multiline: max lines
     # chathistory_limit  256;     # CHATHISTORY messages kept per conversation
     # chathistory_maxage 604800;  # max age (secs) a client may request (7 days)
+    # event_playback     yes;     # record JOIN/PART/QUIT/NICK/MODE/TOPIC/KICK into
+    #                             # history for draft/event-playback clients (no = off)
     # dccallow_maxentries 20;     # /DCCALLOW list entries per user
     # http_max_concurrent 32;     # in-flight outbound HTTP requests (API modules)
 }

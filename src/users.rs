@@ -157,6 +157,7 @@ define_caps! {
     "labeled-response" => labeled_response,
     "batch" => batch,
     "draft/chathistory" => chathistory,
+    "draft/event-playback" => event_playback,
     "draft/message-redaction" => message_redaction,
     "draft/pre-away" => pre_away,
     "draft/metadata-2" => metadata,
@@ -424,6 +425,7 @@ impl Server {
             targets.insert(uid);
             let chans: Vec<String> = self.users[&uid].channels.iter().cloned().collect();
             for key in &chans {
+                crate::modules::chathistory::record_event(self, key, &line);
                 if let Some(ch) = self.channels.get(key) {
                     // +D delayjoin: a still-hidden member's NICK isn't shown here
                     if ch.members.get(&uid).map(|m| m.hidden).unwrap_or(false) {

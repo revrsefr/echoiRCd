@@ -24,6 +24,7 @@ pub mod connflood;
 pub mod customprefix;
 pub mod customtitle;
 pub mod dccallow;
+pub mod event_playback;
 pub mod denychans;
 pub mod disable;
 pub mod dnsbl;
@@ -117,6 +118,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(opertypes::OperTypes),
         Box::new(permchannels::PermChannels::default()),
         Box::new(chathistory::ChatHistoryGc),
+        Box::new(event_playback::EventPlayback),
         Box::new(account_registration::AcctRegGc),
     ]
 }

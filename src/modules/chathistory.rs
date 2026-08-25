@@ -28,9 +28,19 @@ pub struct HistMsg {
     pub ts: u64,
     pub msgid: String,
     pub prefix: String,     // sender's nick!user@host at send time
-    pub verb: &'static str, // "PRIVMSG" or "NOTICE"
+    pub verb: &'static str, // "PRIVMSG"/"NOTICE" for messages; the event verb otherwise
     pub target: String,     // original target (channel, or the DM recipient)
     pub text: String,
+    /// `Some(full ":prefix VERB …" line)` for a channel *event* (JOIN/PART/QUIT/NICK/
+    /// MODE/TOPIC/KICK) replayed under `draft/event-playback`; `None` for a message.
+    pub raw: Option<String>,
+}
+
+impl HistMsg {
+    /// An event (non-message) entry — filtered out for clients without event-playback.
+    pub fn is_event(&self) -> bool {
+        self.raw.is_some()
+    }
 }
 
 /// conversation key (`#chan` or a DM-pair key) -> capped ring. Stored in `Server.ext`.
@@ -62,6 +72,43 @@ pub fn record(
         verb,
         target: target.to_string(),
         text: text.to_string(),
+        raw: None,
+    });
+    while buf.len() > cap {
+        buf.pop_front();
+    }
+}
+
+/// Record a channel *event* (`line` = the full `:prefix VERB …` wire form) into the
+/// same per-conversation ring, for replay under `draft/event-playback`. It carries a
+/// fresh msgid and replays verbatim; clients without the cap never see it. Off when
+/// `event_playback = no`. Called from the local JOIN/PART/QUIT/NICK/MODE/TOPIC/KICK
+/// paths — see [`crate::modules::event_playback`] and the channel/mode command code.
+pub fn record_event(s: &mut Server, key: &str, line: &str) {
+    if !s.conf_bool("event_playback", true) {
+        return;
+    }
+    let cap = limit(s);
+    let msgid = s.next_msgid();
+    let prefix = line
+        .strip_prefix(':')
+        .and_then(|l| l.split(' ').next())
+        .unwrap_or("")
+        .to_string();
+    let buf = s
+        .ext
+        .get_or_insert_with::<History>(History::default)
+        .0
+        .entry(key.to_string())
+        .or_default();
+    buf.push_back(HistMsg {
+        ts: now(),
+        msgid,
+        prefix,
+        verb: "*",
+        target: key.to_string(),
+        text: String::new(),
+        raw: Some(line.to_string()),
     });
     while buf.len() > cap {
         buf.pop_front();
@@ -230,6 +277,12 @@ impl Command for ChatHistory {
             .and_then(|l| l.parse::<usize>().ok())
             .unwrap_or(50)
             .clamp(1, limit(s));
+        // draft/event-playback: include JOIN/PART/… events only for clients that asked.
+        let want_events = s
+            .users
+            .get(&uid)
+            .map(|u| u.caps.event_playback)
+            .unwrap_or(false);
 
         let bref = s.next_msgid().replace('-', "");
         let mut lines: Vec<String> = Vec::new();
@@ -303,15 +356,24 @@ impl Command for ChatHistory {
                     }
                 };
                 for m in picked {
-                    lines.push(format!(
-                        "@time={};msgid={};batch={bref} :{} {} {} :{}",
-                        iso_time(m.ts),
-                        m.msgid,
-                        m.prefix,
-                        m.verb,
-                        m.target,
-                        m.text
-                    ));
+                    if m.is_event() && !want_events {
+                        continue;
+                    }
+                    lines.push(match &m.raw {
+                        // an event replays as its exact wire line + history tags
+                        Some(raw) => {
+                            format!("@time={};msgid={};batch={bref} {raw}", iso_time(m.ts), m.msgid)
+                        }
+                        None => format!(
+                            "@time={};msgid={};batch={bref} :{} {} {} :{}",
+                            iso_time(m.ts),
+                            m.msgid,
+                            m.prefix,
+                            m.verb,
+                            m.target,
+                            m.text
+                        ),
+                    });
                 }
             }
         }
@@ -437,6 +499,7 @@ mod tests {
             verb: "PRIVMSG",
             target: "#c".into(),
             text: "hi".into(),
+            raw: None,
         };
         {
             let h = s.ext.get_or_insert_with::<History>(History::default);
@@ -447,5 +510,21 @@ mod tests {
         let h = s.ext.get::<History>().unwrap();
         assert!(h.0.contains_key("#fresh"), "recent conversation kept");
         assert!(!h.0.contains_key("#stale"), "stale conversation GC'd");
+    }
+
+    // draft/event-playback: record_event stores a verbatim event entry flagged so
+    // CHATHISTORY/+H can filter it out for clients without the cap; messages aren't.
+    #[test]
+    fn event_playback_records_and_flags_events() {
+        let (tx, _rx) = mpsc::channel();
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+        record(&mut s, "#c", "a!u@h", "PRIVMSG", "#c", "hi", "m1");
+        record_event(&mut s, "#c", ":a!u@h JOIN #c");
+        let buf = &s.ext.get::<History>().unwrap().0["#c"];
+        assert_eq!(buf.len(), 2, "one message + one event stored");
+        assert!(!buf[0].is_event(), "the PRIVMSG is not an event");
+        assert!(buf[1].is_event(), "the recorded JOIN is an event");
+        assert_eq!(buf[1].raw.as_deref(), Some(":a!u@h JOIN #c"));
+        assert!(!buf[1].msgid.is_empty(), "event carries a msgid for replay");
     }
 }

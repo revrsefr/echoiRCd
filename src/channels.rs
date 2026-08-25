@@ -1198,9 +1198,18 @@ impl Server {
         } else {
             None
         };
+        // draft/event-playback: JOIN/PART/… events in the +H backlog only for cap clients.
+        let want_events = self
+            .users
+            .get(&uid)
+            .map(|u| u.caps.event_playback)
+            .unwrap_or(false);
         let out: Vec<String> = match self.ext.get::<History>().and_then(|h| h.0.get(key)) {
             Some(buf) => {
-                let mut recent: Vec<&HistMsg> = buf.iter().filter(|m| m.ts >= cutoff).collect();
+                let mut recent: Vec<&HistMsg> = buf
+                    .iter()
+                    .filter(|m| m.ts >= cutoff && (want_events || !m.is_event()))
+                    .collect();
                 let start = recent.len().saturating_sub(lines as usize);
                 recent.drain(..start);
                 recent
@@ -1210,7 +1219,10 @@ impl Server {
                         if let Some(b) = &bref {
                             tags.push_str(&format!(";batch={b}"));
                         }
-                        format!("@{tags} :{} {} {name} :{}", m.prefix, m.verb, m.text)
+                        match &m.raw {
+                            Some(raw) => format!("@{tags} {raw}"),
+                            None => format!("@{tags} :{} {} {name} :{}", m.prefix, m.verb, m.text),
+                        }
                     })
                     .collect()
             }
