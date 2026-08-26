@@ -45,6 +45,7 @@ informed as they change. This page groups what's supported.
 | Capability | What it adds |
 |------------|--------------|
 | `draft/chathistory` | `CHATHISTORY` — fetch recent messages for a conversation. |
+| `draft/event-playback` | Include JOIN/PART/QUIT/NICK/MODE/TOPIC/KICK events in `CHATHISTORY` (and the `+H` join backlog), interleaved with messages; without the cap, history stays messages-only. Recording is toggled by `event_playback`. |
 | `draft/message-redaction` | `REDACT` — delete/redact a prior message. |
 | `draft/multiline` | Send one logical message spanning multiple lines. |
 | `draft/read-marker` | `MARKREAD` — set/query the last-read point of a conversation. |
@@ -55,6 +56,15 @@ informed as they change. This page groups what's supported.
 `MONITOR` (+ `extended-monitor`), the legacy `WATCH` list, `SILENCE`, and
 caller-id (`ACCEPT` + user mode `+g`) let clients track other users' presence and
 control who may message them.
+
+`draft/webpush` adds encrypted **Web Push** (RFC 8291 payload encryption + RFC 8292
+VAPID) so a PM or highlight reaches a client whose tab is backgrounded or closed. The
+client subscribes with `WEBPUSH REGISTER <endpoint> p256dh=<b64url>;auth=<b64url>` (and
+`WEBPUSH UNREGISTER <endpoint>`); the server encrypts a small JSON copy and POSTs it to
+that push endpoint — off the core thread — with a VAPID `Authorization` header, while
+the subscriber is away. The server's VAPID public key is advertised via ISUPPORT
+`VAPID=`. Its keypair is auto-generated and persisted on first start; behaviour is
+tuned by `webpush` / `webpush_away_only` / `webpush_ttl` / `webpush_sub`.
 
 ## Metadata & misc
 
@@ -72,4 +82,5 @@ control who may message them.
 On registration the server advertises its limits and features via `RPL_ISUPPORT`
 (005), including `PREFIX`, `CHANMODES`, `EXTBAN` (see [modes](modes.md)), `WHOX`,
 `CHATHISTORY`, `MONITOR` / `WATCH` / `SILENCE` sizes, `NICKLEN` / `CHANNELLEN`,
-`CASEMAPPING=ascii`, `UTF8ONLY`, and `NETWORK`.
+`CASEMAPPING=ascii`, `UTF8ONLY`, `VAPID` (the Web Push application-server key), and
+`NETWORK`.
