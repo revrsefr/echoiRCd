@@ -29,9 +29,9 @@ operational limit exposed as a config key.
   modes `beIgXw`, keyed/limit/flood/redirect/history/anticaps params, the full flag
   set, all the standard user modes, and matching + acting **extbans**.
 - **IRCv3** — message-tags (+msgid), server-time, labeled-response, batch,
-  echo-message, account-tag, **CHATHISTORY**, **multiline**, **message-redaction**,
-  **read-marker**, **relaymsg**, SASL, standard-replies, and `WATCH`/`MONITOR`/
-  `SILENCE`/caller-id.
+  echo-message, account-tag, **CHATHISTORY** + **event-playback**, **multiline**,
+  **message-redaction**, **read-marker**, **relaymsg**, **web-push** (VAPID / RFC
+  8291), SASL, standard-replies, and `WATCH`/`MONITOR`/`SILENCE`/caller-id.
 - **Operators** — `OPER`/`KILL`/`WALLOPS`/`GLOBOPS`, the `SA*`/`CHG*`/`SET*`
   override toolbox, x-lines (`K`/`G`/`Z`/`E`/`SHUN`/`QLINE`/`CBAN`/`RLINE`)
   persisted to disk, staff prefix (`operprefix`/`OJOIN`), oper levels, rank-gated
