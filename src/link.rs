@@ -1714,12 +1714,15 @@ impl Server {
         }
         let key = chan.to_ascii_lowercase();
         let mut m = Member::default();
-        // membid and ts are numeric; a trailing all-letter token is the modes
-        if let Some(modes) = msg.params.get(3) {
-            if modes.chars().all(|c| c.is_ascii_alphabetic()) {
-                for c in modes.chars() {
-                    m.set_prefix(c, true);
-                }
+        // membid and ts are numeric; a trailing all-letter token is the status modes
+        // the member arrives with (a services bot joins "ao", core services "o").
+        let status = msg
+            .params
+            .get(3)
+            .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphabetic()));
+        if let Some(modes) = status {
+            for c in modes.chars() {
+                m.set_prefix(c, true);
             }
         }
         // If the channel is unknown (a desync/race), create it with the TS the IJOIN
@@ -1743,6 +1746,24 @@ impl Server {
             .map(|r| r.prefix())
             .unwrap_or_default();
         self.to_channel(&key, &format!(":{prefix} JOIN {chan}"), None);
+        // The JOIN conveys membership but not the status the member arrived with, so a
+        // client already in the channel would show a services bot oppless after it
+        // rejoins (e.g. across a services restart). Announce the status as a MODE too,
+        // attributed to the member's server as a netburst status change is.
+        if let Some(modes) = status {
+            let nick = self
+                .remote_users
+                .get(&uuid)
+                .map(|r| r.nick.clone())
+                .unwrap_or_else(|| uuid.clone());
+            let src = uuid
+                .get(..3)
+                .and_then(|sid| self.servers.get(sid))
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| self.name.clone());
+            let targets = vec![nick.as_str(); modes.len()].join(" ");
+            self.to_channel(&key, &format!(":{src} MODE {chan} +{modes} {targets}"), None);
+        }
         self.propagate(&msg.to_wire(), Some(via));
     }
 
@@ -2603,6 +2624,112 @@ mod tests {
         let m = &s.channels["#echoircd"].rmembers["42SB00000"];
         assert!(m.admin(), "bot should hold +a (&) from the IJOIN status token");
         assert!(m.op(), "bot should hold +o (@) from the IJOIN status token");
+    }
+
+    // ...and it must announce that status to members already in the channel: the
+    // bare JOIN alone left a client showing a services bot oppless after it rejoined
+    // (e.g. across a services restart), even though a fresh NAMES had it opped.
+    #[test]
+    fn ijoin_status_is_announced_to_members() {
+        use crate::config::Config;
+        use crate::extensible::Extensible;
+        use crate::users::{Caps, UserFlags};
+        use std::sync::atomic::AtomicU64;
+        use std::sync::{mpsc, Arc};
+        let (tx, _rx) = mpsc::channel();
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+        s.servers.insert(
+            "42S".to_string(),
+            RemoteServer {
+                sid: "42S".into(),
+                name: "services.example.net".into(),
+                desc: String::new(),
+                via: 1,
+                is_service: true,
+                silent_service: false,
+            },
+        );
+        s.remote_users.insert(
+            "42SB00000".to_string(),
+            RemoteUser {
+                uuid: "42SB00000".to_string(),
+                nick: "echoIRCd".into(),
+                ident: "echo".into(),
+                host: "services".into(),
+                realname: "bot".into(),
+                account: None,
+                ip: String::new(),
+                modes: "iHkB".into(),
+                sid: "42S".into(),
+                via: 1,
+            },
+        );
+        // a local member already sitting in the channel, with a captured sink
+        let (utx, urx) = mpsc::channel();
+        s.users.insert(
+            7,
+            User {
+                uid: 7,
+                uuid: "0AAAAAAAB".into(),
+                nick: "alice".into(),
+                ident: "a".into(),
+                realname: "a".into(),
+                host: "localhost".into(),
+                cloak: String::new(),
+                vhost: None,
+                secure: false,
+                certfp: None,
+                tls_info: None,
+                sni: None,
+                brand_server: None,
+                brand_network: None,
+                account: None,
+                signon: 0,
+                nick_ts: 0,
+                addr: "127.0.0.1:1".parse().unwrap(),
+                port: 6667,
+                registered: true,
+                dns_pending: false,
+                ident_pending: false,
+                auth_pending: false,
+                waitpong: None,
+                class: None,
+                pass: None,
+                deferred: Vec::new(),
+                cap: false,
+                cap_302: false,
+                caps: Caps::default(),
+                sasl_mech: None,
+                channels: HashSet::default(),
+                invited: HashSet::default(),
+                watch: Vec::new(),
+                monitor: Vec::new(),
+                silence: Vec::new(),
+                signore: Vec::new(),
+                accept: Vec::new(),
+                quitting: None,
+                flags: UserFlags::default(),
+                last_active: 0,
+                ping_sent: false,
+                ext: Extensible::default(),
+                out: OutSink::Thread(utx),
+                sock: None,
+            },
+        );
+        s.uuid_local.insert("0AAAAAAAB".into(), 7);
+        let mut ch = Channel::new("#echoircd");
+        ch.members.insert(7, Member::default());
+        s.channels.insert("#echoircd".into(), ch);
+
+        let msg = crate::message::parse(":42SB00000 IJOIN #echoircd 16 1 ao").unwrap();
+        s.link_ijoin_recv(1, &msg);
+
+        let lines: Vec<String> = std::iter::from_fn(|| urx.try_recv().ok()).collect();
+        assert!(lines.iter().any(|l| l.contains("JOIN #echoircd")), "member should see the bot JOIN, got {lines:?}");
+        assert!(
+            lines.iter().any(|l| l == ":services.example.net MODE #echoircd +ao echoIRCd echoIRCd"),
+            "member must be told the bot's +ao status, got {lines:?}"
+        );
     }
 
     // A server is a service iff its NAME matches the sasl_server or a `uline` config
