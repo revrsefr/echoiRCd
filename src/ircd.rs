@@ -120,6 +120,55 @@ fn with_extra_tag(line: &str, tag: &str) -> String {
     }
 }
 
+/// A short human label for an event, appended to `out` (cleared by the caller). Used
+/// by the slow-event snote and the [watchdog] warning so a stall names its culprit
+/// (which command / connect / background result) rather than only a duration. Writes
+/// in place, so it costs no allocation on the hot path once `out`'s buffer is warm.
+fn write_event_label(ev: &Event, out: &mut String) {
+    use std::fmt::Write;
+    match ev {
+        Event::Connect { addr, link, outbound, .. } => {
+            if *link {
+                let _ = write!(out, "server link ({})", if *outbound { "outbound" } else { "inbound" });
+            } else {
+                let _ = write!(out, "connect from {}", addr.ip());
+            }
+        }
+        Event::Line { line, .. } => push_verb(line, out),
+        Event::Disconnect { .. } => out.push_str("disconnect"),
+        Event::ResolvedHost { .. } => out.push_str("DNS/DNSBL result"),
+        Event::Ident { .. } => out.push_str("ident result"),
+        Event::OperAuth { .. } => out.push_str("OPER auth result"),
+        Event::MkpasswdResult { .. } => out.push_str("MKPASSWD result"),
+        Event::TitleAuth { .. } => out.push_str("TITLE auth result"),
+        Event::ConnclassAuth { .. } => out.push_str("connect-class auth result"),
+        Event::HttpResult { tag, .. } => {
+            let _ = write!(out, "HTTP result [{tag}]");
+        }
+        Event::RpcRequest { method, .. } => {
+            let _ = write!(out, "RPC {method}");
+        }
+        Event::Tick => out.push_str("tick (ping/idle sweep)"),
+        Event::Rehash => out.push_str("rehash"),
+    }
+}
+
+/// Append the IRC command verb of a raw client line (skipping IRCv3 `@tags` and any
+/// `:prefix`), upper-cased and length-bounded so a malformed line can't bloat the label.
+fn push_verb(line: &str, out: &mut String) {
+    let mut s = line.trim_start();
+    if let Some(rest) = s.strip_prefix('@') {
+        s = rest.split_once(' ').map_or("", |(_, r)| r).trim_start();
+    }
+    if let Some(rest) = s.strip_prefix(':') {
+        s = rest.split_once(' ').map_or("", |(_, r)| r).trim_start();
+    }
+    match s.split_whitespace().next() {
+        Some(verb) => out.extend(verb.chars().take(24).flat_map(char::to_uppercase)),
+        None => out.push_str("(empty line)"),
+    }
+}
+
 pub struct Ircd {
     server: Server,
     commands: HashMap<&'static str, Box<dyn Command>>,
@@ -158,9 +207,23 @@ impl Ircd {
     /// `busy` is a shared marker the watchdog thread samples: it holds the ms-since-
     /// `base` at which the current event started (0 = idle), so a stuck handler is
     /// visible from outside. Events slower than `slow_command_ms` are also snoticed.
-    pub fn run(mut self, rx: Receiver<Event>, busy: Arc<AtomicU64>, base: Instant) {
+    pub fn run(
+        mut self,
+        rx: Receiver<Event>,
+        busy: Arc<AtomicU64>,
+        base: Instant,
+        label: Arc<std::sync::Mutex<String>>,
+    ) {
         let slow_ms = self.server.conf_num("slow_command_ms", 200u64);
         for ev in rx {
+            // record what this event is into the buffer the watchdog samples, so a
+            // slow or stuck event names its culprit instead of just a duration. Writes
+            // into the reused String — no per-event allocation once the buffer is warm.
+            {
+                let mut g = label.lock().unwrap_or_else(|e| e.into_inner());
+                g.clear();
+                write_event_label(&ev, &mut g);
+            }
             busy.store((base.elapsed().as_millis() as u64).max(1), Ordering::Relaxed);
             let start = Instant::now();
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.handle_event(ev)))
@@ -176,10 +239,12 @@ impl Ircd {
             busy.store(0, Ordering::Relaxed);
             let ms = start.elapsed().as_millis() as u64;
             if slow_ms != 0 && ms >= slow_ms {
+                let what = label.lock().unwrap_or_else(|e| e.into_inner()).clone();
                 let ms_s = ms.to_string();
-                let m = self
-                    .server
-                    .trf("slow event: a command took {0}ms on the core thread", &[ms_s.as_str()]);
+                let m = self.server.trf(
+                    "slow event: {0} took {1}ms on the core thread",
+                    &[what.as_str(), ms_s.as_str()],
+                );
                 self.server.snotice(&m);
             }
         }

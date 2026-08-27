@@ -250,24 +250,28 @@ fn main() {
     // (0 = idle); a separate thread warns if it stays stuck past `watchdog_ms`.
     let wd_base = Instant::now();
     let core_busy = Arc::new(AtomicU64::new(0));
+    // the core writes a short label of the current event here; the watchdog and the
+    // slow-event snote read it so a stall names its culprit, not just a duration.
+    let core_label = Arc::new(std::sync::Mutex::new(String::new()));
     let watchdog_ms = raw_num("watchdog_ms", 5000) as u64; // 0 = off
     if watchdog_ms > 0 {
-        let (wb, base) = (core_busy.clone(), wd_base);
+        let (wb, base, wl) = (core_busy.clone(), wd_base, core_label.clone());
         thread::spawn(move || loop {
             thread::sleep(Duration::from_millis(1000));
             let cur = wb.load(Ordering::Relaxed);
             if cur != 0 {
                 let stuck = (base.elapsed().as_millis() as u64).saturating_sub(cur);
                 if stuck > watchdog_ms {
+                    let what = wl.lock().map(|g| g.clone()).unwrap_or_else(|e| e.into_inner().clone());
                     eprintln!(
-                        "[watchdog] core thread stuck ~{stuck}ms on one event — a handler is blocking the whole server"
+                        "[watchdog] core thread stuck ~{stuck}ms on '{what}' — a handler is blocking the whole server"
                     );
                 }
             }
         });
     }
     let (busy, base) = (core_busy, wd_base);
-    let core = thread::spawn(move || Ircd::new(core_cfg, core_tx, core_counter).run(rx, busy, base));
+    let core = thread::spawn(move || Ircd::new(core_cfg, core_tx, core_counter).run(rx, busy, base, core_label));
 
     // background timer: drives ping/idle timeouts
     let tick_tx = tx.clone();
