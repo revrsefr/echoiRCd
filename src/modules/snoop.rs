@@ -40,6 +40,15 @@ impl Module for Snoop {
             "Client connecting: {0} ({1}@{2})",
             &[nick.as_str(), ident.as_str(), host.as_str()],
         );
+        // the connecting address, tagged by family (an ipv4-mapped v6 shows its ipv4 form)
+        let (fam, ip_s) = match ip {
+            std::net::IpAddr::V4(v4) => ("ipv4", v4.to_string()),
+            std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+                Some(v4) => ("ipv4", v4.to_string()),
+                None => ("ipv6", v6.to_string()),
+            },
+        };
+        msg.push_str(&srv.trf(", {0}:{1}", &[fam, ip_s.as_str()]));
         let port_s = port.to_string();
         msg.push_str(&srv.trf(", port: {0}", &[port_s.as_str()]));
         // transport + security of this connection (WebSocket clients arrive on the wss
