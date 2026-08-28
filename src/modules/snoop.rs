@@ -14,7 +14,7 @@ impl Module for Snoop {
     fn on_user_connect(&mut self, srv: &mut Server, uid: Uid) {
         // `conf_bool`/`snotice_c` are `&self`, so we can hold the `&User` borrow and
         // reference its fields directly instead of cloning them out.
-        let (nick, ident, host, port, sni, account) = {
+        let (nick, ident, host, port, sni, account, secure, tls_info, websocket) = {
             let Some(u) = srv.users.get(&uid) else {
                 return;
             };
@@ -25,6 +25,9 @@ impl Module for Snoop {
                 u.port,
                 u.sni.clone(),
                 u.account.clone(),
+                u.secure,
+                u.tls_info.clone(),
+                u.flags.via_websocket,
             )
         };
         if srv.conf_bool("snoop_stderr", false) {
@@ -38,6 +41,17 @@ impl Module for Snoop {
         );
         let port_s = port.to_string();
         msg.push_str(&srv.trf(", port: {0}", &[port_s.as_str()]));
+        // transport + security of this connection (WebSocket clients arrive on the wss
+        // listener via nginx/Orbit; TLS clients get the negotiated version/cipher).
+        if websocket {
+            msg.push_str(&srv.trf(", websocket", &[]));
+        }
+        if secure {
+            match &tls_info {
+                Some(info) => msg.push_str(&srv.trf(", tls: {0}", &[info.as_str()])),
+                None => msg.push_str(&srv.trf(", secure", &[])),
+            }
+        }
         if let Some(sni) = &sni {
             msg.push_str(&srv.trf(", sni: {0}", &[sni.as_str()]));
         }
