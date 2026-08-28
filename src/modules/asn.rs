@@ -48,6 +48,12 @@ pub fn user_in(s: &Server, uid: Uid, list: &[u32]) -> bool {
     !list.is_empty() && of(s, uid).is_some_and(|a| list.contains(&a))
 }
 
+/// The `A:<asn[,asn]>` matching extban: is `uid`'s origin AS one of the listed AS
+/// numbers? The `AS` prefix is optional — e.g. `+b A:15169` or `+b A:AS3215,16276`.
+pub fn extban_match(s: &Server, uid: Uid, spec: &str) -> bool {
+    user_in(s, uid, &parse_list(spec))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

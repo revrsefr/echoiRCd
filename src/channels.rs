@@ -1337,7 +1337,7 @@ impl Server {
 
     /// Whether any entry in `list` catches `uid`: a plain `nick!user@host` glob, or
     /// a matching extban (`g:` group, `y:` reputation, `r:` realname, `j:` channel,
-    /// `s:` server, `G:` geoip, `b:` banlist). Acting extbans (`m:`/`c:`/`n:`) never
+    /// `s:` server, `G:` geoip, `A:` asn, `b:` banlist). Acting extbans (`m:`/`c:`/`n:`) never
     /// match here — they restrict actions, not join/ban membership.
     pub fn ban_list_hit(&self, uid: Uid, list: &[Ban]) -> bool {
         let who = self.users.get(&uid).map(|u| u.prefix()).unwrap_or_default();
@@ -1353,6 +1353,7 @@ impl Server {
                     Some(b'j') => crate::modules::channelban::matches(self, uid, &b.mask[2..]),
                     Some(b's') => crate::modules::serverban::matches(self, uid, &b.mask[2..]),
                     Some(b'G') => crate::modules::geoip::geoban_match(self, uid, &b.mask[2..]),
+                    Some(b'A') => crate::modules::asn::extban_match(self, uid, &b.mask[2..]),
                     Some(b'b') => crate::modules::extbanbanlist::matches(self, uid, &b.mask[2..]),
                     _ => false,
                 }
