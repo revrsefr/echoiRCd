@@ -7,6 +7,7 @@ pub mod account_registration;
 pub mod accountban;
 pub mod antimixedutf8;
 pub mod antirandom;
+pub mod asn;
 pub mod autodrop;
 pub mod autoop;
 pub mod banredirect;

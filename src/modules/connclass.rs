@@ -7,7 +7,7 @@
 //!
 //! ```text
 //! connectclass = <name> allow=<mask[,mask]> [parent=<name>] [deny=yes]
-//!   [requiressl=yes|trusted] [password=<pw>] [hash=<algo>] [port=<p[,p]>]
+//!   [requiressl=yes|trusted] [password=<pw>] [hash=<algo>] [port=<p[,p]>] [asn=<n[,n]>]
 //!   [localmax=<n>] [globalmax=<n>] [limit=<n>] [maxchans=<n>] [pingfreq=<secs>]
 //!   [timeout=<secs>] [modes=<+modes>] [recvq=<bytes>] [hardsendq=<bytes>]
 //!   [softsendq=<bytes>] [fakelag=yes|no] [penaltythreshold=<n>] [commandrate=<secs>]
@@ -35,6 +35,7 @@ pub struct ConnClass {
     pub ssl_trusted: bool,           // require a TLS client certificate (requiressl=trusted)
     pub password: Option<String>,    // PASS credential (plain or hashed; verify auto-detects)
     pub ports: Vec<u16>,             // restrict to these listener ports (empty = any)
+    pub asn: Vec<u32>,               // restrict to these origin AS numbers (empty = any)
     pub localmax: Option<usize>,     // max local connections per IP in this class
     pub globalmax: Option<usize>,    // max network-wide connections per IP
     pub limit: Option<usize>,        // max total local users in this class
@@ -75,6 +76,7 @@ fn apply(c: &mut ConnClass, k: &str, v: &str) {
         // regardless of whether it appears before or after `password=`.
         "hash" => {}
         "port" => c.ports.extend(list(v).filter_map(|p| p.parse::<u16>().ok())),
+        "asn" => c.asn.extend(crate::modules::asn::parse_list(v)),
         "localmax" => c.localmax = v.parse().ok(),
         "globalmax" => c.globalmax = v.parse().ok(),
         "limit" => c.limit = v.parse().ok(),
@@ -269,6 +271,7 @@ fn pick(
     secure: bool,
     has_cert: bool,
     port: u16,
+    asn: Option<u32>,
 ) -> Pick {
     for c in all(s) {
         if !c.allow.iter().any(|m| mask_match(m, ip, host)) {
@@ -281,6 +284,9 @@ fn pick(
             continue;
         }
         if !c.ports.is_empty() && !c.ports.contains(&port) {
+            continue;
+        }
+        if !c.asn.is_empty() && !asn.is_some_and(|a| c.asn.contains(&a)) {
             continue;
         }
         if c.deny {
@@ -343,7 +349,8 @@ pub fn assign(s: &mut Server, uid: Uid) -> Option<String> {
             u.port,
         )
     };
-    let class = match pick(s, uid, &ip, "", secure, has_cert, port) {
+    let asn = crate::modules::asn::of(s, uid);
+    let class = match pick(s, uid, &ip, "", secure, has_cert, port, asn) {
         Pick::Deny(name) => {
             return Some(format!("Connection class {name} denies your address"));
         }
@@ -409,7 +416,8 @@ pub fn on_register(s: &mut Server, uid: Uid) -> AuthOutcome {
     }) else {
         return AuthOutcome::Proceed;
     };
-    match pick(s, uid, &ip, &host, secure, has_cert, port) {
+    let asn = crate::modules::asn::of(s, uid);
+    match pick(s, uid, &ip, &host, secure, has_cert, port, asn) {
         Pick::Deny(name) => {
             return AuthOutcome::Reject(format!("Connection class {name} denies your address"));
         }
@@ -557,5 +565,13 @@ mod tests {
         assert!(mask_match("*.example.com", "192.0.2.1", "host.example.com"));
         assert!(mask_match("192.0.2.*", "192.0.2.7", ""));
         assert!(!mask_match("nomatch/33", "1.2.3.4", "")); // unparseable → no match
+    }
+
+    #[test]
+    fn asn_param_parses() {
+        let mut c = ConnClass::default();
+        apply(&mut c, "asn", "3215,15169");
+        apply(&mut c, "asn", "AS16276");
+        assert_eq!(c.asn, vec![3215, 15169, 16276]);
     }
 }

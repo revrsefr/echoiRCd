@@ -252,7 +252,7 @@ connections {
 #     clients by IP/host mask (glob OR CIDR) + optional TLS/port; first match
 #     wins, else the global limits apply. One quoted value string per class:
 #       allow=<mask[,mask]> deny=yes parent=<name> requiressl=yes|trusted
-#       password=<pw> hash=<algo> port=<p[,p]> localmax=<n> globalmax=<n>
+#       password=<pw> hash=<algo> port=<p[,p]> asn=<n[,n]> localmax=<n> globalmax=<n>
 #       limit=<n> maxchans=<n> pingfreq=<s> timeout=<s> modes=<+modes>
 #       recvq=<bytes> softsendq=<bytes> hardsendq=<bytes> fakelag=no
 #       penaltythreshold=<n> commandrate=<s> useident=yes requireident=yes
@@ -262,6 +262,7 @@ connections {
 #     connectclass "secure  allow=* requiressl=yes password=sha256:<hex> hash=sha256";
 #     connectclass "vpn     allow=* parent=trusted localmax=2 maxchans=20 modes=+ix";
 #     connectclass "banned  allow=1.2.3.0/24 deny=yes";
+#     connectclass "byasn   allow=* asn=3215,16276";  # only these origin ASNs (needs geoip_asn_database)
 #     connectclass_required yes;   # refuse clients that match no allow class (default no)
 # }
 
@@ -436,10 +437,11 @@ restrictions {
 # }
 # security groups — use as an extban: MODE #c +b g:<name>. criteria: public tls
 # insecure account unregistered oper exclude-oper bot webirc mask=<glob>
-# exclude=<glob> scoremin=<n> scoremax=<n>.
+# exclude=<glob> scoremin=<n> scoremax=<n> asn=<n[,n]> (asn needs geoip_asn_database).
 # securitygroups {
 #     securitygroup "trusted account tls public";
 #     securitygroup "newbies scoremax=10 public";
+#     securitygroup "myisp   asn=3215 public";   # members whose origin AS is 3215
 # }
 
 

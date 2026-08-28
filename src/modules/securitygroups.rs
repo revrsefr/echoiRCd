@@ -1,5 +1,5 @@
 //! Named security groups. A `securitygroup` config line defines a named set of users
-//! by AND-ed criteria (host masks, TLS, account, oper, bot, webirc, reputation score
+//! by AND-ed criteria (host masks, TLS, account, oper, bot, webirc, origin ASN, reputation score
 //! range). Groups drive the `g:` matching extban, the `SECURITYGROUPS` command, and a
 //! WHOIS line.
 
@@ -32,6 +32,7 @@ struct SecGroup {
     webirc: Tri,
     score_min: Option<u32>,
     score_max: Option<u32>,
+    asn: Vec<u32>,
 }
 
 /// Parse the `securitygroup = <name> [criteria…]` config lines into groups.
@@ -103,6 +104,7 @@ fn parse_groups(s: &Server) -> Vec<SecGroup> {
                 ("exclude-webirc", _) => g.webirc = Tri::No,
                 ("scoremin", Some(n)) => g.score_min = n.parse().ok(),
                 ("scoremax", Some(n)) => g.score_max = n.parse().ok(),
+                ("asn", Some(a)) => g.asn.extend(crate::modules::asn::parse_list(a)),
                 _ => {}
             }
         }
@@ -158,6 +160,9 @@ fn matches(s: &Server, uid: Uid, g: &SecGroup) -> bool {
         if g.score_min.is_some_and(|m| score < m) || g.score_max.is_some_and(|m| score > m) {
             return false;
         }
+    }
+    if !g.asn.is_empty() && !crate::modules::asn::user_in(s, uid, &g.asn) {
+        return false;
     }
     true
 }
