@@ -14,7 +14,7 @@ impl Module for Snoop {
     fn on_user_connect(&mut self, srv: &mut Server, uid: Uid) {
         // `conf_bool`/`snotice_c` are `&self`, so we can hold the `&User` borrow and
         // reference its fields directly instead of cloning them out.
-        let (nick, ident, host, port, sni, account, secure, tls_info, websocket) = {
+        let (nick, ident, host, port, sni, account, secure, tls_info, websocket, ip) = {
             let Some(u) = srv.users.get(&uid) else {
                 return;
             };
@@ -28,6 +28,7 @@ impl Module for Snoop {
                 u.secure,
                 u.tls_info.clone(),
                 u.flags.via_websocket,
+                u.addr.ip(),
             )
         };
         if srv.conf_bool("snoop_stderr", false) {
@@ -51,6 +52,10 @@ impl Module for Snoop {
                 Some(info) => msg.push_str(&srv.trf(", tls: {0}", &[info.as_str()])),
                 None => msg.push_str(&srv.trf(", secure", &[])),
             }
+        }
+        // where the client is connecting from: GeoIP country/city (+ ASN if that db is loaded)
+        if let Some(geo) = crate::modules::geoip::describe(srv, ip) {
+            msg.push_str(&srv.trf(", geo: {0}", &[geo.as_str()]));
         }
         if let Some(sni) = &sni {
             msg.push_str(&srv.trf(", sni: {0}", &[sni.as_str()]));

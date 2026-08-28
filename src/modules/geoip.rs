@@ -1,9 +1,12 @@
-//! MaxMind DB (`.mmdb`) country lookup, with the `G:<cc>` geoban extban, the
-//! `GEOIP` command and a WHOIS country line. The binary format is parsed by hand:
-//! the metadata section, the record-size-aware search tree, and the typed data
-//! decoder.
+//! MaxMind DB (`.mmdb`) geolocation: country + city + ASN, with the `G:<cc>` geoban
+//! extban, the `GEOIP` command, a WHOIS "connecting from …" line and the connect-snote
+//! `geo:` field. The binary format is parsed by hand: the metadata section, the
+//! record-size-aware search tree, and the typed data decoder — so it reads any
+//! MaxMind-schema db (Country, City, ASN, or DB-IP equivalents).
 //!
-//! Config: `geoip_database = /path/to/GeoLite2-Country.mmdb` (loaded once at boot).
+//! Config (loaded once at boot):
+//!   `geoip_database     = /path/to/GeoLite2-City.mmdb`   # country + city
+//!   `geoip_asn_database = /path/to/GeoLite2-ASN.mmdb`     # optional: AS number + org
 
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -27,6 +30,23 @@ pub struct Country {
     pub iso: String,
     pub name: String,
 }
+
+/// A resolved location from a City database: country plus the (optional) city name.
+pub struct Geo {
+    pub country_iso: String,
+    pub country_name: String,
+    pub city: Option<String>,
+}
+
+/// A resolved autonomous system from an ASN database.
+pub struct Asn {
+    pub number: u32,
+    pub org: String,
+}
+
+/// The ASN database, cached separately in `Server.ext`. MaxMind ships ASN as its own
+/// `.mmdb`, distinct from the Country/City geolocation database.
+pub struct GeoAsnDb(pub Arc<Mmdb>);
 
 /// A parsed `.mmdb` file: the raw bytes plus the tree geometry from its metadata.
 pub struct Mmdb {
@@ -254,8 +274,9 @@ impl Mmdb {
         }
     }
 
-    /// The country for `ip` — ISO code plus English name — if the database has one.
-    pub fn country(&self, ip: IpAddr) -> Option<Country> {
+    /// Walk the search tree for `ip` and return the absolute offset of its data record
+    /// in the data section, or `None` if the address isn't in the tree.
+    fn find(&self, ip: IpAddr) -> Option<usize> {
         // build the bit path; IPv4 in an IPv6 db is prefixed with 96 zero bits
         let mut bits: Vec<bool> = Vec::with_capacity(128);
         match ip {
@@ -288,39 +309,87 @@ impl Mmdb {
             }
             if rec > self.node_count {
                 // data pointer: abs = tree_size + (rec - node_count)
-                let abs = (self.data_start - SEPARATOR) + rec - self.node_count;
-                let d = Decoder {
-                    data: &self.data,
-                    base: self.data_start,
-                };
-                let country = d.map_get(abs, "country")?;
-                let iso = d.string(d.map_get(country, "iso_code")?)?;
-                // country.names.en — the `names` submap is usually a shared pointer;
-                // map_get/string follow it. Fall back to the code if it's absent.
-                let name = d
-                    .map_get(country, "names")
-                    .and_then(|names| d.map_get(names, "en"))
-                    .and_then(|en| d.string(en))
-                    .unwrap_or_else(|| iso.clone());
-                return Some(Country { iso, name });
+                return Some((self.data_start - SEPARATOR) + rec - self.node_count);
             }
             node = rec;
         }
         None
     }
+
+    fn decoder(&self) -> Decoder<'_> {
+        Decoder { data: &self.data, base: self.data_start }
+    }
+
+    /// The country for `ip` — ISO code plus English name — if the database has one.
+    pub fn country(&self, ip: IpAddr) -> Option<Country> {
+        let abs = self.find(ip)?;
+        let d = self.decoder();
+        let country = d.map_get(abs, "country")?;
+        let iso = d.string(d.map_get(country, "iso_code")?)?;
+        // country.names.en — the `names` submap is usually a shared pointer; map_get/
+        // string follow it. Fall back to the code if it's absent.
+        let name = d
+            .map_get(country, "names")
+            .and_then(|names| d.map_get(names, "en"))
+            .and_then(|en| d.string(en))
+            .unwrap_or_else(|| iso.clone());
+        Some(Country { iso, name })
+    }
+
+    /// Country **and** city for `ip` in a single tree walk, from a City database.
+    /// `city` is `None` on a Country-only db or when the record carries no city name.
+    pub fn geo(&self, ip: IpAddr) -> Option<Geo> {
+        let abs = self.find(ip)?;
+        let d = self.decoder();
+        let country = d.map_get(abs, "country")?;
+        let iso = d.string(d.map_get(country, "iso_code")?)?;
+        let name = d
+            .map_get(country, "names")
+            .and_then(|names| d.map_get(names, "en"))
+            .and_then(|en| d.string(en))
+            .unwrap_or_else(|| iso.clone());
+        let city = d
+            .map_get(abs, "city")
+            .and_then(|city| d.map_get(city, "names"))
+            .and_then(|names| d.map_get(names, "en"))
+            .and_then(|en| d.string(en));
+        Some(Geo { country_iso: iso, country_name: name, city })
+    }
+
+    /// The autonomous system (number + organisation) for `ip`, from a GeoLite2-ASN
+    /// database. `None` if this db has no ASN record for the address.
+    pub fn asn(&self, ip: IpAddr) -> Option<Asn> {
+        let abs = self.find(ip)?;
+        let d = self.decoder();
+        let number = d.map_get(abs, "autonomous_system_number").and_then(|o| d.uint(o))?;
+        let org = d
+            .map_get(abs, "autonomous_system_organization")
+            .and_then(|o| d.string(o))
+            .unwrap_or_default();
+        Some(Asn { number: number as u32, org })
+    }
 }
 
 /// Load the configured database into `Server.ext` at boot. Called from `Ircd::new`.
 pub fn init(s: &mut Server) {
-    let Some(path) = s.conf("geoip_database").map(str::to_string) else {
-        return;
-    };
-    match Mmdb::open(&path) {
-        Some(db) => {
-            s.ext.set(GeoDb(Arc::new(db)));
-            eprintln!("echoircd: loaded GeoIP database {path}");
+    if let Some(path) = s.conf("geoip_database").map(str::to_string) {
+        match Mmdb::open(&path) {
+            Some(db) => {
+                s.ext.set(GeoDb(Arc::new(db)));
+                eprintln!("echoircd: loaded GeoIP database {path}");
+            }
+            None => eprintln!("echoircd: could not read GeoIP database {path}"),
         }
-        None => eprintln!("echoircd: could not read GeoIP database {path}"),
+    }
+    // Optional, separate ASN database (GeoLite2-ASN.mmdb) — adds AS number + org.
+    if let Some(path) = s.conf("geoip_asn_database").map(str::to_string) {
+        match Mmdb::open(&path) {
+            Some(db) => {
+                s.ext.set(GeoAsnDb(Arc::new(db)));
+                eprintln!("echoircd: loaded GeoIP ASN database {path}");
+            }
+            None => eprintln!("echoircd: could not read GeoIP ASN database {path}"),
+        }
     }
 }
 
@@ -330,6 +399,40 @@ pub fn lookup(s: &Server, ip: IpAddr) -> Option<Country> {
         iso: c.iso.to_ascii_uppercase(),
         name: c.name,
     })
+}
+
+/// The ASN of `ip` from the ASN database, if one is loaded and has a record for it.
+pub fn asn(s: &Server, ip: IpAddr) -> Option<Asn> {
+    s.ext.get::<GeoAsnDb>().and_then(|db| db.0.asn(ip))
+}
+
+/// A compact geo descriptor for `ip`, e.g. `FR/Paris (AS3215 Orange S.A.)`. Degrades
+/// gracefully to `FR/Paris`, `FR`, `(AS3215 …)`, or `None` depending on which databases
+/// are loaded and what they hold for the address.
+pub fn describe(s: &Server, ip: IpAddr) -> Option<String> {
+    let geo = s.ext.get::<GeoDb>().and_then(|db| db.0.geo(ip));
+    let a = asn(s, ip);
+    let mut out = String::new();
+    if let Some(g) = &geo {
+        out.push_str(&g.country_iso.to_ascii_uppercase());
+        if let Some(city) = &g.city {
+            out.push('/');
+            out.push_str(city);
+        }
+    }
+    if let Some(a) = &a {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str("(AS");
+        out.push_str(&a.number.to_string());
+        if !a.org.is_empty() {
+            out.push(' ');
+            out.push_str(&a.org);
+        }
+        out.push(')');
+    }
+    (!out.is_empty()).then_some(out)
 }
 
 /// The `G:<cc>` geoban match: does `uid`'s country code equal (case-insensitively)
@@ -346,10 +449,25 @@ pub fn geoban_match(s: &Server, uid: Uid, spec: &str) -> bool {
     }
 }
 
-/// A WHOIS line (opers only) naming the target's country.
+/// A WHOIS line (opers only) naming where the target is connecting from: country,
+/// city (if a City db is loaded), and AS number + org (if an ASN db is loaded).
 pub fn whois_line(s: &Server, tuid: Uid) -> Option<String> {
     let ip = s.users.get(&tuid).map(|u| u.addr.ip())?;
-    lookup(s, ip).map(|c| format!("is connecting from country {}", c.name))
+    let g = s.ext.get::<GeoDb>().and_then(|db| db.0.geo(ip))?;
+    let mut loc = g.country_name;
+    if let Some(city) = g.city {
+        loc.push('/');
+        loc.push_str(&city);
+    }
+    let mut line = format!("is connecting from {loc}");
+    if let Some(a) = asn(s, ip) {
+        if a.org.is_empty() {
+            line.push_str(&format!(" (AS{})", a.number));
+        } else {
+            line.push_str(&format!(" (AS{} {})", a.number, a.org));
+        }
+    }
+    Some(line)
 }
 
 pub fn commands() -> Vec<Box<dyn Command>> {
@@ -383,9 +501,9 @@ impl Command for GeoIpCmd {
         let nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
         let msg = match ip {
             None => format!("GEOIP: no such nick, and {target} is not an IP"),
-            Some(ip) => match lookup(s, ip) {
-                Some(c) => format!("GEOIP: {target} ({ip}) is in {} ({})", c.name, c.iso),
-                None => format!("GEOIP: no country found for {target} ({ip})"),
+            Some(ip) => match describe(s, ip) {
+                Some(desc) => format!("GEOIP: {target} ({ip}) — {desc}"),
+                None => format!("GEOIP: no geo data for {target} ({ip})"),
             },
         };
         s.send(uid, format!(":{} NOTICE {nick} :*** {msg}", s.name));
@@ -428,5 +546,35 @@ mod tests {
             db.country("2001:4860:4860::8888".parse().unwrap()).unwrap().iso,
             "US"
         );
+    }
+
+    #[test]
+    fn city_db_resolves_country_and_city() {
+        let Some(p) = std::env::var("ECHOIRCD_TEST_CITY_MMDB").ok() else {
+            return;
+        };
+        let Some(db) = Mmdb::open(&p) else { return };
+        // country extraction works on a City db (same nesting as the Country db)
+        let g = db.geo(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))).unwrap();
+        assert_eq!(g.country_iso, "US");
+        assert!(db.geo(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).is_none());
+        // city extraction: at least one well-known IP should carry a city name
+        let with_city = ["81.2.69.142", "128.101.101.101", "1.1.1.1", "24.24.24.24"]
+            .iter()
+            .filter_map(|s| db.geo(s.parse().ok()?))
+            .any(|g| g.city.is_some());
+        assert!(with_city, "City db should yield a city name for at least one known IP");
+    }
+
+    #[test]
+    fn asn_db_resolves_number_and_org() {
+        let Some(p) = std::env::var("ECHOIRCD_TEST_ASN_MMDB").ok() else {
+            return;
+        };
+        let Some(db) = Mmdb::open(&p) else { return };
+        let a = db.asn(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))).unwrap();
+        assert_eq!(a.number, 15169); // Google LLC
+        assert!(a.org.to_lowercase().contains("google"), "org was {:?}", a.org);
+        assert!(db.asn(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).is_none());
     }
 }

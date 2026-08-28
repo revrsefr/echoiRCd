@@ -486,8 +486,9 @@ modules {
     # showfile "RULES /etc/echoircd/rules.txt";
     # --- filter (oper /FILTER): pattern engine for rules added after it ---
     # filter_engine glob;   # glob (wildcards, default) | regex
-    # --- geoip: MaxMind .mmdb country lookup. Enables +b G:<cc>, GEOIP, WHOIS country ---
-    # geoip_database "/etc/echoircd/GeoLite2-Country.mmdb";
+    # --- geoip: MaxMind .mmdb geolocation. Enables +b G:<cc>, GEOIP, WHOIS + connect-snote geo ---
+    # geoip_database     "/etc/echoircd/GeoLite2-City.mmdb";    # country + city (or GeoLite2-Country.mmdb for country only)
+    # geoip_asn_database "/etc/echoircd/GeoLite2-ASN.mmdb";     # optional, separate db: adds AS number + org
     # --- network_icon: advertise a network icon via draft/ICON ISUPPORT ---
     # network_icon "https://example.org/icon.png";
     # --- profilelink: a profile URL in WHOIS for logged-in users ---
