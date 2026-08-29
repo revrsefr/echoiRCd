@@ -75,7 +75,8 @@ impl Command for Links {
             &format!("{} {} :0 {}", s.name, s.name, s.server_desc),
         );
         // hideservices: services (U-lined) servers are hidden from non-opers.
-        let hide_svc = s.conf_bool("hideservices", false) && !s.is_oper(uid);
+        let hide_svc = s.conf_bool("hideservices", false)
+            && !crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::SERVERS_AUSPEX);
         let mut rows: Vec<(String, String)> = s
             .servers
             .values()

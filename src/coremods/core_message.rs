@@ -136,7 +136,9 @@ fn dm_blocked(s: &Server, uid: Uid, tuid: Uid) -> bool {
         ),
         None => return true,
     };
-    if deny_uncommon && !s.is_oper(uid) {
+    if deny_uncommon
+        && !crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::USERS_IGNORE_COMMONCHANS)
+    {
         let common = match (s.users.get(&uid), s.users.get(&tuid)) {
             (Some(a), Some(b)) => a.channels.intersection(&b.channels).next().is_some(),
             _ => false,
@@ -485,7 +487,7 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             .map(|u| u.flags.deny_uncommon)
             .unwrap_or(false)
             && uid != tuid
-            && !s.is_oper(uid)
+            && !crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::USERS_IGNORE_COMMONCHANS)
         {
             let common = match (s.users.get(&uid), s.users.get(&tuid)) {
                 (Some(a), Some(b)) => a.channels.intersection(&b.channels).next().is_some(),

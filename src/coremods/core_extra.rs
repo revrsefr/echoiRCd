@@ -401,7 +401,8 @@ impl Command for Map {
             &format!("{} ({} users)", s.name, s.users.len()),
         );
         // hideservices: services (U-lined) servers are hidden from non-opers.
-        let hide_svc = s.conf_bool("hideservices", false) && !s.is_oper(uid);
+        let hide_svc = s.conf_bool("hideservices", false)
+            && !crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::SERVERS_AUSPEX);
         let mut peers: Vec<String> = s
             .servers
             .values()

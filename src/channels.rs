@@ -731,12 +731,15 @@ impl Server {
         {
             return; // unknown user, or already joined
         }
-        // IRC operators override the join restrictions below; each bypass sets
-        // `overrode`, snoticed once the join succeeds.
+        // opers holding channels/override bypass the join restrictions below; each
+        // bypass sets `overrode`, snoticed once the join succeeds. `is_oper` still gates
+        // the +O join *requirement* and the create/badchan module intercepts.
         let is_oper = self.users.get(&uid).map(|u| u.flags.oper).unwrap_or(false);
+        let can_override =
+            crate::modules::opertypes::has_priv(self, uid, crate::modules::opertypes::privs::CHANNELS_OVERRIDE);
         let mut overrode = false;
         // connectclass max-channels cap (opers exempt)
-        if !is_oper {
+        if !can_override {
             if let Some(max) = crate::modules::connclass::max_chans(self, uid) {
                 if self.users.get(&uid).map(|u| u.channels.len()).unwrap_or(0) >= max {
                     self.numeric(
@@ -749,7 +752,7 @@ impl Server {
             }
         }
         // CBAN — a forbidden channel name (opers bypass)
-        if !is_oper {
+        if !can_override {
             if let Some(reason) = self.matched_cban(&key) {
                 self.numeric(
                     uid,
@@ -775,7 +778,7 @@ impl Server {
         if let Some(ch) = self.channels.get(&key) {
             if let Some(k) = &ch.modes.key {
                 if key_arg != Some(k.as_str()) {
-                    if !is_oper {
+                    if !can_override {
                         self.numeric(
                             uid,
                             ERR_BADCHANNELKEY,
@@ -789,7 +792,7 @@ impl Server {
             // +b — bans block even an invited user, unless a +e exception matches
             // (both honour the g: security-group extban)
             if self.ban_list_hit(uid, &ch.bans) && !self.ban_list_hit(uid, &ch.excepts) {
-                if !is_oper {
+                if !can_override {
                     // banredirect: `+b mask$#chan` bounces the user into #chan (once)
                     if let Some(t) = crate::modules::banredirect::redirect_target(self, uid, &key) {
                         let tl = t.to_ascii_lowercase();
@@ -819,7 +822,7 @@ impl Server {
                 && !ch.invites.contains(&uid)
                 && !self.ban_list_hit(uid, &ch.invex)
             {
-                if !is_oper {
+                if !can_override {
                     self.numeric(
                         uid,
                         ERR_INVITEONLYCHAN,
@@ -831,7 +834,7 @@ impl Server {
             }
             // +z — TLS-connected users only
             if ch.modes.secure_only && !self.users.get(&uid).map(|u| u.secure).unwrap_or(false) {
-                if !is_oper {
+                if !can_override {
                     self.numeric(
                         uid,
                         ERR_SECUREONLYCHAN,
@@ -858,7 +861,7 @@ impl Server {
                     .map(|u| u.account.is_none())
                     .unwrap_or(true)
             {
-                if !is_oper {
+                if !can_override {
                     self.numeric(
                         uid,
                         ERR_NEEDREGGEDNICK,
@@ -872,7 +875,7 @@ impl Server {
             if let Some(secs) = ch.modes.kicknorejoin {
                 if let Some(&kt) = ch.recent_kicks.get(&uid) {
                     if now().saturating_sub(kt) < secs as u64 {
-                        if !is_oper {
+                        if !can_override {
                             self.numeric(
                                 uid,
                                 ERR_DELAYREJOIN,
@@ -896,7 +899,7 @@ impl Server {
                 .limit
                 .is_some_and(|l| (ch.members.len() + ch.rmembers.len()) as u32 >= l);
             let redirect = ch.modes.redirect.clone();
-            if full && is_oper {
+            if full && can_override {
                 overrode = true;
             } else if full {
                 match redirect {
@@ -927,7 +930,7 @@ impl Server {
             }
         }
         // +j join flood — once tripped, the channel locks new joins out for 60s (opers exempt)
-        if !is_oper && self.channels.contains_key(&key) && self.joinflood_check(&key) {
+        if !can_override && self.channels.contains_key(&key) && self.joinflood_check(&key) {
             self.numeric(
                 uid,
                 ERR_UNAVAILRESOURCE,

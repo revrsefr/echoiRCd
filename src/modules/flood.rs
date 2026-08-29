@@ -44,8 +44,9 @@ impl Module for Flood {
             let Some(u) = srv.users.get_mut(&uid) else {
                 return ModResult::Passthru;
             };
-            if u.flags.oper {
-                return ModResult::Passthru; // opers bypass flood limits
+            // opers holding users/flood bypass the message-rate limit
+            if crate::modules::opertypes::user_has_priv(u, crate::modules::opertypes::privs::USERS_FLOOD) {
+                return ModResult::Passthru;
             }
             let st = u.ext.get_or_insert_with(FloodState::default);
             st.times.retain(|&t| now.saturating_sub(t) < window);

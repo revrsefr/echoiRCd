@@ -19,6 +19,25 @@ use crate::server::Server;
 use crate::users::DEFAULT_SNOMASK;
 use crate::Uid;
 
+/// Canonical operator privilege names, grouped by domain. Every gate calls
+/// [`has_priv`]/[`user_has_priv`] with one of these constants, so the strings live
+/// in one place instead of drifting as scattered literals. Config `class privs="…"`
+/// uses the same strings (space/comma separated; `*` grants all).
+pub mod privs {
+    /// see a user's real host+IP and geo, and +i users you share no channel with
+    pub const USERS_AUSPEX: &str = "users/auspex";
+    /// see secret/private (+s/+p) channels in LIST / WHO / WHOIS
+    pub const CHANNELS_AUSPEX: &str = "channels/auspex";
+    /// see U-lined/services servers otherwise hidden by `hideservices`
+    pub const SERVERS_AUSPEX: &str = "servers/auspex";
+    /// exempt from message-flood and join-flood limits
+    pub const USERS_FLOOD: &str = "users/flood";
+    /// message a +c user without sharing a common channel
+    pub const USERS_IGNORE_COMMONCHANS: &str = "users/ignore-commonchans";
+    /// join through +k/+b/+i/+l/+z/+R/+J, CBAN and the max-channels cap
+    pub const CHANNELS_OVERRIDE: &str = "channels/override";
+}
+
 /// Per-user resolved grant, stored on `User.ext` at oper-up. Present ⇒ a typed
 /// oper; absent ⇒ a legacy oper with full access. Read by WHOIS for the title.
 pub struct OperType {
@@ -247,12 +266,12 @@ fn builtin() -> (HashMap<String, ClassDef>, HashMap<String, TypeDef>) {
     let mut classes: HashMap<String, ClassDef> = HashMap::default();
     classes.insert("announce".into(), cdef(&["WALLOPS", "GLOBOPS"], &[], "ag"));
     classes.insert("ban".into(), cdef(&["KILL", "KLINE", "GLINE", "ZLINE", "QLINE", "ELINE", "RLINE", "SHUN", "CBAN", "CHECK", "NICKLOCK", "NICKUNLOCK"], &[], "kx"));
-    classes.insert("override".into(), cdef(&["SAJOIN", "SAPART", "SANICK", "SAKICK", "SAMODE", "SATOPIC", "SAQUIT", "CLEARCHAN"], &["override"], "v"));
+    classes.insert("override".into(), cdef(&["SAJOIN", "SAPART", "SANICK", "SAKICK", "SAMODE", "SATOPIC", "SAQUIT", "CLEARCHAN"], &["channels/override", "users/flood"], "v"));
     classes.insert("host".into(), cdef(&["CHGHOST", "CHGIDENT", "CHGNAME", "SETHOST", "SETIDENT", "SETIDLE", "SWHOIS"], &[], ""));
     classes.insert("services".into(), cdef(&["SVSNICK", "SVSJOIN", "SVSPART", "SVSMODE", "SVSLOGIN", "SVSLOGOUT"], &[], ""));
     classes.insert("server".into(), cdef(&["CONNECT", "SQUIT", "DIE", "RESTART"], &[], "lr"));
     // auspex: see through user/channel privacy (real host+IP, geo, secret channels)
-    classes.insert("auspex".into(), cdef(&[], &["users/auspex", "channels/auspex"], ""));
+    classes.insert("auspex".into(), cdef(&[], &["users/auspex", "channels/auspex", "servers/auspex"], ""));
 
     let mut types: HashMap<String, TypeDef> = HashMap::default();
     // The WHOIS title line is bold + colour 4 (red) by default; override per type
@@ -458,7 +477,7 @@ mod tests {
 
         let admin = resolved("admin");
         assert!(admin.commands.contains("KILL") && admin.commands.contains("SAJOIN") && admin.commands.contains("CHGHOST"));
-        assert!(admin.privs.contains("override"));
+        assert!(admin.privs.contains("channels/override") && admin.privs.contains("users/flood"));
         assert!(!admin.commands.contains("DIE"), "admin can't DIE");
         assert!(!admin.commands.contains("SVSNICK"), "admin isn't a services admin");
         assert!(admin.all_snomasks);
