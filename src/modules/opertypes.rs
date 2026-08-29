@@ -47,6 +47,8 @@ pub struct OperType {
     pub commands: HashSet<String>,
     pub all_privs: bool,
     pub privs: HashSet<String>,
+    pub usermodes: ModeAllow, // oper-only user modes this type may set
+    pub chanmodes: ModeAllow, // oper-only channel modes this type may set
 }
 
 /// Commands an oper type gates. Anything outside this set (OPERMOTD, MKPASSWD,
@@ -132,6 +134,63 @@ pub fn user_has_priv(u: &crate::users::User, name: &str) -> bool {
     }
 }
 
+/// Which oper-only modes a type may set: `All` (`usermodes="*"`, or a type that never
+/// restricts) or `Only(set)` for an explicit letter list. An unspecified allowlist
+/// resolves to `All`, so a type restricts modes only when it opts in.
+#[derive(Clone, Default)]
+pub enum ModeAllow {
+    #[default]
+    All,
+    Only(HashSet<char>),
+}
+
+impl ModeAllow {
+    fn allows(&self, c: char) -> bool {
+        match self {
+            ModeAllow::All => true,
+            ModeAllow::Only(set) => set.contains(&c),
+        }
+    }
+}
+
+/// Whether oper `uid`'s type may set the oper-only mode `letter` (`chan` picks the
+/// channel-mode vs user-mode allowlist). Legacy untyped opers may set anything; the
+/// caller has already confirmed oper-ness, so this only applies the per-type allowlist.
+pub fn can_use_mode(s: &Server, uid: Uid, letter: char, chan: bool) -> bool {
+    match s.users.get(&uid).and_then(|u| u.ext.get::<OperType>()) {
+        None => true,
+        Some(t) => {
+            if chan {
+                t.chanmodes.allows(letter)
+            } else {
+                t.usermodes.allows(letter)
+            }
+        }
+    }
+}
+
+/// Parse a `usermodes=`/`chanmodes=` value into an allowlist (`*` = all).
+fn parse_modeallow(v: &str) -> ModeAllow {
+    if v.contains('*') {
+        ModeAllow::All
+    } else {
+        ModeAllow::Only(v.chars().filter(|c| c.is_ascii_alphabetic()).collect())
+    }
+}
+
+/// Fold `add` into `acc`, favouring the more permissive result (All wins, else union).
+fn merge_modeallow(acc: &mut Option<ModeAllow>, add: &Option<ModeAllow>) {
+    match add {
+        None => {}
+        Some(ModeAllow::All) => *acc = Some(ModeAllow::All),
+        Some(ModeAllow::Only(s)) => match acc {
+            Some(ModeAllow::All) => {}
+            Some(ModeAllow::Only(existing)) => existing.extend(s.iter().copied()),
+            None => *acc = Some(ModeAllow::Only(s.clone())),
+        },
+    }
+}
+
 /// Apply the oper's type at oper-up: auto usermodes / snomasks / vhost / level, then
 /// store the grant + title. A missing type (or an unknown id) leaves the oper with
 /// full access, so `oper` blocks without `type=` keep working.
@@ -166,6 +225,8 @@ pub fn apply(s: &mut Server, uid: Uid, type_id: Option<&str>) {
             commands: r.commands.clone(),
             all_privs: r.all_privs,
             privs: r.privs.clone(),
+            usermodes: r.usermodes.clone(),
+            chanmodes: r.chanmodes.clone(),
         });
     }
 }
@@ -193,6 +254,8 @@ struct Resolved {
     all_snomasks: bool,
     vhost: Option<String>,
     level: Option<u32>,
+    usermodes: ModeAllow,
+    chanmodes: ModeAllow,
 }
 
 thread_local! {
@@ -218,6 +281,8 @@ struct ClassDef {
     privs: Vec<String>,
     all_snomasks: bool,
     snomasks: String,
+    usermodes: Option<ModeAllow>,
+    chanmodes: Option<ModeAllow>,
 }
 
 #[derive(Default, Clone)]
@@ -235,6 +300,8 @@ struct TypeDef {
     vhost: Option<String>,
     level: Option<u32>,
     color: Option<u8>,
+    usermodes: Option<ModeAllow>,
+    chanmodes: Option<ModeAllow>,
 }
 
 fn cdef(commands: &[&str], privs: &[&str], sno: &str) -> ClassDef {
@@ -339,7 +406,9 @@ fn apply_class_kv(cd: &mut ClassDef, k: &str, v: &str) {
                 cd.snomasks.push_str(v);
             }
         }
-        _ => {} // usermodes/chanmodes allowlist: accepted but not yet enforced
+        "usermodes" => cd.usermodes = Some(parse_modeallow(v)),
+        "chanmodes" => cd.chanmodes = Some(parse_modeallow(v)),
+        _ => {}
     }
 }
 
@@ -366,7 +435,9 @@ fn apply_type_kv(td: &mut TypeDef, k: &str, v: &str) {
                 td.privs.extend(v.split(',').filter(|x| !x.is_empty()).map(|x| x.to_ascii_lowercase()));
             }
         }
-        "modes" | "usermodes" => td.modes = v.to_string(),
+        "modes" => td.modes = v.to_string(),
+        "usermodes" => td.usermodes = Some(parse_modeallow(v)),
+        "chanmodes" => td.chanmodes = Some(parse_modeallow(v)),
         "snomasks" | "snomask" => {
             if v.contains('*') {
                 td.all_snomasks = true;
@@ -410,6 +481,14 @@ fn resolve(td: &TypeDef, classes: &HashMap<String, ClassDef>) -> Resolved {
     let mut privs: HashSet<String> = td.privs.iter().cloned().collect();
     let mut all_sno = td.all_snomasks;
     let mut sno = td.snomasks.clone();
+    // mode allowlists: an all-classes type may set every oper mode; otherwise merge the
+    // classes' + type's lists, and an unspecified allowlist stays permissive (`All`).
+    let mut usermodes: Option<ModeAllow> = td.usermodes.clone();
+    let mut chanmodes: Option<ModeAllow> = td.chanmodes.clone();
+    if td.all_classes {
+        usermodes = Some(ModeAllow::All);
+        chanmodes = Some(ModeAllow::All);
+    }
 
     let names: Vec<String> = if td.all_classes {
         classes.keys().cloned().collect()
@@ -424,6 +503,8 @@ fn resolve(td: &TypeDef, classes: &HashMap<String, ClassDef>) -> Resolved {
             privs.extend(cd.privs.iter().cloned());
             all_sno |= cd.all_snomasks;
             sno.push_str(&cd.snomasks);
+            merge_modeallow(&mut usermodes, &cd.usermodes);
+            merge_modeallow(&mut chanmodes, &cd.chanmodes);
         }
     }
 
@@ -451,6 +532,8 @@ fn resolve(td: &TypeDef, classes: &HashMap<String, ClassDef>) -> Resolved {
         all_snomasks: all_sno,
         vhost: td.vhost.clone(),
         level: td.level,
+        usermodes: usermodes.unwrap_or_default(),
+        chanmodes: chanmodes.unwrap_or_default(),
     }
 }
 
@@ -515,6 +598,27 @@ mod tests {
             aux.privs.contains(&"users/auspex".to_string())
                 && aux.privs.contains(&"channels/auspex".to_string())
         );
+    }
+
+    #[test]
+    fn mode_allowlist_defaults_permissive_and_restricts_when_set() {
+        let no_classes: HashMap<String, ClassDef> = HashMap::default();
+        // built-ins never restrict modes → every oper-only letter is allowed
+        for id in ["helpop", "globop", "admin", "servadmin", "netadmin"] {
+            let r = resolved(id);
+            assert!(r.usermodes.allows('H') && r.chanmodes.allows('O'), "{id} unrestricted");
+        }
+        // an explicit list restricts to those letters; the unset axis stays permissive
+        let mut td = TypeDef::default();
+        apply_type_kv(&mut td, "usermodes", "iw");
+        let r = resolve(&td, &no_classes);
+        assert!(r.usermodes.allows('i') && r.usermodes.allows('w'));
+        assert!(!r.usermodes.allows('H'), "H is not in the usermodes allowlist");
+        assert!(r.chanmodes.allows('O'), "unspecified chanmodes stay permissive");
+        // "*" grants all
+        let mut td2 = TypeDef::default();
+        apply_type_kv(&mut td2, "usermodes", "*");
+        assert!(resolve(&td2, &no_classes).usermodes.allows('H'));
     }
 
     #[test]

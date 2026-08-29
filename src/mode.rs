@@ -433,6 +433,15 @@ impl ChanMode for OperFlagChan {
             );
             return Applied::No;
         }
+        // per-oper-type chanmode allowlist (services under sudo pass through)
+        if adding && !s.mode_sudo && !crate::modules::opertypes::can_use_mode(s, uid, self.ch, true) {
+            s.numeric(
+                uid,
+                ERR_NOPRIVILEGES,
+                &format!("{chan} :Your oper type may not set channel mode +{}", self.ch),
+            );
+            return Applied::No;
+        }
         if let Some(c) = s.channels.get_mut(key) {
             (self.set)(&mut c.modes, adding);
         }
@@ -1359,6 +1368,15 @@ impl UserMode for OperFlag {
                 uid,
                 ERR_NOPRIVILEGES,
                 ":Permission Denied- You're not an IRC operator",
+            );
+            return false;
+        }
+        // per-oper-type usermode allowlist (services under sudo pass through)
+        if adding && !s.mode_sudo && !crate::modules::opertypes::can_use_mode(s, uid, self.ch, false) {
+            s.numeric(
+                uid,
+                ERR_NOPRIVILEGES,
+                ":Permission Denied- your oper type may not set that user mode",
             );
             return false;
         }

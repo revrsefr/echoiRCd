@@ -92,12 +92,19 @@ oper {
 #
 # A class also grants privileges — named permissions checked at sensitive points.
 # "privs=*" grants all. Standard privileges:
-#   users/auspex     see a user's real host+IP and geo (WHOIS/WHO + the connect
-#                    notice), and see +i users who share no channel with you
-#   channels/auspex  see secret/private (+s/+p) channels in LIST/WHO/WHOIS
-# Only netadmin holds all privileges by default; grant the built-in "auspex" class to
-# any other type that should see through privacy.
-# class    { name "helpdesk"; commands "CHECK"; snomasks "c"; privs "users/auspex"; }
+#   users/auspex             real host+IP and geo (WHOIS/WHO + connect notice), +i users
+#   channels/auspex          secret/private (+s/+p) channels in LIST/WHO/WHOIS
+#   servers/auspex           services (U-lined) servers hidden by hideservices
+#   channels/override        join through +k/+b/+i/+l/+z/+R/+J, CBAN and the max-chans cap
+#   users/flood              exempt from message- and join-flood limits
+#   users/ignore-commonchans PM a +c user without sharing a common channel
+# Only netadmin holds every privilege by default. Built-in "auspex" grants the auspex
+# trio; "override" grants channels/override + users/flood.
+#
+# usermodes="…"/chanmodes="…" restrict which oper-only modes the type may SET (a letter
+# list, or "*" for all). Unspecified = all, so built-ins are unrestricted. ("modes" is
+# separate: the usermodes auto-applied at oper-up.)
+# class    { name "helpdesk"; commands "CHECK"; snomasks "c"; privs "users/auspex"; usermodes "s"; }
 # opertype { name "helpdesk"; classes "helpdesk auspex"; modes "+ih"; title "Help_Desk"; level 15; }
 
 
