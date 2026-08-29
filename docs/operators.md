@@ -31,27 +31,35 @@ be `KILL`ed by a lower-level one. Levels are advisory policy layered on top of t
 An `oper` block can name a **type** with `type=<id>` — a role that decides what the
 oper may actually do, what usermodes and snomasks they get on oper-up, and how their
 `/WHOIS` reads (`is a <title>`). An oper with **no** `type` keeps full access (every
-oper command), so existing blocks are unaffected.
+oper command and privilege), so existing blocks are unaffected.
 
-A type is built from reusable **classes** — capability bundles:
+A type is built from reusable **classes** — capability bundles across three axes:
+**commands** (which oper commands run), **privileges** (named permissions checked at
+sensitive points — see below), and **modes** (which oper-only usermodes/chanmodes may
+be set):
 
 ```text
-# class = <id> commands=<A,B,…|*> [privs=<x,y|*>] [snomasks=<letters|*>]
+# class = <id> [commands=<A,B,…|*>] [privs=<x,y|*>] [usermodes=<letters|*>] \
+#              [chanmodes=<letters|*>] [snomasks=<letters|*>]
 class = ban       commands=KILL,KLINE,GLINE,ZLINE,QLINE,ELINE,RLINE,SHUN,CBAN,CHECK snomasks=kx
-class = announce  commands=WALLOPS,GLOBOPS snomasks=ag
-class = override  commands=SAJOIN,SAPART,SANICK,SAKICK,SAMODE,SATOPIC,SAQUIT,CLEARCHAN privs=override
+class = auspex    privs=users/auspex,channels/auspex,servers/auspex
+class = override  commands=SAJOIN,SAPART,SANICK,SAKICK,SAMODE,SATOPIC,SAQUIT,CLEARCHAN privs=channels/override,users/flood
 
-# opertype = <id> classes=<a,b|*> [commands=…] [modes=+iw] [snomasks=+cg] \
-#            [vhost=host.name] [title=Nice_Title] [level=N]
+# opertype = <id> classes=<a,b|*> [commands=…] [privs=…] [usermodes=…] [chanmodes=…] \
+#            [modes=+iw] [snomasks=+cg] [vhost=host.name] [title=Nice_Title] [level=N]
 opertype = netadmin classes=* modes=+iw snomasks=+* title=Network_Administrator level=100
 
 oper = alice sha256:<hex> type=netadmin
 ```
 
-`commands`, `privs`, `snomasks`, and `classes` accept `*` for "all". A type's `modes`
-and `snomasks` are set automatically at oper-up; `vhost` (if given) replaces the host;
-`title` (underscores become spaces) is the `/WHOIS` line; `level` folds into the
-[oper level](#oper-levels). Running a command the type doesn't grant is refused.
+Every list accepts `*` for "all" and a leading `-` on a token to **remove** one, so
+`commands=*,-DIE` is every command except `DIE` and `privs=*,-users/auspex` is every
+privilege but that. A type's `modes`/`snomasks` are auto-applied at oper-up — distinct
+from the `usermodes`/`chanmodes` **allowlists**, which cap which oper-only modes the
+type may *set* (unset ⇒ unrestricted). `vhost` (if given) replaces the host; `title`
+(underscores become spaces) is the `/WHOIS` line; `level` folds into the [oper
+level](#oper-levels). Running a command, setting an oper mode, or exercising a
+privilege the type doesn't grant is refused.
 
 Five types ship **built-in**, so `type=<id>` works with no `class`/`opertype` config —
 override or extend any by defining one with the same id:
@@ -60,9 +68,26 @@ override or extend any by defining one with the same id:
 |----|-------|--------|
 | `helpop` | Help Operator | +ih, oper snomask — a titled helper, no privileged commands |
 | `globop` | GlobOp | + `WALLOPS`/`GLOBOPS` + announce snomasks |
-| `admin` | Administrator | + `KILL`/x-lines/`SHUN`/`CHECK`, `SA*` override, `CHG*`/`SET*` |
+| `admin` | Administrator | + `KILL`/x-lines/`SHUN`/`CHECK`, `SA*` override (`channels/override`, `users/flood`), `CHG*`/`SET*` |
 | `servadmin` | Services Administrator | + the `SVS*` services commands |
-| `netadmin` | Network Administrator | everything, plus `CONNECT`/`SQUIT`/`DIE`/`RESTART` |
+| `netadmin` | Network Administrator | everything (`commands=*`, `privs=*`), plus `CONNECT`/`SQUIT`/`DIE`/`RESTART` |
+
+Only `netadmin` holds **privileges** by default; grant the built-in `auspex` class (or
+specific privileges) to any other type that should see through privacy.
+
+### Privileges
+
+Named permissions the daemon checks wherever it protects something beyond a plain
+command. Assign them via `privs=` on a class or type (`*` = all, `-x` removes one):
+
+| Privilege | Grants |
+|-----------|--------|
+| `users/auspex` | a user's real host+IP and geo in `/WHOIS` & `/WHO`, `+i` users you share no channel with, `+I` hidden channel lists, and the IP/geo fields of the connect notice |
+| `channels/auspex` | secret/private (`+s`/`+p`) channels and their members in `/LIST`, `/WHO`, `/WHOIS`, `/NAMES` |
+| `servers/auspex` | U-lined/services servers otherwise hidden by `hideservices` in `/MAP` & `/LINKS` |
+| `channels/override` | join through `+k`/`+b`/`+i`/`+l`/`+z`/`+R`/`+J`, a `CBAN`, and the max-channels cap |
+| `users/flood` | exemption from the message- and join-flood limits |
+| `users/ignore-commonchans` | message a `+c` user without sharing a common channel |
 
 ## Snomasks
 
@@ -70,6 +95,11 @@ Server-notice masks (`+s`) subscribe an oper to categories of the server's live
 event stream — connects, floods, link events, and so on. Set them as a
 mode parameter, e.g. `/MODE yournick +s +ck`. The stream can also be mirrored to
 a channel (`chanlog`), a file (`log_json`), or the system logger (`syslog`).
+
+The `+c` (connect) notice shows each client's nick, `+x` cloak, listener port,
+transport (WebSocket / TLS) and account; its **real IP** and **GeoIP/ASN** are shown
+only to opers holding `users/auspex` — everyone else on `+c` sees those two fields
+redacted, while the server log always keeps the full line.
 
 ## User & network management
 

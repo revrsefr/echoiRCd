@@ -34,8 +34,10 @@ operational limit exposed as a config key.
   8291), SASL, standard-replies, and `WATCH`/`MONITOR`/`SILENCE`/caller-id.
 - **Operators** — `OPER`/`KILL`/`WALLOPS`/`GLOBOPS`, the `SA*`/`CHG*`/`SET*`
   override toolbox, x-lines (`K`/`G`/`Z`/`E`/`SHUN`/`QLINE`/`CBAN`/`RLINE`)
-  persisted to disk, staff prefix (`operprefix`/`OJOIN`), oper levels, rank-gated
-  `hidelist`/`hidemode`, and a reload-safe `REHASH`.
+  persisted to disk, a **type/class privilege model** (per-type commands, named
+  privileges like `users/auspex`/`channels/override`, and usermode/chanmode
+  allowlists — each `*`/`-` tunable), staff prefix (`operprefix`/`OJOIN`), oper
+  levels, rank-gated `hidelist`/`hidemode`, and a reload-safe `REHASH`.
 - **Services & accounts** — SASL PLAIN/EXTERNAL relayed over the link, the `SVS*` /
   `ENCAP` / `METADATA` interface, account-gated modes, and optional ircd-side
   account registration (`REGISTER`/`VERIFY`).
