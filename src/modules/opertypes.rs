@@ -42,6 +42,8 @@ pub mod privs {
     pub const CHANNELS_IGNORE_NONICKS: &str = "channels/ignore-nonicks";
     /// message a +g (caller-id) user without being on their ACCEPT list
     pub const USERS_IGNORE_CALLERID: &str = "users/ignore-callerid";
+    /// reach a +D (deaf) user with your channel messages despite their deafness
+    pub const USERS_IGNORE_PRIVDEAF: &str = "users/ignore-privdeaf";
     /// `/WHOIS` a +W (showwhois) user without notifying them
     pub const USERS_SECRET_WHOIS: &str = "users/secret-whois";
     /// private-message anyone while `restrictmsg` is on
@@ -367,7 +369,7 @@ fn builtin() -> (HashMap<String, ClassDef>, HashMap<String, TypeDef>) {
     classes.insert("services".into(), cdef(&["SVSNICK", "SVSJOIN", "SVSPART", "SVSMODE", "SVSLOGIN", "SVSLOGOUT"], &[], ""));
     classes.insert("server".into(), cdef(&["CONNECT", "SQUIT", "DIE", "RESTART"], &["servers/use-disabled-commands"], "lr"));
     // auspex: see through user/channel privacy (real host+IP, geo, secret channels)
-    classes.insert("auspex".into(), cdef(&[], &["users/auspex", "channels/auspex", "servers/auspex", "users/secret-whois", "users/ignore-callerid"], ""));
+    classes.insert("auspex".into(), cdef(&[], &["users/auspex", "channels/auspex", "servers/auspex", "users/secret-whois", "users/ignore-callerid", "users/ignore-privdeaf"], ""));
 
     let mut types: HashMap<String, TypeDef> = HashMap::default();
     // The WHOIS title line is bold + colour 4 (red) by default; override per type
@@ -685,6 +687,7 @@ mod tests {
         assert!(has("override", "users/ignore-restrictmsg"));
         assert!(has("override", "servers/ignore-securelist") && has("override", "servers/ignore-blockamsg"));
         assert!(has("auspex", "users/secret-whois") && has("auspex", "users/ignore-callerid"));
+        assert!(has("auspex", "users/ignore-privdeaf"));
         assert!(has("server", "servers/use-disabled-commands"));
         // netadmin holds every class ⇒ every one of the new privileges resolves in
         assert!(resolved("netadmin").all_privs);

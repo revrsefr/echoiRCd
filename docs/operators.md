@@ -91,6 +91,7 @@ command. Assign them via `privs=` on a class or type (`*` = all, `-x` removes on
 | `users/flood` | exemption from the message- and join-flood limits |
 | `users/ignore-commonchans` | message a `+c` user without sharing a common channel |
 | `users/ignore-callerid` | message a `+g` (caller-ID) user without being on their accept list |
+| `users/ignore-privdeaf` | reach a `+D` (deaf) user with your channel messages despite their deafness |
 | `users/ignore-restrictmsg` | private-message anyone while `restrictmsg` is on |
 | `users/secret-whois` | `/WHOIS` a `+W` (showwhois) user without notifying them |
 | `servers/use-disabled-commands` | use a command turned off by `disabled_commands` |
@@ -100,8 +101,9 @@ command. Assign them via `privs=` on a class or type (`*` = all, `-x` removes on
 The built-in `override` class carries the channel/message/anti-spam bypasses
 (`channels/restricted-create`, `channels/ignore-nonicks`, `users/ignore-restrictmsg`,
 `servers/ignore-securelist`, `servers/ignore-blockamsg`), `auspex` carries the
-see-through-privacy set (the three `*/auspex` plus `users/secret-whois` and
-`users/ignore-callerid`), and `servers/use-disabled-commands` sits on the `server` class.
+see-through-privacy set (the three `*/auspex` plus `users/secret-whois`,
+`users/ignore-callerid` and `users/ignore-privdeaf`), and `servers/use-disabled-commands`
+sits on the `server` class.
 
 ## Snomasks
 

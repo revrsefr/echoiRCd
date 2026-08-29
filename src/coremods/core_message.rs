@@ -755,8 +755,12 @@ impl Command for TagMsg {
                 .get(&key)
                 .map(|c| c.members.keys().copied().collect())
                 .unwrap_or_default();
+            let reach_deaf =
+                crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::USERS_IGNORE_PRIVDEAF);
             for m in members {
-                if (m == uid && !echo) || s.users.get(&m).map(|u| u.flags.deaf).unwrap_or(false) {
+                if (m == uid && !echo)
+                    || (s.users.get(&m).map(|u| u.flags.deaf).unwrap_or(false) && !reach_deaf)
+                {
                     continue;
                 }
                 // only message-tags clients receive a TAGMSG

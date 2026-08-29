@@ -1354,6 +1354,9 @@ impl Server {
         let src_mask = self.users.get(&src).map(|su| su.prefix()).unwrap_or_default();
         let src_signore: Vec<String> =
             self.users.get(&src).map(|su| su.signore.clone()).unwrap_or_default();
+        // users/ignore-privdeaf: this sender's channel messages reach +D deaf members
+        let src_reaches_deaf =
+            crate::modules::opertypes::has_priv(self, src, crate::modules::opertypes::privs::USERS_IGNORE_PRIVDEAF);
         // one cached line per (server_time, account_tag, message_tags) combination
         let mut cache: [Option<std::sync::Arc<str>>; 8] = std::array::from_fn(|_| None);
         for m in members {
@@ -1363,7 +1366,7 @@ impl Server {
             let Some(u) = self.users.get(&m) else {
                 continue;
             };
-            if u.flags.deaf {
+            if u.flags.deaf && !src_reaches_deaf {
                 continue;
             }
             // SIGNORE: skip a member mutually server-ignored with the sender
