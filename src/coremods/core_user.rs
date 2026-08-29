@@ -511,8 +511,8 @@ impl Command for Nick {
             );
             return CmdResult::Fail;
         }
-        // +N — can't change nick while on a no-nick-change channel (opers bypass)
-        if !s.is_oper(uid) {
+        // +N — can't change nick while on a no-nick-change channel (channels/ignore-nonicks bypasses)
+        if !crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::CHANNELS_IGNORE_NONICKS) {
             let blocked = s
                 .users
                 .get(&uid)

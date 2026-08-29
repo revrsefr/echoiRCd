@@ -438,8 +438,11 @@ impl Command for Whois {
                 &format!("{nick} {idle} {signon} :seconds idle, signon time"),
             );
         }
-        // +W showwhois — tell the target that someone looked them up
-        if showwhois && !is_self {
+        // +W showwhois — tell the target that someone looked them up (users/secret-whois is silent)
+        if showwhois
+            && !is_self
+            && !crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::USERS_SECRET_WHOIS)
+        {
             let by = s.users.get(&uid).map(|u| u.prefix()).unwrap_or_default();
             let m = s.trf("{0} did a /WHOIS on you", &[by.as_str()]);
             s.send(

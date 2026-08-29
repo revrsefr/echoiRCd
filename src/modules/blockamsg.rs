@@ -50,8 +50,8 @@ impl Module for BlockAmsg {
         if params.len() < 2 {
             return ModResult::Passthru;
         }
-        // opers bypass the check entirely
-        if srv.is_oper(uid) {
+        // servers/ignore-blockamsg opers bypass the check entirely
+        if crate::modules::opertypes::has_priv(srv, uid, crate::modules::opertypes::privs::SERVERS_IGNORE_BLOCKAMSG) {
             return ModResult::Passthru;
         }
 

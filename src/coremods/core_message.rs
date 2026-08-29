@@ -153,7 +153,9 @@ fn dm_blocked(s: &Server, uid: Uid, tuid: Uid) -> bool {
     if ssl_only && !s.users.get(&uid).map(|u| u.secure).unwrap_or(false) {
         return true;
     }
-    if callerid {
+    if callerid
+        && !crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::USERS_IGNORE_CALLERID)
+    {
         let sender_nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
         if !s.is_accepted(tuid, &sender_nick) {
             return true;
@@ -566,7 +568,11 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             .get(&tuid)
             .map(|u| u.flags.callerid)
             .unwrap_or(false);
-        if target_g && uid != tuid && !s.is_accepted(tuid, &sender_nick) {
+        if target_g
+            && uid != tuid
+            && !s.is_accepted(tuid, &sender_nick)
+            && !crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::USERS_IGNORE_CALLERID)
+        {
             let (tnick, sident, shost) = {
                 let t = s.users.get(&tuid);
                 let u = s.users.get(&uid);

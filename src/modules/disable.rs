@@ -29,8 +29,8 @@ impl Module for Disable {
         cmd: &str,
         _params: &[String],
     ) -> ModResult {
-        // opers are never restricted
-        if srv.is_oper(uid) {
+        // servers/use-disabled-commands opers bypass the disabled list
+        if crate::modules::opertypes::has_priv(srv, uid, crate::modules::opertypes::privs::SERVERS_USE_DISABLED_COMMANDS) {
             return ModResult::Passthru;
         }
         // (re)build the set only when the config generation changes, not per command

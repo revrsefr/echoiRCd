@@ -86,8 +86,22 @@ command. Assign them via `privs=` on a class or type (`*` = all, `-x` removes on
 | `channels/auspex` | secret/private (`+s`/`+p`) channels and their members in `/LIST`, `/WHO`, `/WHOIS`, `/NAMES` |
 | `servers/auspex` | U-lined/services servers otherwise hidden by `hideservices` in `/MAP` & `/LINKS` |
 | `channels/override` | join through `+k`/`+b`/`+i`/`+l`/`+z`/`+R`/`+J`, a `CBAN`, and the max-channels cap |
+| `channels/restricted-create` | create a new channel while `restrictchans` is on |
+| `channels/ignore-nonicks` | change nick while on a `+N` (no-nick-change) channel |
 | `users/flood` | exemption from the message- and join-flood limits |
 | `users/ignore-commonchans` | message a `+c` user without sharing a common channel |
+| `users/ignore-callerid` | message a `+g` (caller-ID) user without being on their accept list |
+| `users/ignore-restrictmsg` | private-message anyone while `restrictmsg` is on |
+| `users/secret-whois` | `/WHOIS` a `+W` (showwhois) user without notifying them |
+| `servers/use-disabled-commands` | use a command turned off by `disabled_commands` |
+| `servers/ignore-securelist` | bypass the `securelist` LIST hold for fresh connections |
+| `servers/ignore-blockamsg` | send `/AMSG`-style multi-channel messages the `blockamsg` module blocks |
+
+The built-in `override` class carries the channel/message/anti-spam bypasses
+(`channels/restricted-create`, `channels/ignore-nonicks`, `users/ignore-restrictmsg`,
+`servers/ignore-securelist`, `servers/ignore-blockamsg`), `auspex` carries the
+see-through-privacy set (the three `*/auspex` plus `users/secret-whois` and
+`users/ignore-callerid`), and `servers/use-disabled-commands` sits on the `server` class.
 
 ## Snomasks
 

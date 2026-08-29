@@ -29,8 +29,8 @@ impl Module for RestrictMsg {
         if target.starts_with('#') {
             return ModResult::Passthru;
         }
-        // sender opers may message anyone
-        if srv.is_oper(uid) {
+        // users/ignore-restrictmsg senders may message anyone
+        if crate::modules::opertypes::has_priv(srv, uid, crate::modules::opertypes::privs::USERS_IGNORE_RESTRICTMSG) {
             return ModResult::Passthru;
         }
         let Some(tuid) = srv.find_nick(target) else {

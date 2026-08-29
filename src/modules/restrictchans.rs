@@ -9,9 +9,10 @@ use crate::server::Server;
 use crate::Uid;
 
 /// Called from `Server::join`. Returns true when creating `name` should be blocked
-/// (the caller returns without joining). Opers and joins to *existing* channels pass.
-pub fn intercept(s: &mut Server, uid: Uid, name: &str, is_oper: bool) -> bool {
-    if is_oper || !s.conf_bool("restrictchans", false) {
+/// (the caller returns without joining). Holders of `channels/restricted-create` and
+/// joins to *existing* channels pass.
+pub fn intercept(s: &mut Server, uid: Uid, name: &str, may_create: bool) -> bool {
+    if may_create || !s.conf_bool("restrictchans", false) {
         return false;
     }
     // joining a channel that already exists is always fine

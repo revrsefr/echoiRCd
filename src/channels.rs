@@ -766,8 +766,10 @@ impl Server {
         if crate::modules::denychans::intercept(self, uid, name, is_oper) {
             return;
         }
-        // restrictchans — only opers may create new channels (unless whitelisted)
-        if crate::modules::restrictchans::intercept(self, uid, name, is_oper) {
+        // restrictchans — channels/restricted-create may create new channels (unless whitelisted)
+        let may_create =
+            crate::modules::opertypes::has_priv(self, uid, crate::modules::opertypes::privs::CHANNELS_RESTRICTED_CREATE);
+        if crate::modules::restrictchans::intercept(self, uid, name, may_create) {
             return;
         }
         // channames — forbidden characters in new channel names

@@ -36,6 +36,22 @@ pub mod privs {
     pub const USERS_IGNORE_COMMONCHANS: &str = "users/ignore-commonchans";
     /// join through +k/+b/+i/+l/+z/+R/+J, CBAN and the max-channels cap
     pub const CHANNELS_OVERRIDE: &str = "channels/override";
+    /// create a new channel while `restrictchans` is on
+    pub const CHANNELS_RESTRICTED_CREATE: &str = "channels/restricted-create";
+    /// change nick while on a +N (no-nick-change) channel
+    pub const CHANNELS_IGNORE_NONICKS: &str = "channels/ignore-nonicks";
+    /// message a +g (caller-id) user without being on their ACCEPT list
+    pub const USERS_IGNORE_CALLERID: &str = "users/ignore-callerid";
+    /// `/WHOIS` a +W (showwhois) user without notifying them
+    pub const USERS_SECRET_WHOIS: &str = "users/secret-whois";
+    /// private-message anyone while `restrictmsg` is on
+    pub const USERS_IGNORE_RESTRICTMSG: &str = "users/ignore-restrictmsg";
+    /// use a command turned off by `disabled_commands`
+    pub const SERVERS_USE_DISABLED_COMMANDS: &str = "servers/use-disabled-commands";
+    /// bypass the `securelist` LIST hold for fresh connections
+    pub const SERVERS_IGNORE_SECURELIST: &str = "servers/ignore-securelist";
+    /// send `/AMSG`-style multi-channel messages the `blockamsg` module blocks
+    pub const SERVERS_IGNORE_BLOCKAMSG: &str = "servers/ignore-blockamsg";
 }
 
 /// Per-user resolved grant, stored on `User.ext` at oper-up. Present ⇒ a typed
@@ -346,12 +362,12 @@ fn builtin() -> (HashMap<String, ClassDef>, HashMap<String, TypeDef>) {
     let mut classes: HashMap<String, ClassDef> = HashMap::default();
     classes.insert("announce".into(), cdef(&["WALLOPS", "GLOBOPS"], &[], "ag"));
     classes.insert("ban".into(), cdef(&["KILL", "KLINE", "GLINE", "ZLINE", "QLINE", "ELINE", "RLINE", "SHUN", "CBAN", "CHECK", "NICKLOCK", "NICKUNLOCK"], &[], "kx"));
-    classes.insert("override".into(), cdef(&["SAJOIN", "SAPART", "SANICK", "SAKICK", "SAMODE", "SATOPIC", "SAQUIT", "CLEARCHAN"], &["channels/override", "users/flood"], "v"));
+    classes.insert("override".into(), cdef(&["SAJOIN", "SAPART", "SANICK", "SAKICK", "SAMODE", "SATOPIC", "SAQUIT", "CLEARCHAN"], &["channels/override", "users/flood", "channels/restricted-create", "channels/ignore-nonicks", "users/ignore-restrictmsg", "servers/ignore-securelist", "servers/ignore-blockamsg"], "v"));
     classes.insert("host".into(), cdef(&["CHGHOST", "CHGIDENT", "CHGNAME", "SETHOST", "SETIDENT", "SETIDLE", "SWHOIS"], &[], ""));
     classes.insert("services".into(), cdef(&["SVSNICK", "SVSJOIN", "SVSPART", "SVSMODE", "SVSLOGIN", "SVSLOGOUT"], &[], ""));
-    classes.insert("server".into(), cdef(&["CONNECT", "SQUIT", "DIE", "RESTART"], &[], "lr"));
+    classes.insert("server".into(), cdef(&["CONNECT", "SQUIT", "DIE", "RESTART"], &["servers/use-disabled-commands"], "lr"));
     // auspex: see through user/channel privacy (real host+IP, geo, secret channels)
-    classes.insert("auspex".into(), cdef(&[], &["users/auspex", "channels/auspex", "servers/auspex"], ""));
+    classes.insert("auspex".into(), cdef(&[], &["users/auspex", "channels/auspex", "servers/auspex", "users/secret-whois", "users/ignore-callerid"], ""));
 
     let mut types: HashMap<String, TypeDef> = HashMap::default();
     // The WHOIS title line is bold + colour 4 (red) by default; override per type
@@ -659,6 +675,19 @@ mod tests {
         apply_type_kv(&mut td2, "commands", "KILL,-GLINE");
         let r2 = resolve(&td2, &no_classes);
         assert!(!r2.all_commands && r2.commands.contains("KILL") && r2.deny_commands.contains("GLINE"));
+    }
+
+    #[test]
+    fn builtin_classes_grant_the_new_privileges() {
+        let (classes, _) = builtin();
+        let has = |c: &str, p: &str| classes.get(c).unwrap().privs.contains(&p.to_string());
+        assert!(has("override", "channels/restricted-create") && has("override", "channels/ignore-nonicks"));
+        assert!(has("override", "users/ignore-restrictmsg"));
+        assert!(has("override", "servers/ignore-securelist") && has("override", "servers/ignore-blockamsg"));
+        assert!(has("auspex", "users/secret-whois") && has("auspex", "users/ignore-callerid"));
+        assert!(has("server", "servers/use-disabled-commands"));
+        // netadmin holds every class ⇒ every one of the new privileges resolves in
+        assert!(resolved("netadmin").all_privs);
     }
 
     #[test]
