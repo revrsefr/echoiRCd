@@ -1250,11 +1250,11 @@ impl Server {
             self.numeric(uid, RPL_ENDOFNAMES, &format!("{key} :End of /NAMES list"));
             return;
         };
-        // +s (secret) / +p (private): members are hidden from non-members. Reply as
-        // if the channel were empty (opers still see it).
+        // +s (secret) / +p (private): members are hidden from non-members. Reply as if
+        // the channel were empty (channels/auspex still sees it, like WHO/WHOIS/LIST).
         if (ch.modes.secret || ch.modes.private)
             && !ch.members.contains_key(&uid)
-            && !self.is_oper(uid)
+            && !crate::modules::opertypes::has_priv(self, uid, crate::modules::opertypes::privs::CHANNELS_AUSPEX)
         {
             self.numeric(
                 uid,
