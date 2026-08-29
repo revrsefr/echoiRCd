@@ -363,6 +363,19 @@ fn apply_user_modes(s: &mut Server, uid: Uid, target: &str, params: &[String]) -
             } else {
                 None
             };
+            // +s has its own dispatch, so apply the per-oper-type usermode allowlist here
+            // too (services under sudo pass through; non-opers are rejected by apply_snomask)
+            if adding
+                && !s.mode_sudo
+                && !crate::modules::opertypes::can_use_mode(s, uid, 's', false)
+            {
+                s.numeric(
+                    uid,
+                    ERR_NOPRIVILEGES,
+                    ":Permission Denied- your oper type may not set that user mode",
+                );
+                continue;
+            }
             if apply_snomask(s, uid, adding, param.as_deref()) {
                 emit(&mut applied, &mut last, sign, c);
             }
