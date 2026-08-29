@@ -14,7 +14,7 @@ impl Module for Snoop {
     fn on_user_connect(&mut self, srv: &mut Server, uid: Uid) {
         // `conf_bool`/`snotice_c` are `&self`, so we can hold the `&User` borrow and
         // reference its fields directly instead of cloning them out.
-        let (nick, ident, host, port, sni, account, secure, tls_info, websocket, ip) = {
+        let (nick, ident, host, cloak, vhost, port, sni, account, secure, tls_info, websocket, ip) = {
             let Some(u) = srv.users.get(&uid) else {
                 return;
             };
@@ -22,6 +22,8 @@ impl Module for Snoop {
                 u.nick.clone(),
                 u.ident.clone(),
                 u.host.clone(),
+                u.cloak.clone(),
+                u.vhost.clone(),
                 u.port,
                 u.sni.clone(),
                 u.account.clone(),
@@ -31,14 +33,25 @@ impl Module for Snoop {
                 u.addr.ip(),
             )
         };
+        // The host other users see: vhost > +x cloak > real host. snoop is registered
+        // ahead of the cloak module, so u.cloak is still empty here — derive it now
+        // (compute_cloak is deterministic) so the notice shows the +x mask, not the raw
+        // host. Falls back to the real host when cloaking is disabled.
+        let shown_host = if let Some(v) = vhost.filter(|v| !v.is_empty()) {
+            v
+        } else if !cloak.is_empty() {
+            cloak
+        } else {
+            crate::modules::cloak::compute_cloak(srv, uid).unwrap_or(host)
+        };
         if srv.conf_bool("snoop_stderr", false) {
-            eprintln!("[snoop] connect {nick} ({ident}@{host})");
+            eprintln!("[snoop] connect {nick} ({ident}@{shown_host})");
         }
         // port is always shown; sni/account only when present. Prose + field labels come
         // from the locale catalog so a translated build reads naturally.
         let mut msg = srv.trf(
             "Client connecting: {0} ({1}@{2})",
-            &[nick.as_str(), ident.as_str(), host.as_str()],
+            &[nick.as_str(), ident.as_str(), shown_host.as_str()],
         );
         // the connecting address, tagged by family (an ipv4-mapped v6 shows its ipv4 form)
         let (fam, ip_s) = match ip {
