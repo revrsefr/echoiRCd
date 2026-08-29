@@ -89,8 +89,16 @@ oper {
 # "is a <title>") built from reusable capability classes; five ship built in:
 # helpop, globop, admin, servadmin, netadmin. Running a command your type doesn't
 # grant is refused; its modes/snomasks/vhost are applied on oper-up.
-# class    { name "helpdesk"; commands "CHECK"; snomasks "c"; }   # privs "..."
-# opertype { name "helpdesk"; classes "helpdesk"; modes "+ih"; title "Help_Desk"; level 15; }
+#
+# A class also grants privileges — named permissions checked at sensitive points.
+# "privs=*" grants all. Standard privileges:
+#   users/auspex     see a user's real host+IP and geo (WHOIS/WHO + the connect
+#                    notice), and see +i users who share no channel with you
+#   channels/auspex  see secret/private (+s/+p) channels in LIST/WHO/WHOIS
+# Only netadmin holds all privileges by default; grant the built-in "auspex" class to
+# any other type that should see through privacy.
+# class    { name "helpdesk"; commands "CHECK"; snomasks "c"; privs "users/auspex"; }
+# opertype { name "helpdesk"; classes "helpdesk auspex"; modes "+ih"; title "Help_Desk"; level 15; }
 
 
 # ═══ server-to-server linking ════════════════════════════════════════════════
@@ -456,11 +464,6 @@ logging {
     # log_json "/var/log/echoircd/events.jsonl";
     # --- snoop_stderr: also echo the server-notice stream to stderr ---
     # snoop_stderr yes;
-    # --- snoop_sensitive_opertype: which oper type(s) may see the sensitive fields
-    #     of the "Client connecting" notice (the raw IP and the geo/ASN). Other opers
-    #     get a "🔒 restricted" redaction; the server log always keeps the full line.
-    #     Repeatable; default netadmin. Use "*" to let every +c oper see them. ---
-    # snoop_sensitive_opertype netadmin;
     # --- metrics: OpenMetrics/Prometheus scrape endpoint (plaintext HTTP GET);
     #     bind privately or behind a proxy. ---
     # metrics_bind "127.0.0.1:9109";

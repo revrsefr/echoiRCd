@@ -47,12 +47,11 @@ impl Module for Snoop {
         if srv.conf_bool("snoop_stderr", false) {
             eprintln!("[snoop] connect {nick} ({ident}@{shown_host})");
         }
-        // The notice is rendered per-viewer. The sensitive fields — the raw IP and the
-        // geo/ASN — are shown only to opers whose type may see them (default netadmin,
-        // config `snoop_sensitive_opertype`; `*` = everyone); lower opers get a redaction.
-        // The rest (cloak hostmask, port, transport, security, sni, account) is identical
-        // for all, and the server log always keeps the full detail. Prose + field labels
-        // come from the locale catalog so a translated build reads naturally.
+        // The notice is rendered per-viewer: the sensitive fields — the raw IP and the
+        // geo/ASN — go only to opers holding the users/auspex privilege; lower opers get a
+        // redaction. The rest (cloak hostmask, port, transport, security, sni, account) is
+        // identical for all, and the server log always keeps the full detail. Prose + field
+        // labels come from the locale catalog so a translated build reads naturally.
         let (fam, ip_s) = match ip {
             std::net::IpAddr::V4(v4) => ("ipv4", v4.to_string()),
             std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
@@ -98,20 +97,9 @@ impl Module for Snoop {
         }
         let full = format!("{head}{ip_full}{port_seg}{trans}{geo_full}{tail}");
         let redacted = format!("{head}{ip_red}{port_seg}{trans}{geo_red}{tail}");
-        // who may see the sensitive fields: the configured oper types, default netadmin.
-        let configured = srv.conf_all("snoop_sensitive_opertype");
-        let allow: Vec<String> = if configured.is_empty() {
-            vec!["netadmin".to_string()]
-        } else {
-            configured.to_vec()
-        };
-        if allow.iter().any(|a| a == "*") {
-            srv.snotice_c('c', &full); // redaction disabled — every +c oper sees the full line
-        } else {
-            srv.snotice_c_gated('c', &full, &redacted, |u| {
-                crate::modules::opertypes::user_type_allowed(u, &allow)
-            });
-        }
+        srv.snotice_c_gated('c', &full, &redacted, |u| {
+            crate::modules::opertypes::user_has_priv(u, "users/auspex")
+        });
     }
     fn on_join(&mut self, srv: &mut Server, uid: Uid, chan: &str) {
         if srv.conf_bool("snoop_stderr", false) {

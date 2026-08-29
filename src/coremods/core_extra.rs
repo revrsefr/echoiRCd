@@ -99,11 +99,12 @@ impl Command for List {
     }
     fn handle(&self, s: &mut Server, uid: Uid, _params: &[String]) -> CmdResult {
         s.numeric(uid, RPL_LISTSTART, "Channel :Users Name");
+        let auspex = crate::modules::opertypes::has_priv(s, uid, "channels/auspex");
         let keys: Vec<String> = s.channels.keys().cloned().collect();
         for key in keys {
             let ch = &s.channels[&key];
-            // hide secret / private channels from non-members
-            if (ch.modes.secret || ch.modes.private) && !ch.members.contains_key(&uid) {
+            // hide secret / private channels from non-members (channels/auspex sees them)
+            if (ch.modes.secret || ch.modes.private) && !ch.members.contains_key(&uid) && !auspex {
                 continue;
             }
             let count = ch.members.len() + ch.rmembers.len();

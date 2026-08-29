@@ -176,6 +176,9 @@ impl Command for Whois {
             return CmdResult::Fail;
         };
         let asker_oper = s.is_oper(uid);
+        // auspex: see through user privacy (real host+IP, geo) / channel privacy (secret chans)
+        let asker_auspex_u = crate::modules::opertypes::has_priv(s, uid, "users/auspex");
+        let asker_auspex_c = crate::modules::opertypes::has_priv(s, uid, "channels/auspex");
         let is_self = tuid == uid;
         // hidewhois: hide sensitive lines from ordinary users (opers/self exempt per config)
         let hide = crate::modules::hidewhois::hide(s, uid, tuid, asker_oper);
@@ -254,7 +257,7 @@ impl Command for Whois {
                 // a +s/+p channel is shown only to the target itself, an oper, or a
                 // fellow member — never leaked to an outside asker.
                 is_self
-                    || asker_oper
+                    || asker_auspex_c
                     || (!c.modes.secret && !c.modes.private)
                     || c.members.contains_key(&uid)
             })
@@ -356,13 +359,15 @@ impl Command for Whois {
             if let Some(line) = crate::modules::whoisport::line(s, tuid) {
                 s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));
             }
-            // geoip: the country the user connects from — opers only
+        }
+        // geoip: where the user connects from — needs users/auspex (like the real host/ip)
+        if asker_auspex_u {
             if let Some(line) = crate::modules::geoip::whois_line(s, tuid) {
                 s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));
             }
         }
-        // opers can see through the cloak to the real host/ip
-        if asker_oper && disp != realhost {
+        // users/auspex: see through the cloak to the real host/ip
+        if asker_auspex_u && disp != realhost {
             s.numeric(
                 uid,
                 RPL_WHOISHOST,
@@ -466,6 +471,10 @@ impl Command for Who {
                 (fields.to_string(), qtype.to_string())
             });
         let asker_oper = s.is_oper(uid);
+        // auspex: reveal secret/private channel members (channels/auspex) and +i users
+        // who share no channel with the asker (users/auspex)
+        let asker_auspex_u = crate::modules::opertypes::has_priv(s, uid, "users/auspex");
+        let asker_auspex_c = crate::modules::opertypes::has_priv(s, uid, "channels/auspex");
         let multi = s
             .users
             .get(&uid)
@@ -480,7 +489,7 @@ impl Command for Who {
                 Some(ch)
                     if (ch.modes.secret || ch.modes.private)
                         && !ch.members.contains_key(&uid)
-                        && !asker_oper =>
+                        && !asker_auspex_c =>
                 {
                     Vec::new()
                 }
@@ -517,7 +526,7 @@ impl Command for Who {
             // with them (self and opers always see them).
             let hidden = s.users.get(&tuid).map(|u| u.flags.invisible).unwrap_or(false)
                 && tuid != uid
-                && !asker_oper
+                && !asker_auspex_u
                 && !s
                     .channels
                     .values()

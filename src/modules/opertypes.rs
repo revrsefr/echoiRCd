@@ -22,7 +22,6 @@ use crate::Uid;
 /// Per-user resolved grant, stored on `User.ext` at oper-up. Present ⇒ a typed
 /// oper; absent ⇒ a legacy oper with full access. Read by WHOIS for the title.
 pub struct OperType {
-    pub type_id: String, // the resolved type id (e.g. "netadmin"), lower-cased
     pub title: String,
     pub color: Option<u8>, // mIRC colour for the WHOIS title line (None = plain)
     pub all_commands: bool,
@@ -95,13 +94,22 @@ pub fn whois_line(s: &Server, uid: Uid) -> Option<String> {
     })
 }
 
-/// Whether `u` may see operator-only sensitive fields, given the allowed type ids
-/// (case-insensitive). Untyped opers — legacy `oper` blocks with no `type=`, which
-/// carry unrestricted access — are always allowed. Used by the connect-notice redaction.
-pub fn user_type_allowed(u: &crate::users::User, allowed: &[String]) -> bool {
+/// Whether operator `uid` holds privilege `name` (e.g. `users/auspex`).
+/// A typed oper holds it if its type has `privs=*` or lists the privilege; an untyped
+/// legacy oper (an `oper` block with no `type=`) holds every privilege; a non-oper holds
+/// none. This is the check every privilege gate calls.
+pub fn has_priv(s: &Server, uid: Uid, name: &str) -> bool {
+    s.users.get(&uid).is_some_and(|u| user_has_priv(u, name))
+}
+
+/// [`has_priv`] against an already-borrowed `&User`, for use inside a user iteration.
+pub fn user_has_priv(u: &crate::users::User, name: &str) -> bool {
+    if !u.flags.oper {
+        return false;
+    }
     match u.ext.get::<OperType>() {
-        None => true,
-        Some(t) => allowed.iter().any(|a| a.eq_ignore_ascii_case(&t.type_id)),
+        None => true, // legacy oper (no type) — unrestricted
+        Some(t) => t.all_privs || t.privs.contains(name),
     }
 }
 
@@ -133,7 +141,6 @@ pub fn apply(s: &mut Server, uid: Uid, type_id: Option<&str>) {
     }
     if let Some(u) = s.users.get_mut(&uid) {
         u.ext.set(OperType {
-            type_id: id.clone(),
             title: r.title.clone(),
             color: r.color,
             all_commands: r.all_commands,
@@ -244,6 +251,8 @@ fn builtin() -> (HashMap<String, ClassDef>, HashMap<String, TypeDef>) {
     classes.insert("host".into(), cdef(&["CHGHOST", "CHGIDENT", "CHGNAME", "SETHOST", "SETIDENT", "SETIDLE", "SWHOIS"], &[], ""));
     classes.insert("services".into(), cdef(&["SVSNICK", "SVSJOIN", "SVSPART", "SVSMODE", "SVSLOGIN", "SVSLOGOUT"], &[], ""));
     classes.insert("server".into(), cdef(&["CONNECT", "SQUIT", "DIE", "RESTART"], &[], "lr"));
+    // auspex: see through user/channel privacy (real host+IP, geo, secret channels)
+    classes.insert("auspex".into(), cdef(&[], &["users/auspex", "channels/auspex"], ""));
 
     let mut types: HashMap<String, TypeDef> = HashMap::default();
     // The WHOIS title line is bold + colour 4 (red) by default; override per type
@@ -461,6 +470,32 @@ mod tests {
         let netadmin = resolved("netadmin");
         assert_eq!(netadmin.title, "Network Administrator");
         assert!(netadmin.all_commands, "netadmin gets everything");
+    }
+
+    #[test]
+    fn only_all_privs_types_hold_auspex_by_default() {
+        // the resolved priv set is what user_has_priv checks: all_privs || privs.contains.
+        let has = |r: &Resolved, p: &str| r.all_privs || r.privs.contains(p);
+
+        // netadmin holds every class ⇒ every privilege, incl. the auspex pair
+        let netadmin = resolved("netadmin");
+        assert!(netadmin.all_privs, "netadmin holds every privilege");
+        assert!(has(&netadmin, "users/auspex") && has(&netadmin, "channels/auspex"));
+
+        // no lower built-in type sees through privacy until granted the auspex class
+        for id in ["helpop", "globop", "admin", "servadmin"] {
+            let r = resolved(id);
+            assert!(!has(&r, "users/auspex"), "{id} must not hold users/auspex by default");
+            assert!(!has(&r, "channels/auspex"), "{id} must not hold channels/auspex by default");
+        }
+
+        // the auspex class exists so an admin can opt a type in
+        let (classes, _) = builtin();
+        let aux = classes.get("auspex").expect("auspex class");
+        assert!(
+            aux.privs.contains(&"users/auspex".to_string())
+                && aux.privs.contains(&"channels/auspex".to_string())
+        );
     }
 
     #[test]
