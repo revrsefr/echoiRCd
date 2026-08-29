@@ -1130,6 +1130,38 @@ impl Server {
         crate::modules::log_json::tee(self, msg);
     }
 
+    /// Like [`Self::snotice_c`], but redacted per viewer: each `+c` oper for whom
+    /// `allow(&user)` is false receives `redacted` instead of `full`. The server log and
+    /// the chan/syslog/json tees always record the full line, so nothing is lost for audit.
+    pub fn snotice_c_gated(
+        &self,
+        cat: char,
+        full: &str,
+        redacted: &str,
+        allow: impl Fn(&crate::users::User) -> bool,
+    ) {
+        self.log_push(full);
+        let recips: Vec<(Uid, bool)> = self
+            .users
+            .iter()
+            .filter(|(_, u)| u.flags.oper && u.flags.snomask_cats.contains(cat))
+            .map(|(&uid, u)| (uid, allow(u)))
+            .collect();
+        let uids: Vec<Uid> = recips.iter().map(|(u, _)| *u).collect();
+        let jfull = self.json_log_value(full, &uids);
+        let jred = self.json_log_value(redacted, &uids);
+        for (o, revealed) in recips {
+            if revealed {
+                self.deliver_server_notice(o, full, &jfull);
+            } else {
+                self.deliver_server_notice(o, redacted, &jred);
+            }
+        }
+        crate::modules::chanlog::tee(self, cat, full);
+        crate::modules::syslog::tee(self, full);
+        crate::modules::log_json::tee(self, full);
+    }
+
     /// Broadcast a `*** msg` server NOTICE to *every* registered local user — for
     /// server-wide announcements everyone should see (e.g. a config reload). Goes
     /// through the same tagged path as `snotice`, so cap-holders get the server-time

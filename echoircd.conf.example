@@ -456,6 +456,11 @@ logging {
     # log_json "/var/log/echoircd/events.jsonl";
     # --- snoop_stderr: also echo the server-notice stream to stderr ---
     # snoop_stderr yes;
+    # --- snoop_sensitive_opertype: which oper type(s) may see the sensitive fields
+    #     of the "Client connecting" notice (the raw IP and the geo/ASN). Other opers
+    #     get a "🔒 restricted" redaction; the server log always keeps the full line.
+    #     Repeatable; default netadmin. Use "*" to let every +c oper see them. ---
+    # snoop_sensitive_opertype netadmin;
     # --- metrics: OpenMetrics/Prometheus scrape endpoint (plaintext HTTP GET);
     #     bind privately or behind a proxy. ---
     # metrics_bind "127.0.0.1:9109";

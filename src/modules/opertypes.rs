@@ -22,6 +22,7 @@ use crate::Uid;
 /// Per-user resolved grant, stored on `User.ext` at oper-up. Present ⇒ a typed
 /// oper; absent ⇒ a legacy oper with full access. Read by WHOIS for the title.
 pub struct OperType {
+    pub type_id: String, // the resolved type id (e.g. "netadmin"), lower-cased
     pub title: String,
     pub color: Option<u8>, // mIRC colour for the WHOIS title line (None = plain)
     pub all_commands: bool,
@@ -94,6 +95,16 @@ pub fn whois_line(s: &Server, uid: Uid) -> Option<String> {
     })
 }
 
+/// Whether `u` may see operator-only sensitive fields, given the allowed type ids
+/// (case-insensitive). Untyped opers — legacy `oper` blocks with no `type=`, which
+/// carry unrestricted access — are always allowed. Used by the connect-notice redaction.
+pub fn user_type_allowed(u: &crate::users::User, allowed: &[String]) -> bool {
+    match u.ext.get::<OperType>() {
+        None => true,
+        Some(t) => allowed.iter().any(|a| a.eq_ignore_ascii_case(&t.type_id)),
+    }
+}
+
 /// Apply the oper's type at oper-up: auto usermodes / snomasks / vhost / level, then
 /// store the grant + title. A missing type (or an unknown id) leaves the oper with
 /// full access, so `oper` blocks without `type=` keep working.
@@ -122,6 +133,7 @@ pub fn apply(s: &mut Server, uid: Uid, type_id: Option<&str>) {
     }
     if let Some(u) = s.users.get_mut(&uid) {
         u.ext.set(OperType {
+            type_id: id.clone(),
             title: r.title.clone(),
             color: r.color,
             all_commands: r.all_commands,

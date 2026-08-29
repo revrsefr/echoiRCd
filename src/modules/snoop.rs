@@ -47,13 +47,12 @@ impl Module for Snoop {
         if srv.conf_bool("snoop_stderr", false) {
             eprintln!("[snoop] connect {nick} ({ident}@{shown_host})");
         }
-        // port is always shown; sni/account only when present. Prose + field labels come
-        // from the locale catalog so a translated build reads naturally.
-        let mut msg = srv.trf(
-            "Client connecting: {0} ({1}@{2})",
-            &[nick.as_str(), ident.as_str(), shown_host.as_str()],
-        );
-        // the connecting address, tagged by family (an ipv4-mapped v6 shows its ipv4 form)
+        // The notice is rendered per-viewer. The sensitive fields — the raw IP and the
+        // geo/ASN — are shown only to opers whose type may see them (default netadmin,
+        // config `snoop_sensitive_opertype`; `*` = everyone); lower opers get a redaction.
+        // The rest (cloak hostmask, port, transport, security, sni, account) is identical
+        // for all, and the server log always keeps the full detail. Prose + field labels
+        // come from the locale catalog so a translated build reads naturally.
         let (fam, ip_s) = match ip {
             std::net::IpAddr::V4(v4) => ("ipv4", v4.to_string()),
             std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
@@ -61,31 +60,58 @@ impl Module for Snoop {
                 None => ("ipv6", v6.to_string()),
             },
         };
-        msg.push_str(&srv.trf(", {0}:{1}", &[fam, ip_s.as_str()]));
-        let port_s = port.to_string();
-        msg.push_str(&srv.trf(", port: {0}", &[port_s.as_str()]));
-        // transport + security of this connection (WebSocket clients arrive on the wss
-        // listener via nginx/Orbit; TLS clients get the negotiated version/cipher).
+        let redacted_val = srv.trf("🔒 restricted", &[]);
+        let head = srv.trf(
+            "Client connecting: {0} ({1}@{2})",
+            &[nick.as_str(), ident.as_str(), shown_host.as_str()],
+        );
+        // the connecting address, tagged by family (an ipv4-mapped v6 shows its ipv4 form)
+        let ip_full = srv.trf(", {0}:{1}", &[fam, ip_s.as_str()]);
+        let ip_red = srv.trf(", {0}:{1}", &[fam, redacted_val.as_str()]);
+        let port_seg = srv.trf(", port: {0}", &[port.to_string().as_str()]);
+        // transport + security (WebSocket clients arrive on the wss listener via
+        // nginx/Orbit; TLS clients get the negotiated version/cipher).
+        let mut trans = String::new();
         if websocket {
-            msg.push_str(&srv.trf(", websocket", &[]));
+            trans.push_str(&srv.trf(", websocket", &[]));
         }
         if secure {
             match &tls_info {
-                Some(info) => msg.push_str(&srv.trf(", tls: {0}", &[info.as_str()])),
-                None => msg.push_str(&srv.trf(", secure", &[])),
+                Some(info) => trans.push_str(&srv.trf(", tls: {0}", &[info.as_str()])),
+                None => trans.push_str(&srv.trf(", secure", &[])),
             }
         }
-        // where the client is connecting from: GeoIP country/city (+ ASN if that db is loaded)
-        if let Some(geo) = crate::modules::geoip::describe(srv, ip) {
-            msg.push_str(&srv.trf(", geo: {0}", &[geo.as_str()]));
-        }
+        // geo: GeoIP country/city (+ ASN when that db is loaded) — sensitive like the IP
+        let (geo_full, geo_red) = match crate::modules::geoip::describe(srv, ip) {
+            Some(g) => (
+                srv.trf(", geo: {0}", &[g.as_str()]),
+                srv.trf(", geo: {0}", &[redacted_val.as_str()]),
+            ),
+            None => (String::new(), String::new()),
+        };
+        let mut tail = String::new();
         if let Some(sni) = &sni {
-            msg.push_str(&srv.trf(", sni: {0}", &[sni.as_str()]));
+            tail.push_str(&srv.trf(", sni: {0}", &[sni.as_str()]));
         }
         if let Some(acct) = &account {
-            msg.push_str(&srv.trf(", account: {0}", &[acct.as_str()]));
+            tail.push_str(&srv.trf(", account: {0}", &[acct.as_str()]));
         }
-        srv.snotice_c('c', &msg);
+        let full = format!("{head}{ip_full}{port_seg}{trans}{geo_full}{tail}");
+        let redacted = format!("{head}{ip_red}{port_seg}{trans}{geo_red}{tail}");
+        // who may see the sensitive fields: the configured oper types, default netadmin.
+        let configured = srv.conf_all("snoop_sensitive_opertype");
+        let allow: Vec<String> = if configured.is_empty() {
+            vec!["netadmin".to_string()]
+        } else {
+            configured.to_vec()
+        };
+        if allow.iter().any(|a| a == "*") {
+            srv.snotice_c('c', &full); // redaction disabled — every +c oper sees the full line
+        } else {
+            srv.snotice_c_gated('c', &full, &redacted, |u| {
+                crate::modules::opertypes::user_type_allowed(u, &allow)
+            });
+        }
     }
     fn on_join(&mut self, srv: &mut Server, uid: Uid, chan: &str) {
         if srv.conf_bool("snoop_stderr", false) {
