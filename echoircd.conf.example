@@ -91,7 +91,9 @@ oper {
 # grant is refused; its modes/snomasks/vhost are applied on oper-up.
 #
 # A class also grants privileges — named permissions checked at sensitive points.
-# "privs=*" grants all. Standard privileges:
+# "*" grants all; a "-token" removes one, so "commands=*,-DIE" is everything but DIE and
+# "privs=*,-users/auspex" is every privilege but that (works for commands and privs).
+# Standard privileges:
 #   users/auspex             real host+IP and geo (WHOIS/WHO + connect notice), +i users
 #   channels/auspex          secret/private (+s/+p) channels in LIST/WHO/WHOIS
 #   servers/auspex           services (U-lined) servers hidden by hideservices

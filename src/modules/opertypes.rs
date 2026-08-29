@@ -47,6 +47,8 @@ pub struct OperType {
     pub commands: HashSet<String>,
     pub all_privs: bool,
     pub privs: HashSet<String>,
+    pub deny_commands: HashSet<String>, // `-CMD` removals even when all_commands
+    pub deny_privs: HashSet<String>,    // `-priv` removals even when all_privs
     pub usermodes: ModeAllow, // oper-only user modes this type may set
     pub chanmodes: ModeAllow, // oper-only channel modes this type may set
 }
@@ -79,7 +81,10 @@ impl Module for OperTypes {
         let up = cmd.to_ascii_uppercase();
         let (allowed, title) = match srv.users.get(&uid).and_then(|u| u.ext.get::<OperType>()) {
             None => (true, String::new()), // legacy full-access oper (no type)
-            Some(t) => (t.all_commands || t.commands.contains(&up), t.title.clone()),
+            Some(t) => (
+                (t.all_commands || t.commands.contains(&up)) && !t.deny_commands.contains(&up),
+                t.title.clone(),
+            ),
         };
         if allowed {
             return ModResult::Passthru;
@@ -130,7 +135,7 @@ pub fn user_has_priv(u: &crate::users::User, name: &str) -> bool {
     }
     match u.ext.get::<OperType>() {
         None => true, // legacy oper (no type) — unrestricted
-        Some(t) => t.all_privs || t.privs.contains(name),
+        Some(t) => (t.all_privs || t.privs.contains(name)) && !t.deny_privs.contains(name),
     }
 }
 
@@ -225,6 +230,8 @@ pub fn apply(s: &mut Server, uid: Uid, type_id: Option<&str>) {
             commands: r.commands.clone(),
             all_privs: r.all_privs,
             privs: r.privs.clone(),
+            deny_commands: r.deny_commands.clone(),
+            deny_privs: r.deny_privs.clone(),
             usermodes: r.usermodes.clone(),
             chanmodes: r.chanmodes.clone(),
         });
@@ -249,6 +256,8 @@ struct Resolved {
     commands: HashSet<String>,
     all_privs: bool,
     privs: HashSet<String>,
+    deny_commands: HashSet<String>,
+    deny_privs: HashSet<String>,
     modes: String,
     snomasks: Option<String>, // Some(letters) auto-set; None = keep the oper-up default
     all_snomasks: bool,
@@ -279,6 +288,8 @@ struct ClassDef {
     commands: Vec<String>,
     all_privs: bool,
     privs: Vec<String>,
+    deny_commands: Vec<String>,
+    deny_privs: Vec<String>,
     all_snomasks: bool,
     snomasks: String,
     usermodes: Option<ModeAllow>,
@@ -294,6 +305,8 @@ struct TypeDef {
     commands: Vec<String>,
     all_privs: bool,
     privs: Vec<String>,
+    deny_commands: Vec<String>,
+    deny_privs: Vec<String>,
     modes: String,
     all_snomasks: bool,
     snomasks: String,
@@ -383,21 +396,33 @@ fn build_types(s: &Server) -> HashMap<String, Resolved> {
     types.iter().map(|(id, td)| (id.clone(), resolve(td, &classes))).collect()
 }
 
+/// Fold a comma list of command/priv tokens: `*` sets `all`, `-X` denies X, a bare
+/// token allows X. `norm` normalises case per axis (upper for commands, lower for privs).
+fn fold_tokens(
+    v: &str,
+    all: &mut bool,
+    allow: &mut Vec<String>,
+    deny: &mut Vec<String>,
+    norm: fn(&str) -> String,
+) {
+    for tok in v.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+        if tok == "*" {
+            *all = true;
+        } else if let Some(rest) = tok.strip_prefix('-').filter(|r| !r.is_empty()) {
+            deny.push(norm(rest));
+        } else {
+            allow.push(norm(tok));
+        }
+    }
+}
+
 fn apply_class_kv(cd: &mut ClassDef, k: &str, v: &str) {
     match k {
         "commands" | "cmds" => {
-            if v == "*" {
-                cd.all_commands = true;
-            } else {
-                cd.commands.extend(v.split(',').filter(|x| !x.is_empty()).map(|x| x.to_ascii_uppercase()));
-            }
+            fold_tokens(v, &mut cd.all_commands, &mut cd.commands, &mut cd.deny_commands, str::to_ascii_uppercase)
         }
         "privs" => {
-            if v == "*" {
-                cd.all_privs = true;
-            } else {
-                cd.privs.extend(v.split(',').filter(|x| !x.is_empty()).map(|x| x.to_ascii_lowercase()));
-            }
+            fold_tokens(v, &mut cd.all_privs, &mut cd.privs, &mut cd.deny_privs, str::to_ascii_lowercase)
         }
         "snomasks" | "snomask" => {
             if v.contains('*') {
@@ -422,18 +447,10 @@ fn apply_type_kv(td: &mut TypeDef, k: &str, v: &str) {
             }
         }
         "commands" | "cmds" => {
-            if v == "*" {
-                td.all_commands = true;
-            } else {
-                td.commands.extend(v.split(',').filter(|x| !x.is_empty()).map(|x| x.to_ascii_uppercase()));
-            }
+            fold_tokens(v, &mut td.all_commands, &mut td.commands, &mut td.deny_commands, str::to_ascii_uppercase)
         }
         "privs" => {
-            if v == "*" {
-                td.all_privs = true;
-            } else {
-                td.privs.extend(v.split(',').filter(|x| !x.is_empty()).map(|x| x.to_ascii_lowercase()));
-            }
+            fold_tokens(v, &mut td.all_privs, &mut td.privs, &mut td.deny_privs, str::to_ascii_lowercase)
         }
         "modes" => td.modes = v.to_string(),
         "usermodes" => td.usermodes = Some(parse_modeallow(v)),
@@ -479,6 +496,8 @@ fn resolve(td: &TypeDef, classes: &HashMap<String, ClassDef>) -> Resolved {
     let mut commands: HashSet<String> = td.commands.iter().cloned().collect();
     let mut all_privs = td.all_privs || td.all_classes;
     let mut privs: HashSet<String> = td.privs.iter().cloned().collect();
+    let mut deny_commands: HashSet<String> = td.deny_commands.iter().cloned().collect();
+    let mut deny_privs: HashSet<String> = td.deny_privs.iter().cloned().collect();
     let mut all_sno = td.all_snomasks;
     let mut sno = td.snomasks.clone();
     // mode allowlists: an all-classes type may set every oper mode; otherwise merge the
@@ -501,6 +520,8 @@ fn resolve(td: &TypeDef, classes: &HashMap<String, ClassDef>) -> Resolved {
             commands.extend(cd.commands.iter().cloned());
             all_privs |= cd.all_privs;
             privs.extend(cd.privs.iter().cloned());
+            deny_commands.extend(cd.deny_commands.iter().cloned());
+            deny_privs.extend(cd.deny_privs.iter().cloned());
             all_sno |= cd.all_snomasks;
             sno.push_str(&cd.snomasks);
             merge_modeallow(&mut usermodes, &cd.usermodes);
@@ -527,6 +548,8 @@ fn resolve(td: &TypeDef, classes: &HashMap<String, ClassDef>) -> Resolved {
         commands,
         all_privs,
         privs,
+        deny_commands,
+        deny_privs,
         modes: td.modes.clone(),
         snomasks,
         all_snomasks: all_sno,
@@ -619,6 +642,23 @@ mod tests {
         let mut td2 = TypeDef::default();
         apply_type_kv(&mut td2, "usermodes", "*");
         assert!(resolve(&td2, &no_classes).usermodes.allows('H'));
+    }
+
+    #[test]
+    fn token_deny_removes_even_when_all() {
+        let no_classes: HashMap<String, ClassDef> = HashMap::default();
+        // `*,-X` = all except X, on both the command and priv axes
+        let mut td = TypeDef::default();
+        apply_type_kv(&mut td, "commands", "*,-DIE");
+        apply_type_kv(&mut td, "privs", "*,-users/auspex");
+        let r = resolve(&td, &no_classes);
+        assert!(r.all_commands && r.deny_commands.contains("DIE"));
+        assert!(r.all_privs && r.deny_privs.contains("users/auspex"));
+        // a bare list may still carry a removal
+        let mut td2 = TypeDef::default();
+        apply_type_kv(&mut td2, "commands", "KILL,-GLINE");
+        let r2 = resolve(&td2, &no_classes);
+        assert!(!r2.all_commands && r2.commands.contains("KILL") && r2.deny_commands.contains("GLINE"));
     }
 
     #[test]

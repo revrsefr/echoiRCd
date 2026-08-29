@@ -285,8 +285,8 @@ impl Command for Whois {
                 &format!("{nick} {} :echoIRCd", s.name),
             );
         }
-        // +I hides the channel list from everyone but the user themselves + opers
-        if !chans.is_empty() && (is_self || asker_oper || !hidechans) {
+        // +I hides the channel list from everyone but the user themselves + users/auspex
+        if !chans.is_empty() && (is_self || asker_auspex_u || !hidechans) {
             // fold across multiple 319 lines so a user in many channels stays under 512
             let askern = s.users.get(&uid).map(|u| u.nick.len()).unwrap_or(1);
             let budget = 500usize.saturating_sub(s.name.len() + askern + nick.len() + 12);
