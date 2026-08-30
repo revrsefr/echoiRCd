@@ -144,19 +144,6 @@ pub fn def_for_letter(c: char) -> Option<&'static PrefixDef> {
     custom_defs().iter().find(|d| d.letter == c)
 }
 
-/// The prefix mode letter for a sigil char (FJOIN decode); `' '` if none.
-pub fn letter_for_sigil(c: char) -> char {
-    let cs = c.to_string();
-    if let Some(i) = (0..6).find(|&i| sigil(i) == cs) {
-        return LETTERS[i];
-    }
-    custom_defs()
-        .iter()
-        .find(|d| d.sigil == cs)
-        .map(|d| d.letter)
-        .unwrap_or(' ')
-}
-
 fn builtin_index(letter: char) -> Option<usize> {
     LETTERS.iter().position(|&l| l == letter)
 }

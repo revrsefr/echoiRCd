@@ -98,7 +98,7 @@ impl Module for Snoop {
         let full = format!("{head}{ip_full}{port_seg}{trans}{geo_full}{tail}");
         let redacted = format!("{head}{ip_red}{port_seg}{trans}{geo_red}{tail}");
         srv.snotice_c_gated('c', &full, &redacted, |u| {
-            crate::modules::opertypes::user_has_priv(u, "users/auspex")
+            crate::modules::opertypes::user_has_priv(u, crate::modules::opertypes::privs::USERS_AUSPEX)
         });
     }
     fn on_join(&mut self, srv: &mut Server, uid: Uid, chan: &str) {

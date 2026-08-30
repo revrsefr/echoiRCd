@@ -99,7 +99,7 @@ impl Command for List {
     }
     fn handle(&self, s: &mut Server, uid: Uid, _params: &[String]) -> CmdResult {
         s.numeric(uid, RPL_LISTSTART, "Channel :Users Name");
-        let auspex = crate::modules::opertypes::has_priv(s, uid, "channels/auspex");
+        let auspex = crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::CHANNELS_AUSPEX);
         let keys: Vec<String> = s.channels.keys().cloned().collect();
         for key in keys {
             let ch = &s.channels[&key];

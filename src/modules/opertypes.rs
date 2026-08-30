@@ -116,11 +116,6 @@ impl Module for OperTypes {
     }
 }
 
-/// The WHOIS title of a typed oper, if any (used in the denial message).
-pub fn title_of(s: &Server, uid: Uid) -> Option<String> {
-    s.users.get(&uid).and_then(|u| u.ext.get::<OperType>()).map(|t| t.title.clone())
-}
-
 /// The formatted WHOIS special line for a typed oper, if any — "is a/an <title>",
 /// bold + the type's colour (mIRC code, e.g. 4 = red) so it stands out. core_info
 /// emits it on its own 320 line.

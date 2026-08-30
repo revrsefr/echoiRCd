@@ -178,8 +178,8 @@ impl Command for Whois {
         };
         let asker_oper = s.is_oper(uid);
         // auspex: see through user privacy (real host+IP, geo) / channel privacy (secret chans)
-        let asker_auspex_u = crate::modules::opertypes::has_priv(s, uid, "users/auspex");
-        let asker_auspex_c = crate::modules::opertypes::has_priv(s, uid, "channels/auspex");
+        let asker_auspex_u = crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::USERS_AUSPEX);
+        let asker_auspex_c = crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::CHANNELS_AUSPEX);
         let is_self = tuid == uid;
         // hidewhois: hide sensitive lines from ordinary users (opers/self exempt per config)
         let hide = crate::modules::hidewhois::hide(s, uid, tuid, asker_oper);
@@ -477,8 +477,8 @@ impl Command for Who {
         let asker_oper = s.is_oper(uid);
         // auspex: reveal secret/private channel members (channels/auspex) and +i users
         // who share no channel with the asker (users/auspex)
-        let asker_auspex_u = crate::modules::opertypes::has_priv(s, uid, "users/auspex");
-        let asker_auspex_c = crate::modules::opertypes::has_priv(s, uid, "channels/auspex");
+        let asker_auspex_u = crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::USERS_AUSPEX);
+        let asker_auspex_c = crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::CHANNELS_AUSPEX);
         let multi = s
             .users
             .get(&uid)

@@ -265,13 +265,6 @@ impl Server {
             .is_some_and(|ru| self.server_is_service(&ru.sid))
     }
 
-    /// Whether the user reachable by this nick is a network service.
-    pub fn nick_is_service(&self, nick: &str) -> bool {
-        self.remote_nick
-            .get(&nick.to_ascii_lowercase())
-            .is_some_and(|uuid| self.uuid_is_service(uuid))
-    }
-
     fn link_server(&mut self, uid: Uid, msg: &Message) {
         if msg.params.len() < 4 {
             self.reject_link(uid, "Not enough SERVER parameters");
