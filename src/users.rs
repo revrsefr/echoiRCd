@@ -194,9 +194,9 @@ impl Caps {
             .map(|c| {
                 if *c == "sasl" && cap302 {
                     if secure {
-                        "sasl=PLAIN,EXTERNAL,SCRAM-SHA-256".to_string()
+                        "sasl=PLAIN,EXTERNAL,SCRAM-SHA-256,ECDSA-NIST256P-CHALLENGE".to_string()
                     } else {
-                        "sasl=PLAIN,SCRAM-SHA-256".to_string()
+                        "sasl=PLAIN,SCRAM-SHA-256,ECDSA-NIST256P-CHALLENGE".to_string()
                     }
                 } else if *c == "draft/multiline" && cap302 {
                     format!("draft/multiline=max-bytes={mline_bytes},max-lines={mline_lines}")

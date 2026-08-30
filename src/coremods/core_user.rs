@@ -335,6 +335,7 @@ impl Command for Authenticate {
                     CmdResult::Ok
                 } else if arg.eq_ignore_ascii_case("PLAIN")
                     || arg.eq_ignore_ascii_case("SCRAM-SHA-256")
+                    || arg.eq_ignore_ascii_case("ECDSA-NIST256P-CHALLENGE")
                 {
                     if !have_services {
                         s.numeric(
@@ -344,12 +345,14 @@ impl Command for Authenticate {
                         );
                         return CmdResult::Fail;
                     }
-                    // SCRAM is challenge-response, so the password never crosses the wire —
-                    // it's fine to offer over plaintext too. The rounds relay mech-agnostically.
+                    // SCRAM and ECDSA are challenge-response, so the password/key never
+                    // crosses the wire — fine over plaintext too. Rounds relay mech-agnostically.
                     let mech = if arg.eq_ignore_ascii_case("PLAIN") {
                         "PLAIN"
-                    } else {
+                    } else if arg.eq_ignore_ascii_case("SCRAM-SHA-256") {
                         "SCRAM-SHA-256"
+                    } else {
+                        "ECDSA-NIST256P-CHALLENGE"
                     };
                     if let Some(u) = s.users.get_mut(&uid) {
                         u.sasl_mech = Some(mech.to_string());
@@ -382,7 +385,7 @@ impl Command for Authenticate {
                         }
                     }
                 } else {
-                    s.numeric(uid, RPL_SASLMECHS, "PLAIN,SCRAM-SHA-256 :are available SASL mechanisms");
+                    s.numeric(uid, RPL_SASLMECHS, "PLAIN,SCRAM-SHA-256,ECDSA-NIST256P-CHALLENGE :are available SASL mechanisms");
                     s.numeric(uid, ERR_SASLFAIL, ":Unsupported SASL mechanism");
                     CmdResult::Fail
                 }
