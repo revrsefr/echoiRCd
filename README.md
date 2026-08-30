@@ -31,7 +31,8 @@ operational limit exposed as a config key.
 - **IRCv3** — message-tags (+msgid), server-time, labeled-response, batch,
   echo-message, account-tag, **CHATHISTORY** + **event-playback**, **multiline**,
   **message-redaction**, **read-marker**, **relaymsg**, **web-push** (VAPID / RFC
-  8291), SASL, standard-replies, and `WATCH`/`MONITOR`/`SILENCE`/caller-id.
+  8291), SASL (PLAIN/EXTERNAL/SCRAM-SHA-256), standard-replies, and
+  `WATCH`/`MONITOR`/`SILENCE`/caller-id.
 - **Operators** — `OPER`/`KILL`/`WALLOPS`/`GLOBOPS`, the `SA*`/`CHG*`/`SET*`
   override toolbox, x-lines (`K`/`G`/`Z`/`E`/`SHUN`/`QLINE`/`CBAN`/`RLINE`)
   persisted to disk, a **type/class privilege model** (per-type commands, named

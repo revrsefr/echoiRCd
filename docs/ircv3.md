@@ -37,7 +37,7 @@ informed as they change. This page groups what's supported.
 
 | Capability | What it adds |
 |------------|--------------|
-| `sasl` | `AUTHENTICATE` with **PLAIN** or **EXTERNAL** (client-cert / CertFP), relayed to the services server. See [linking](linking.md). |
+| `sasl` | `AUTHENTICATE` with **PLAIN**, **SCRAM-SHA-256** (challenge-response — no password on the wire, offered on plaintext too), or **EXTERNAL** (client-cert / CertFP), relayed to the services server. See [linking](linking.md). |
 | `draft/account-registration` | Create and confirm an account in-band with `REGISTER` / `VERIFY`. |
 
 ## History & messaging

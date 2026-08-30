@@ -333,7 +333,9 @@ impl Command for Authenticate {
                 if arg == "*" {
                     s.numeric(uid, ERR_SASLABORTED, ":SASL authentication aborted");
                     CmdResult::Ok
-                } else if arg.eq_ignore_ascii_case("PLAIN") {
+                } else if arg.eq_ignore_ascii_case("PLAIN")
+                    || arg.eq_ignore_ascii_case("SCRAM-SHA-256")
+                {
                     if !have_services {
                         s.numeric(
                             uid,
@@ -342,12 +344,19 @@ impl Command for Authenticate {
                         );
                         return CmdResult::Fail;
                     }
+                    // SCRAM is challenge-response, so the password never crosses the wire —
+                    // it's fine to offer over plaintext too. The rounds relay mech-agnostically.
+                    let mech = if arg.eq_ignore_ascii_case("PLAIN") {
+                        "PLAIN"
+                    } else {
+                        "SCRAM-SHA-256"
+                    };
                     if let Some(u) = s.users.get_mut(&uid) {
-                        u.sasl_mech = Some("PLAIN".to_string());
+                        u.sasl_mech = Some(mech.to_string());
                     }
                     // start the exchange at services; its `C` challenge is relayed
                     // back to the client as the `AUTHENTICATE +` prompt
-                    s.sasl_relay(uid, "S PLAIN");
+                    s.sasl_relay(uid, &format!("S {mech}"));
                     CmdResult::Ok
                 } else if arg.eq_ignore_ascii_case("EXTERNAL") {
                     // CertFP: only works on TLS with a client cert; the fingerprint
@@ -373,7 +382,7 @@ impl Command for Authenticate {
                         }
                     }
                 } else {
-                    s.numeric(uid, RPL_SASLMECHS, "PLAIN :are available SASL mechanisms");
+                    s.numeric(uid, RPL_SASLMECHS, "PLAIN,SCRAM-SHA-256 :are available SASL mechanisms");
                     s.numeric(uid, ERR_SASLFAIL, ":Unsupported SASL mechanism");
                     CmdResult::Fail
                 }

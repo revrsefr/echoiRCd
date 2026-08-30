@@ -194,9 +194,9 @@ impl Caps {
             .map(|c| {
                 if *c == "sasl" && cap302 {
                     if secure {
-                        "sasl=PLAIN,EXTERNAL".to_string()
+                        "sasl=PLAIN,EXTERNAL,SCRAM-SHA-256".to_string()
                     } else {
-                        "sasl=PLAIN".to_string()
+                        "sasl=PLAIN,SCRAM-SHA-256".to_string()
                     }
                 } else if *c == "draft/multiline" && cap302 {
                     format!("draft/multiline=max-bytes={mline_bytes},max-lines={mline_lines}")
@@ -594,6 +594,9 @@ mod tests {
         assert!(Caps::ls_line(true, false, "", 4096, 24).contains("sasl=PLAIN")); // 302 shows mechs
         assert!(!Caps::ls_line(true, false, "", 4096, 24).contains("EXTERNAL")); // plaintext: no EXTERNAL
         assert!(Caps::ls_line(true, true, "", 4096, 24).contains("sasl=PLAIN,EXTERNAL")); // TLS offers it
+        // SCRAM-SHA-256 is offered on both transports (challenge-response, no wire password)
+        assert!(Caps::ls_line(true, false, "", 4096, 24).contains("SCRAM-SHA-256"));
+        assert!(Caps::ls_line(true, true, "", 4096, 24).contains("SCRAM-SHA-256"));
         assert!(
             Caps::ls_line(false, false, "", 4096, 24).contains("sasl")
                 && !Caps::ls_line(false, false, "", 4096, 24).contains("sasl=")
