@@ -1,0 +1,18 @@
+# Keep the build context small and secret-free. Only the release binary, the
+# example config, and docker/default.conf are COPYed into the image.
+.git
+tls/
+*.pem
+*.key
+echoircd.conf
+*.bak
+*.bak-*
+config.toml.bak*
+target/debug/
+target/release/deps/
+target/release/build/
+target/release/incremental/
+target/release/.fingerprint/
+target/release/examples/
+target/.rustc_info.json
+target/CACHEDIR.TAG
