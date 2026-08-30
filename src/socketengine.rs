@@ -1295,10 +1295,12 @@ fn tls_conn(
     } else {
         addr
     };
-    // Bound the blocking TLS handshake: a peer that stalls it would otherwise pin this
-    // thread + socket forever (no uid yet, so nothing else reaps it). Reset to TLS_POLL
-    // once the handshake completes (below), so it doesn't clip a live client's idle reads.
+    // Bound the blocking TLS handshake both ways: a peer that stalls it — silent, or a
+    // zero TCP receive window against our certificate write — would otherwise pin this
+    // thread + socket forever (no uid yet, so nothing else reaps it). The read deadline
+    // resets to TLS_POLL and the write deadline drops once the handshake completes.
     let _ = stream.set_read_timeout(handshake_timeout);
+    let _ = stream.set_write_timeout(handshake_timeout);
     let mut conn = match backend.accept(stream) {
         Ok(c) => c,
         Err(_) => {
@@ -1306,6 +1308,9 @@ fn tls_conn(
             return; // handshake failed
         }
     };
+    // handshake done — clear the write deadline (same socket via `shutdown`) so it can't
+    // clip a live client later.
+    let _ = shutdown.set_write_timeout(None);
     let certfp = conn.peer_cert_fp();
     let tls_info = conn.tls_info();
     let sni = conn.sni();

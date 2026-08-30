@@ -9,7 +9,7 @@
 //!   bind_ws              = 127.0.0.1:8097   plaintext ws:// listener
 //!   bind_wss             = 0.0.0.0:7799     wss:// listener (uses tls_cert/tls_key)
 //!   ws_origin            = https://x.example (repeatable) allowed Origin globs; empty = any
-//!   ws_handshake_timeout = 10               seconds to finish the Upgrade
+//!   ws_handshake_timeout = 10               seconds to finish the TLS + Upgrade handshake
 //!   ws_ping_interval     = 60               seconds between server keepalive pings (0 = off)
 //!   ws_timeout           = 120              seconds with no traffic before we drop it
 //!   ws_defaultmode       = text             frame mode with no subprotocol: text|binary|reject
@@ -224,12 +224,23 @@ fn ws_conn(
         return;
     };
     match tls {
-        Some(backend) => match backend.accept(raw) {
-            Ok(conn) => ws_session(conn, uid, addr, true, core, shutdown, cfg),
-            Err(_) => {
-                let _ = shutdown.shutdown(Shutdown::Both);
+        Some(backend) => {
+            // Bound the blocking wss TLS handshake both ways — otherwise a peer that
+            // stalls it pins this thread + socket forever (no uid yet). Clear the write
+            // deadline (same socket via `shutdown`) once the handshake completes; the
+            // HTTP-upgrade read deadline is set in ws_session.
+            let _ = raw.set_read_timeout(Some(cfg.handshake_timeout));
+            let _ = raw.set_write_timeout(Some(cfg.handshake_timeout));
+            match backend.accept(raw) {
+                Ok(conn) => {
+                    let _ = shutdown.set_write_timeout(None);
+                    ws_session(conn, uid, addr, true, core, shutdown, cfg);
+                }
+                Err(_) => {
+                    let _ = shutdown.shutdown(Shutdown::Both);
+                }
             }
-        },
+        }
         None => ws_session(raw, uid, addr, false, core, shutdown, cfg),
     }
 }
