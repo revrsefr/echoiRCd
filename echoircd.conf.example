@@ -407,6 +407,9 @@ antiabuse {
     #     Rehash to switch live. Ships with fr (Français) and es (Español). ---
     # locale     fr;
     # locale_dir "lang";        # directory holding <code>.conf catalogs (default: lang)
+    # --- HELP: /HELP topics load from help/<code>.conf (selected by `locale`, English
+    #     fallback per topic). Edit a file + REHASH to change help — no restart. ---
+    # help_dir   "help";        # directory of help/<code>.conf topic files (default: help)
     # --- solvemsg: unvouched users answer one arithmetic question before their
     #     PMs are delivered (opers & logged-in accounts exempt). ---
     # solvemsg yes;

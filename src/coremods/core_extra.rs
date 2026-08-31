@@ -30,78 +30,26 @@ impl Command for Help {
         "HELP"
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
-        let topic = params
+        // Topics live in help/<locale>.conf (see src/help.rs); [INDEX] is bare /HELP.
+        let raw = params
             .first()
             .map(|t| t.to_ascii_uppercase())
             .unwrap_or_default();
-        let (head, body): (&str, &[&str]) = match topic.as_str() {
-            "" => (
-                "*",
-                &[
-                    "Use HELP <topic> for detail. Topics: CHANNELS CHMODES SERVICES OPER.",
-                    "Channels: JOIN PART TOPIC MODE KICK INVITE NAMES LIST WHO WHOIS.",
-                    "Modes: HELP CHMODES lists every channel mode and what it does.",
-                    "Messaging: PRIVMSG, NOTICE, and AWAY to mark yourself away.",
-                    "Accounts: authenticate with SASL, or message NickServ (/NS).",
-                ],
-            ),
-            "CHANNELS" => (
-                "CHANNELS",
-                &[
-                    "JOIN #chan [key]      join (or create) a channel",
-                    "PART #chan [:reason]  leave a channel",
-                    "MODE #chan [+modes]   view or set channel modes",
-                    "TOPIC #chan :text     set the topic (needs +t rights)",
-                    "KICK #chan nick       remove a user (needs op/halfop)",
-                    "INVITE nick #chan     invite a user to a channel",
-                    "See CHMODES for the full channel-mode list.",
-                ],
-            ),
-            "CHMODES" => (
-                "CHMODES",
-                &[
-                    "Channel modes — MODE #chan +/-<letters> [params]",
-                    "Join:    +i invite-only  +k key  +l limit  +R reg-only  +O oper-only  +z TLS-only",
-                    "Speak:   +m moderated  +n no-external  +M reg-only  +u op-moderated  +t topic-lock",
-                    "         +d <sec> before new members may speak",
-                    "Hide:    +s secret  +p private  +D delay-join (hidden until they speak)",
-                    "Filter:  +c no-colour  +S strip-colour  +C no-CTCP  +T no-notice  +G censor",
-                    "Floods:  +f lines:sec  +j joins:sec  +F nick-flood  +B anticaps  +H history",
-                    "Lists:   +b ban  +e exempt  +I invite-exempt  +g spamfilter  +w autoop",
-                    "Status (need a nick):  +q owner ~  +a admin &  +o op @  +h halfop %  +v voice +",
-                    "Full reference: https://echoircd.org/docs/channel-modes",
-                ],
-            ),
-            "SERVICES" => (
-                "SERVICES",
-                &[
-                    "Register/identify with NickServ: /NS REGISTER, /NS IDENTIFY.",
-                    "Channel ownership via ChanServ: /CS REGISTER #chan.",
-                    "Aliases /NS /CS /MS /OS /BS /HS message the matching service.",
-                ],
-            ),
-            "OPER" => (
-                "OPER",
-                &[
-                    "OPER <name> <pass>    become an IRC operator",
-                    "KILL nick :reason     disconnect a user",
-                    "KLINE/GLINE/ZLINE     ban a mask (network bans propagate)",
-                    "SAMODE/SAJOIN/SAKICK  act with services authority",
-                    "REHASH                reload the config",
-                ],
-            ),
-            other => {
-                s.numeric(
-                    uid,
-                    RPL_HELPSTART,
-                    &format!("{other} :No help available for that topic"),
-                );
-                s.numeric(uid, RPL_ENDOFHELP, &format!("{other} :End of /HELP"));
-                return CmdResult::Ok;
-            }
-        };
+        let topic = if raw.is_empty() { "INDEX" } else { raw.as_str() };
+        let head = if topic == "INDEX" { "*" } else { topic };
+        // Clone the body so the server can be borrowed mutably for numeric() below.
+        let body: Vec<String> = s.help.get(topic).map(<[String]>::to_vec).unwrap_or_default();
+        if body.is_empty() {
+            s.numeric(
+                uid,
+                RPL_HELPSTART,
+                &format!("{head} :No help available for that topic"),
+            );
+            s.numeric(uid, RPL_ENDOFHELP, &format!("{head} :End of /HELP"));
+            return CmdResult::Ok;
+        }
         s.numeric(uid, RPL_HELPSTART, &format!("{head} :{} help", s.name));
-        for line in body {
+        for line in &body {
             s.numeric(uid, RPL_HELPTXT, &format!("{head} :{line}"));
         }
         s.numeric(uid, RPL_ENDOFHELP, &format!("{head} :End of /HELP"));

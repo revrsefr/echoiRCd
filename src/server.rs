@@ -170,6 +170,7 @@ pub struct Server {
     pub opers: Vec<crate::config::OperBlock>, // oper logins from config
     pub brands: Vec<crate::config::BrandBlock>, // per-SNI server/network branding
     pub catalog: crate::i18n::Catalog, // active-locale message catalog (i18n; en = passthrough)
+    pub help: crate::help::HelpBook,   // active-locale /HELP topics (help/<code>.conf)
     pub cloak_key: Option<String>,    // host-cloaking key (see modules::cloak)
     pub line_ctags: String,           // client-only tags of the line being handled
     // --- server-to-server (see crate::link) ---
@@ -240,6 +241,13 @@ impl Server {
         for w in &i18n_warn {
             eprintln!("echoircd: {w}");
         }
+        let (help, help_warn) = crate::help::HelpBook::load(
+            cfg.raw.get("help_dir").and_then(|v| v.last()).map(String::as_str).unwrap_or("help"),
+            cfg.raw.get("locale").and_then(|v| v.last()).map(String::as_str).unwrap_or("en"),
+        );
+        for w in &help_warn {
+            eprintln!("echoircd: {w}");
+        }
         Server {
             name: cfg.servername,
             network: cfg.network,
@@ -252,6 +260,7 @@ impl Server {
             opers: cfg.opers,
             brands: cfg.brands,
             catalog,
+            help,
             cloak_key: cfg.cloak_key,
             line_ctags: String::new(),
             sid: cfg.sid,
@@ -359,6 +368,14 @@ impl Server {
             eprintln!("echoircd: {w}");
         }
         self.catalog = catalog;
+        let (help, help_warn) = crate::help::HelpBook::load(
+            fresh.raw.get("help_dir").and_then(|v| v.last()).map(String::as_str).unwrap_or("help"),
+            fresh.raw.get("locale").and_then(|v| v.last()).map(String::as_str).unwrap_or("en"),
+        );
+        for w in &help_warn {
+            eprintln!("echoircd: {w}");
+        }
+        self.help = help;
         self.raw_config = fresh.raw;
         self.config_gen = self.config_gen.wrapping_add(1); // invalidate module config caches
         // Re-evaluate which linked servers are services against the fresh
