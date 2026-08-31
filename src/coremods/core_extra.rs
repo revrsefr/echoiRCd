@@ -38,8 +38,9 @@ impl Command for Help {
             "" => (
                 "*",
                 &[
-                    "Use HELP <topic> for detail. Topics: CHANNELS SERVICES OPER.",
+                    "Use HELP <topic> for detail. Topics: CHANNELS CHMODES SERVICES OPER.",
                     "Channels: JOIN PART TOPIC MODE KICK INVITE NAMES LIST WHO WHOIS.",
+                    "Modes: HELP CHMODES lists every channel mode and what it does.",
                     "Messaging: PRIVMSG, NOTICE, and AWAY to mark yourself away.",
                     "Accounts: authenticate with SASL, or message NickServ (/NS).",
                 ],
@@ -53,6 +54,22 @@ impl Command for Help {
                     "TOPIC #chan :text     set the topic (needs +t rights)",
                     "KICK #chan nick       remove a user (needs op/halfop)",
                     "INVITE nick #chan     invite a user to a channel",
+                    "See CHMODES for the full channel-mode list.",
+                ],
+            ),
+            "CHMODES" => (
+                "CHMODES",
+                &[
+                    "Channel modes — MODE #chan +/-<letters> [params]",
+                    "Join:    +i invite-only  +k key  +l limit  +R reg-only  +O oper-only  +z TLS-only",
+                    "Speak:   +m moderated  +n no-external  +M reg-only  +u op-moderated  +t topic-lock",
+                    "         +d <sec> before new members may speak",
+                    "Hide:    +s secret  +p private  +D delay-join (hidden until they speak)",
+                    "Filter:  +c no-colour  +S strip-colour  +C no-CTCP  +T no-notice  +G censor",
+                    "Floods:  +f lines:sec  +j joins:sec  +F nick-flood  +B anticaps  +H history",
+                    "Lists:   +b ban  +e exempt  +I invite-exempt  +g spamfilter  +w autoop",
+                    "Status (need a nick):  +q owner ~  +a admin &  +o op @  +h halfop %  +v voice +",
+                    "Full reference: https://echoircd.org/docs/channel-modes",
                 ],
             ),
             "SERVICES" => (

@@ -138,7 +138,7 @@ pub fn apply_mode(s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
             s.numeric(
                 uid,
                 ERR_UNKNOWNMODE,
-                &format!("{c} :is unknown mode char to me"),
+                &format!("{c} :is unknown mode char to me (try /HELP CHMODES for channel modes)"),
             );
             continue;
         };
