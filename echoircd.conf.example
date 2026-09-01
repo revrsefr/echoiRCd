@@ -368,23 +368,26 @@ users {
 
 
 # ═══ human-verification gates (anti-bot) ═════════════════════════════════════
-# recaptcha: hand an unverified user a token+URL; they send CAPTCHA <token>.
-# cloudflare_challenge: same idea via VERIFYCHALLENGE <token>. JWT-only by default.
+# recaptcha: hand an unverified user a token+URL; they open it and send  CAPTCHA <token>.
+# cloudflare_challenge: same idea via  VERIFYCHALLENGE <token>. JWT-only by default.
+# The *_url is a BARE base — the daemon appends `?token=<jwt>` itself. The *_message
+# MUST contain {url} (it is replaced with that link). *_whitelistports are the LISTENER
+# ports a client connected to (e.g. 6697/7799), NOT the client's source port.
 # verification {
 #     recaptcha                 yes;
-#     recaptcha_secret          "CHANGE_THIS_HS256_SECRET";  # signs the IP-bound token
-#     recaptcha_url             "https://example.org/captcha?token=";
+#     recaptcha_secret          "CHANGE_THIS_HS256_SECRET";  # signs the IP-bound JWT
+#     recaptcha_url             "https://example.org/verify";
 #     recaptcha_issuer          "echoIRCd";   # JWT issuer (default echoIRCd)
 #     recaptcha_ttl             1800;         # token lifetime secs (default 1800)
-#     recaptcha_message         "Please verify you are human:";
+#     recaptcha_message         "*** Verify you are human: {url}";
 #     recaptcha_whitelistports  6697;         # listener ports exempt (repeatable)
 #     cloudflare_challenge      yes;
 #     cloudflare_secret         "CHANGE_THIS_HS256_SECRET";
-#     cloudflare_url            "https://example.org/challenge?token=";
+#     cloudflare_url            "https://example.org/verify";
 #     cloudflare_issuer         "echoIRCd";
 #     cloudflare_ttl            1800;
-#     cloudflare_message        "Solve the challenge:";
-#     cloudflare_whitelistports 6697;
+#     cloudflare_message        "*** Solve the challenge: {url}";
+#     cloudflare_whitelistports 6697,7799;
 # }
 
 
