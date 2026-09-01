@@ -24,6 +24,7 @@ pub mod server;
 pub mod spamfilter;
 pub mod stats;
 pub mod user;
+pub mod verify;
 pub mod whowas;
 
 use std::sync::mpsc::Sender;
@@ -99,6 +100,7 @@ pub const ALL_METHODS: &[&str] = &[
     "spamfilter.list",
     "spamfilter.add",
     "spamfilter.del",
+    "verify.pass",
     "log.tail",
     "log.events",
 ];
@@ -119,6 +121,7 @@ pub fn dispatch(s: &mut Server, method: &str, params: &str, id: &str) -> String 
             Some(("message", action)) => message::handle(s, action, params),
             Some(("whowas", action)) => whowas::handle(s, action, params),
             Some(("spamfilter", action)) => spamfilter::handle(s, action, params),
+            Some(("verify", action)) => verify::handle(s, action, params),
             Some(("log", action)) => log::handle(s, action, params),
             _ => Err(RpcError::method_not_found(method)),
         },
