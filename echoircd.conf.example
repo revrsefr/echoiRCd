@@ -389,6 +389,23 @@ users {
 #     cloudflare_message        "*** Solve the challenge: {url}";
 #     cloudflare_whitelistports 6697,7799;
 # }
+#
+# AUTOMATIC completion: enable the control{} block below and point the verify web
+# page at its RPC. When the page confirms the solve it pushes the token to the daemon
+# (verify.pass), which then completes the held connection on its own — the user never
+# types CAPTCHA/VERIFYCHALLENGE by hand.
+
+# ═══ JSON-RPC control interface ══════════════════════════════════════════════
+# Loopback-only admin/API surface (list/kill users, bans, rehash, verify.pass…).
+# OFF unless rpc=yes AND rpc_token is set. Enabling/changing it needs a RESTART
+# (the listener starts at boot, not on rehash). Every request carries the token
+# (HTTP Bearer or Basic), checked constant-time before anything dispatches.
+# control {
+#     rpc        yes;
+#     rpc_token  "CHANGE_THIS_LONG_RANDOM_TOKEN";  # required, else RPC stays off
+#     rpc_bind   "127.0.0.1:8080";                 # default 127.0.0.1:8080
+#     rpc_user   "admin";                          # Basic-auth user (default admin)
+# }
 
 
 # ═══ anti-spam / anti-drone ══════════════════════════════════════════════════
