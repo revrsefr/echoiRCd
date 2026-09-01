@@ -65,6 +65,7 @@ pub mod profilelink;
 pub mod randquote;
 pub mod realnameban;
 pub mod recaptcha;
+pub mod verify_common;
 pub mod relaymsg;
 pub mod reputation;
 pub mod restrictchans;
