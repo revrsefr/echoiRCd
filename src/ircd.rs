@@ -401,6 +401,9 @@ impl Ircd {
                 let resp =
                     crate::modules::rpc::dispatch(&mut self.server, &method, &params, &id);
                 let _ = reply.send(resp);
+                // a `verify.pass` push may have cleared held connections — complete
+                // them now rather than waiting for the next tick.
+                self.drain_verified_pending();
             }
             Event::Tick => self.on_tick(),
             Event::Rehash => self.on_rehash(),
@@ -740,6 +743,22 @@ impl Ircd {
         }
     }
 
+    /// Complete held connections whose IP was cleared out-of-band by the
+    /// verification web page's `verify.pass` RPC push, and drop expired IP records.
+    /// Called right after each RPC (near-instant completion) and from `on_tick`.
+    fn drain_verified_pending(&mut self) {
+        crate::modules::verify_common::purge(&mut self.server);
+        let cleared = self
+            .server
+            .ext
+            .get_mut::<crate::modules::verify_common::PendingComplete>()
+            .map(|p| std::mem::take(&mut p.0))
+            .unwrap_or_default();
+        for uid in cleared {
+            self.try_register(uid);
+        }
+    }
+
     fn on_tick(&mut self) {
         self.server.ping_links(); // keepalive on every server link
         self.server.purge_xlines(); // drop expired server bans
@@ -773,6 +792,8 @@ impl Ircd {
             self.server.send(uid, format!("ERROR :{m}"));
             self.quit_user(uid, reason);
         }
+        // backstop for the RPC-driven path below (purges expired IP records too).
+        self.drain_verified_pending();
         // republish gauges (the core owns this state; the scrape thread only reads)
         use std::sync::atomic::Ordering::Relaxed;
         let m = &self.server.metrics;
