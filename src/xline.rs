@@ -393,9 +393,12 @@ impl Server {
         self.save_xlines(); // an expiry changed the set — persist it
     }
 
-    /// Path of the on-disk x-line db (beside the config file).
+    /// Path of the on-disk x-line db: the `xline_database` conf key, or `<conf>.xlines`.
     fn xline_db_path(&self) -> String {
-        format!("{}.xlines", self.conf_path)
+        match self.conf("xline_database") {
+            Some(p) if !p.is_empty() => p.to_string(),
+            _ => format!("{}.xlines", self.conf_path),
+        }
     }
 
     /// Persist all current x-lines so they survive a restart.

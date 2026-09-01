@@ -334,6 +334,7 @@ channels {
     # channames_deny    "";   # forbid these chars in NEW channel names (control codes, etc.)
     # permchannels_database "permchannels.db";  # +P permanent channels (default <conf>.permchannels)
     # markread_database     "markread.db";      # draft/read-marker persistence (default <conf>.markread)
+    # xline_database        "xlines.db";        # K/G/Z-line ban persistence (default <conf>.xlines)
     # --- restrictchans: only opers may CREATE channels (all may still join) ---
     # restrictchans yes;
     # restrictchan  "#public-*";   # glob whitelist ordinary users may create (repeatable)
