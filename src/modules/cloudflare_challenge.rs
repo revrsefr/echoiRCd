@@ -37,6 +37,15 @@ fn passed(s: &Server, uid: Uid) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether the client's IP was cleared out-of-band (web page pushed a solved token
+/// via `verify.pass`) — lets a held connection complete without a command.
+fn ip_cleared(s: &Server, uid: Uid) -> bool {
+    let Some(ip) = s.users.get(&uid).map(|u| u.addr.ip().to_string()) else {
+        return false;
+    };
+    crate::modules::verify_common::ip_verified(s, &ip)
+}
+
 fn port_whitelisted(s: &Server, uid: Uid) -> bool {
     let Some(port) = s.users.get(&uid).map(|u| u.port) else {
         return false;
@@ -82,7 +91,7 @@ impl Module for CloudflareChallenge {
         if !enabled(srv) || srv.is_oper(uid) {
             return ModResult::Passthru;
         }
-        if passed(srv, uid) || port_whitelisted(srv, uid) {
+        if passed(srv, uid) || port_whitelisted(srv, uid) || ip_cleared(srv, uid) {
             return ModResult::Passthru;
         }
         // issue the challenge exactly once; later held attempts just keep holding

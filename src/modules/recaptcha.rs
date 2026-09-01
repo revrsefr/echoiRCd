@@ -44,6 +44,15 @@ fn is_verified(s: &Server, uid: Uid) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether the client's IP was cleared out-of-band (the web page pushed a solved
+/// token via `verify.pass`) — lets a held connection complete without a command.
+fn ip_cleared(s: &Server, uid: Uid) -> bool {
+    let Some(ip) = s.users.get(&uid).map(|u| u.addr.ip().to_string()) else {
+        return false;
+    };
+    crate::modules::verify_common::ip_verified(s, &ip)
+}
+
 /// Whether the listener port the client connected to is in `recaptcha_whitelistports`.
 fn port_whitelisted(s: &Server, uid: Uid) -> bool {
     let Some(port) = s.users.get(&uid).map(|u| u.port) else {
@@ -91,7 +100,7 @@ impl Module for ReCaptcha {
         if !enabled(srv) || srv.is_oper(uid) {
             return ModResult::Passthru;
         }
-        if is_verified(srv, uid) || port_whitelisted(srv, uid) {
+        if is_verified(srv, uid) || port_whitelisted(srv, uid) || ip_cleared(srv, uid) {
             return ModResult::Passthru;
         }
         // issue the challenge exactly once; later held attempts just keep holding
