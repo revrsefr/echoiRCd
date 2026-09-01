@@ -259,6 +259,12 @@ connections {
     # --- accept-rate: drop connection-churn floods at the accept edge ---
     # accept_rate  0;   # max NEW connections/sec per source IP (0 = off)
     # accept_burst 0;   # instantaneous burst per IP (0 = same as accept_rate)
+    # --- unregistered-connection guard: cap the pool of not-yet-registered
+    #     (e.g. held-for-verification) connections so a bot flood can't fill the
+    #     class limit and lock real users out. Loopback is always exempt. ---
+    # max_unregistered    0;    # hard cap on concurrent un-registered conns (0 = off)
+    # unreg_floodwater    0;    # above this many, cut the handshake timeout (0 = off)
+    # unreg_flood_timeout 30;   # handshake timeout (s) for un-registered conns while flooding
     # --- PROXY protocol: trust HAProxy/nginx PROXY header from these sources
     #     (glob/CIDR, repeatable) so the real client IP is used. ---
     # proxy 127.0.0.1;
