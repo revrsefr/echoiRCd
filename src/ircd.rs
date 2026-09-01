@@ -767,6 +767,8 @@ impl Ircd {
         for m in &mut self.modules {
             m.on_tick(&mut self.server); // timer-driven modules (e.g. reputation)
         }
+        // reconcile the unregistered-connection count + edge-detect flood mode
+        crate::connguard::tick(&mut self.server);
         let now = crate::server::now();
         let (to_ping, to_quit) = self.server.idle_check(now);
         for uid in to_ping {

@@ -454,8 +454,12 @@ impl Server {
     /// Finish registration: send the welcome burst + MOTD and queue the connect
     /// hook. The core calls this once NICK, USER and CAP are all satisfied.
     pub fn welcome(&mut self, uid: Uid) {
+        let was_unreg = self.users.get(&uid).map(|u| !u.registered).unwrap_or(false);
         if let Some(u) = self.users.get_mut(&uid) {
             u.registered = true;
+        }
+        if was_unreg {
+            crate::connguard::note_registered(self); // left the unregistered pool
         }
         self.metrics
             .connects
