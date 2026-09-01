@@ -810,6 +810,9 @@ impl Server {
     /// `:<src> CHGHOST <target> <newhost>` — a services vhost / oper host change
     /// (arrives ENCAP'd to the target's server). Apply to a local target (which
     /// propagates + hostcycles via `change_host_ident`), or forward toward a remote one.
+    /// An `ident@host` vhost arrives as ONE CHGHOST (host param `ident@host`) and is
+    /// applied as a single CHGHOST line — not a CHGIDENT + CHGHOST pair, which would
+    /// show the client two "changed host" notices.
     fn link_chghost_recv(&mut self, from: Uid, msg: &Message) {
         let (Some(target), Some(host)) =
             (msg.params.first().cloned(), msg.params.get(1).cloned())
@@ -817,15 +820,20 @@ impl Server {
             return;
         };
         match self.link_local_target(&target) {
-            Some(tuid) => self.change_host_ident_quiet(tuid, None, Some(&host)),
+            Some(tuid) => match host.split_once('@') {
+                Some((ident, h)) if !ident.is_empty() && !h.is_empty() => {
+                    self.change_host_ident_quiet(tuid, Some(ident), Some(h))
+                }
+                _ => self.change_host_ident_quiet(tuid, None, Some(&host)),
+            },
             None => {
                 self.forward_to_target(&target, msg, from);
             }
         }
     }
 
-    /// `:<src> CHGIDENT <target> <newident>` — a services/oper ident change; the
-    /// `ident@host` form of a vhost arrives as a CHGIDENT then a CHGHOST.
+    /// `:<src> CHGIDENT <target> <newident>` — a standalone services/oper ident
+    /// change (a full `ident@host` vhost instead comes as one CHGHOST, see above).
     fn link_chgident_recv(&mut self, from: Uid, msg: &Message) {
         let (Some(target), Some(ident)) =
             (msg.params.first().cloned(), msg.params.get(1).cloned())
@@ -2582,6 +2590,83 @@ mod tests {
         assert!(!valid_sid("0a1")); // no lowercase
         assert!(!valid_sid("0A")); // too short
         assert!(!valid_sid("0ABC")); // too long
+    }
+
+    // A services `ident@host` vhost arrives as ONE `CHGHOST <uid> ident@host` and
+    // must apply the ident AND host in a single CHGHOST — not a CHGIDENT + CHGHOST
+    // pair, which showed the client two "changed host" notices. Regression.
+    #[test]
+    fn chghost_ident_at_host_applies_as_one_change() {
+        use crate::config::Config;
+        use crate::extensible::Extensible;
+        use crate::users::{Caps, UserFlags};
+        use std::sync::atomic::AtomicU64;
+        use std::sync::{mpsc, Arc};
+        let (tx, _rx) = mpsc::channel();
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+        let (utx, urx) = mpsc::channel();
+        s.users.insert(
+            7,
+            User {
+                uid: 7,
+                uuid: "0AAAAAAAB".into(),
+                nick: "mik".into(),
+                ident: "da55e982f672".into(),
+                realname: "m".into(),
+                host: "cloak.ip".into(),
+                cloak: String::new(),
+                vhost: None,
+                secure: false,
+                certfp: None,
+                tls_info: None,
+                sni: None,
+                brand_server: None,
+                brand_network: None,
+                account: None,
+                signon: 0,
+                nick_ts: 0,
+                addr: "127.0.0.1:1".parse().unwrap(),
+                port: 6667,
+                registered: true,
+                dns_pending: false,
+                ident_pending: false,
+                auth_pending: false,
+                waitpong: None,
+                class: None,
+                pass: None,
+                deferred: Vec::new(),
+                cap: false,
+                cap_302: false,
+                caps: Caps { chghost: true, ..Caps::default() },
+                sasl_mech: None,
+                channels: HashSet::default(),
+                invited: HashSet::default(),
+                watch: Vec::new(),
+                monitor: Vec::new(),
+                silence: Vec::new(),
+                signore: Vec::new(),
+                accept: Vec::new(),
+                quitting: None,
+                flags: UserFlags::default(),
+                last_active: 0,
+                ping_sent: false,
+                ext: Extensible::default(),
+                out: OutSink::Thread(utx),
+                sock: None,
+            },
+        );
+        s.uuid_local.insert("0AAAAAAAB".into(), 7);
+
+        let msg = crate::message::parse(":42S CHGHOST 0AAAAAAAB mike@echoircd.org").unwrap();
+        s.link_chghost_recv(1, &msg);
+
+        // both ident and host applied from the single command
+        assert_eq!(s.users[&7].ident, "mike");
+        assert_eq!(s.users[&7].vhost.as_deref(), Some("echoircd.org"));
+        // and the client saw exactly ONE CHGHOST line, carrying the final ident@host
+        let chghosts: Vec<String> = urx.try_iter().filter(|l| l.contains("CHGHOST")).collect();
+        assert_eq!(chghosts.len(), 1, "exactly one CHGHOST expected, got: {chghosts:?}");
+        assert!(chghosts[0].contains("CHGHOST mike echoircd.org"), "got: {}", chghosts[0]);
     }
 
     // A services bot IJOINing an existing channel with a status token (e.g. "ao")
