@@ -496,6 +496,17 @@ impl Server {
             },
         );
 
+        crate::connguard::note_connect(self);
+        // global unregistered-connection cap — refuse once the held/pending pool is
+        // full, so a bot flood behind the human-verification gate can't fill the
+        // class limit and lock real users out. Loopback (web/services/tests) exempt.
+        if crate::connguard::over_cap(self) && !ip.is_loopback() {
+            let m = self.trf("Closing link: (Server is busy — please try again shortly)", &[]);
+            self.send(uid, format!("ERROR :{m}"));
+            self.remove_user(uid, "Too many unregistered connections");
+            return;
+        }
+
         // connflood — refuse an IP that's opening connections too fast (see modules::connflood)
         if crate::modules::connflood::over_limit(self, ip) {
             let m = self.trf("Closing link: (Too many connections from your IP)", &[]);
@@ -819,6 +830,9 @@ impl Server {
         let Some(user) = self.users.remove(&uid) else {
             return;
         };
+        if !user.registered {
+            crate::connguard::note_removed_unreg(self); // it left before registering
+        }
         // the departing user's own accept list vanishes with them — drop its nicks
         // from the reverse count
         for n in &user.accept {
@@ -1622,10 +1636,15 @@ impl Server {
         let ping_timeout = self.conf_num("ping_timeout", PING_TIMEOUT);
         let mut ping = Vec::new();
         let mut quit = Vec::new();
+        // under an unregistered-connection flood, evict pending handshakes faster
+        let flood_to = crate::connguard::flood_timeout(self);
         for (&uid, u) in &self.users {
             let idle = now.saturating_sub(u.last_active);
             // a connection class may override the registration timeout / ping frequency
-            let reg_to = crate::modules::connclass::reg_timeout(self, uid).unwrap_or(reg_timeout);
+            let mut reg_to = crate::modules::connclass::reg_timeout(self, uid).unwrap_or(reg_timeout);
+            if let Some(ft) = flood_to {
+                reg_to = reg_to.min(ft);
+            }
             let pa = crate::modules::connclass::ping_freq(self, uid).unwrap_or(ping_after);
             if !u.registered {
                 if idle >= reg_to {
@@ -1654,7 +1673,7 @@ mod tests {
     fn version_token_and_comment() {
         assert_eq!(RELEASE, "5");
         let c = version_comment();
-        assert!(c.starts_with("echoircd 5.0.0 \u{b7}"), "unexpected: {c}");
+        assert!(c.starts_with(&format!("echoircd {VERSION} \u{b7}")), "unexpected: {c}");
         assert!(c.contains("rustc ") && c.contains("built "));
     }
 
@@ -1718,6 +1737,47 @@ mod tests {
     fn srv() -> Server {
         let (tx, _rx) = mpsc::channel();
         Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)))
+    }
+
+    // The unregistered-connection guard: the running count tracks the pending pool,
+    // the hard cap and flood high-water are opt-in, and the tick reconcile is
+    // authoritative (self-healing) — registered users never decrement the count.
+    #[test]
+    fn unregistered_guard_counts_caps_and_floods() {
+        let mut s = srv();
+        let _1 = add_user(&mut s, 1, "u1");
+        let _2 = add_user(&mut s, 2, "u2");
+        let _3 = add_user(&mut s, 3, "u3");
+        for uid in [1, 2, 3] {
+            s.users.get_mut(&uid).unwrap().registered = false; // add_user makes them registered
+        }
+        crate::connguard::tick(&mut s); // authoritative reconcile from the user map
+        assert_eq!(crate::connguard::count(&s), 3);
+
+        // cap and floodwater are opt-in (0 = off)
+        assert!(!crate::connguard::over_cap(&s));
+        assert!(!crate::connguard::flood_active(&s));
+
+        // hard cap of 2 -> a pool of 3 is over
+        s.raw_config.insert("max_unregistered".into(), vec!["2".into()]);
+        assert!(crate::connguard::over_cap(&s));
+
+        // floodwater 2 -> flood mode; unregistered timeout cut to the configured value
+        s.raw_config.insert("unreg_floodwater".into(), vec!["2".into()]);
+        s.raw_config.insert("unreg_flood_timeout".into(), vec!["25".into()]);
+        assert!(crate::connguard::flood_active(&s));
+        assert_eq!(crate::connguard::flood_timeout(&s), Some(25));
+
+        // one registers (welcome() does this in prod), one unregistered leaves
+        if let Some(u) = s.users.get_mut(&1) {
+            u.registered = true;
+        }
+        crate::connguard::note_registered(&mut s);
+        s.remove_user(2, "bye"); // unregistered -> decrements
+        s.remove_user(1, "bye"); // registered   -> must NOT decrement
+        assert_eq!(crate::connguard::count(&s), 1);
+        crate::connguard::tick(&mut s); // reconcile agrees: only uid 3 is still pending
+        assert_eq!(crate::connguard::count(&s), 1);
     }
 
     // The tick purge reclaims per-member flood state of users who left, and +J
