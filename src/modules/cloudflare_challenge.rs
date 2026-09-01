@@ -38,7 +38,7 @@ fn passed(s: &Server, uid: Uid) -> bool {
 }
 
 fn port_whitelisted(s: &Server, uid: Uid) -> bool {
-    let Some(port) = s.users.get(&uid).map(|u| u.addr.port()) else {
+    let Some(port) = s.users.get(&uid).map(|u| u.port) else {
         return false;
     };
     s.conf_all("cloudflare_whitelistports").iter().any(|line| {

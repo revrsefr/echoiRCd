@@ -44,9 +44,9 @@ fn is_verified(s: &Server, uid: Uid) -> bool {
         .unwrap_or(false)
 }
 
-/// Whether the user's source port is in `recaptcha_whitelistports` (skip captcha).
+/// Whether the listener port the client connected to is in `recaptcha_whitelistports`.
 fn port_whitelisted(s: &Server, uid: Uid) -> bool {
-    let Some(port) = s.users.get(&uid).map(|u| u.addr.port()) else {
+    let Some(port) = s.users.get(&uid).map(|u| u.port) else {
         return false;
     };
     s.conf_all("recaptcha_whitelistports").iter().any(|line| {
