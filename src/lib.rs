@@ -19,9 +19,10 @@ pub mod command;
 pub mod config;
 pub mod connguard;
 pub mod coremods;
+pub mod database;
 pub mod extensible;
-pub mod http;
 pub mod help;
+pub mod http;
 pub mod i18n;
 pub mod ircd;
 pub mod link;
@@ -34,12 +35,12 @@ pub mod numeric;
 pub mod proxy;
 pub mod regex;
 pub mod resolver;
+#[cfg(test)]
+mod s2s_sim;
 pub mod server;
 pub mod socketengine;
 pub mod tls;
 pub mod tls_rustls;
-#[cfg(test)]
-mod s2s_sim;
 pub mod users;
 pub mod watch;
 pub mod websocket;
