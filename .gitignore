@@ -25,3 +25,4 @@ echoircd.conf.*
 
 # runtime pidfile
 *.pid
+echoircd.live
