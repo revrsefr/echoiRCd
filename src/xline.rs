@@ -9,10 +9,10 @@ use crate::Uid;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum XKind {
-    Kline, // user@host, this server
-    Gline, // user@host, "global" (locally the same until services span it)
-    Zline, // an IP address
-    Eline, // user@host / ip EXEMPT from K/G/Z-lines
+    Kline,   // user@host, this server
+    Gline,   // user@host, "global" (locally the same until services span it)
+    Zline,   // an IP address
+    Eline,   // user@host / ip EXEMPT from K/G/Z-lines
     Shun,    // user@host allowed to connect but whose commands are dropped
     Qline,   // a reserved/forbidden nick glob
     Cban,    // a forbidden channel-name glob
@@ -58,6 +58,7 @@ pub struct XLine {
     pub reason: String,
     pub setter: String,
     pub expires: u64, // 0 = permanent
+    pub set_at: u64,  // unix time the line was set (0 = unknown — a pre-upgrade db entry)
 }
 
 /// Parse a duration: bare number = seconds; `s`/`m`/`h`/`d`/`w` suffixes; `0`/"" = permanent.
@@ -90,7 +91,13 @@ pub fn human_duration(mut secs: u64) -> String {
         return "0 seconds".to_string();
     }
     let mut parts = Vec::new();
-    for (size, label) in [(604800, "week"), (86400, "day"), (3600, "hour"), (60, "minute"), (1, "second")] {
+    for (size, label) in [
+        (604800, "week"),
+        (86400, "day"),
+        (3600, "hour"),
+        (60, "minute"),
+        (1, "second"),
+    ] {
         let n = secs / size;
         if n > 0 {
             parts.push(format!("{n} {label}{}", if n == 1 { "" } else { "s" }));
@@ -98,6 +105,55 @@ pub fn human_duration(mut secs: u64) -> String {
         }
     }
     parts.join(" ")
+}
+
+/// "set by X on <date>, duration <dur>" — the provenance shown in the XLINE
+/// lifecycle notices, degrading gracefully when the set-time is unknown (a
+/// pre-upgrade db entry, `set_at` = 0).
+fn xline_origin(setter: &str, set_at: u64, expires: u64) -> String {
+    if set_at == 0 {
+        return format!("set by {setter}");
+    }
+    let when = crate::server::long_date(set_at);
+    if expires > set_at {
+        format!(
+            "set by {setter} on {when}, duration {}",
+            human_duration(expires - set_at)
+        )
+    } else {
+        format!("set by {setter} on {when}")
+    }
+}
+
+/// Parse one line of the on-disk x-line db: `tag mask expires [set_at] setter reason`.
+/// The optional `set_at` (a decimal, added later) is detected by an all-digit 4th
+/// field — a setter is never all-digits — so old-format lines load with `set_at` 0.
+fn parse_db_line(line: &str) -> Option<XLine> {
+    let mut it = line.split(' ');
+    let (tag, mask, exp, fourth) = (it.next()?, it.next()?, it.next()?, it.next()?);
+    let kind = XKind::from_tag(tag)?;
+    let expires: u64 = exp.parse().unwrap_or(0);
+    let (set_at, setter, reason) =
+        if !fourth.is_empty() && fourth.bytes().all(|b| b.is_ascii_digit()) {
+            (
+                fourth.parse().unwrap_or(0),
+                it.next()?.to_string(),
+                it.collect::<Vec<_>>().join(" "),
+            )
+        } else {
+            (0, fourth.to_string(), it.collect::<Vec<_>>().join(" "))
+        };
+    if setter.is_empty() {
+        return None;
+    }
+    Some(XLine {
+        kind,
+        mask: mask.to_string(),
+        reason,
+        setter,
+        expires,
+        set_at,
+    })
 }
 
 /// The " (expires in …)" tail appended to the reason a banned user is shown, or
@@ -180,7 +236,8 @@ impl Server {
 
     /// The reason nick `nick` may not be used — a Q-line or a services SVSHOLD.
     pub fn nick_reserved(&self, nick: &str) -> Option<String> {
-        self.matched_qline(nick).or_else(|| self.matched_svshold(nick))
+        self.matched_qline(nick)
+            .or_else(|| self.matched_svshold(nick))
     }
 
     /// The reason channel `chan` is CBAN'd (forbidden), if any. Case-insensitive.
@@ -220,7 +277,11 @@ impl Server {
                     })
                     .map(|x| (x.reason.clone(), x.expires))
                     .unwrap_or_default();
-                return Some(format!("{}-lined: {reason}{}", kind.tag(), ban_expiry_suffix(expires, n)));
+                return Some(format!(
+                    "{}-lined: {reason}{}",
+                    kind.tag(),
+                    ban_expiry_suffix(expires, n)
+                ));
             }
         }
         None
@@ -285,15 +346,35 @@ impl Server {
         setter: &str,
         reason: &str,
     ) {
-        let n = now();
+        self.add_xline_at(kind, mask, duration, setter, reason, now());
+    }
+
+    /// Like [`add_xline`](Self::add_xline) but with an explicit set-time. The S2S
+    /// ADDLINE handler passes the wire `settime` so a ban set on a peer keeps its
+    /// original set-time (and true age/expiry) instead of our local receive time.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_xline_at(
+        &mut self,
+        kind: XKind,
+        mask: &str,
+        duration: u64,
+        setter: &str,
+        reason: &str,
+        set_at: u64,
+    ) {
         self.xlines.retain(|x| !(x.kind == kind && x.mask == mask));
-        let expires = if duration == 0 { 0 } else { n.saturating_add(duration) };
+        let expires = if duration == 0 {
+            0
+        } else {
+            set_at.saturating_add(duration)
+        };
         self.xlines.push(XLine {
             kind,
             mask: mask.to_string(),
             reason: reason.to_string(),
             setter: setter.to_string(),
             expires,
+            set_at,
         });
         let detail = if duration == 0 {
             format!("permanent {}-line on {mask}", kind.tag())
@@ -305,7 +386,10 @@ impl Server {
                 crate::server::long_date(expires)
             )
         };
-        let m = self.trf("XLINE: {0} added a {1}: {2}", &[setter, detail.as_str(), reason]);
+        let m = self.trf(
+            "XLINE: {0} added a {1}: {2}",
+            &[setter, detail.as_str(), reason],
+        );
         self.snotice_c('x', &m);
         self.save_xlines();
         self.enforce_xlines();
@@ -316,12 +400,13 @@ impl Server {
     /// short — and returns whether one was found. `remover` is who took it off.
     pub fn remove_xline(&mut self, kind: XKind, mask: &str, remover: &str) -> bool {
         let n = now();
-        // capture the target's expiry before dropping it, to report the time left
-        let expires = self
+        // capture the target before dropping it, to report the time left plus who
+        // originally set it and why
+        let target = self
             .xlines
             .iter()
             .find(|x| x.kind == kind && x.mask.eq_ignore_ascii_case(mask))
-            .map(|x| x.expires);
+            .map(|x| (x.expires, x.setter.clone(), x.reason.clone()));
         let before = self.xlines.len();
         // case-insensitive: nick/host/channel masks match case-insensitively when
         // enforced, so removal must too (e.g. remove `CBAN #foo` for a `#Foo` ban).
@@ -330,14 +415,21 @@ impl Server {
         let removed = self.xlines.len() < before;
         if removed {
             let tag = kind.tag();
+            let (expires, setter, reason) = target.unwrap_or((0, String::new(), String::new()));
             let detail = match expires {
-                Some(e) if e > n => {
-                    format!("timed {tag}-line on {mask} ({} remaining)", human_duration(e - n))
+                e if e > n => {
+                    format!(
+                        "timed {tag}-line on {mask} ({} remaining)",
+                        human_duration(e - n)
+                    )
                 }
-                Some(e) if e != 0 => format!("timed {tag}-line on {mask} (already expired)"),
+                e if e != 0 => format!("timed {tag}-line on {mask} (already expired)"),
                 _ => format!("permanent {tag}-line on {mask}"),
             };
-            let m = self.trf("XLINE: {0} removed a {1}", &[remover, detail.as_str()]);
+            let m = self.trf(
+                "XLINE: {0} removed a {1} (set by {2}: {3})",
+                &[remover, detail.as_str(), setter.as_str(), reason.as_str()],
+            );
             self.snotice_c('x', &m);
             self.save_xlines();
         }
@@ -376,18 +468,33 @@ impl Server {
     /// (snomask +x) so the XLINE notices cover a ban's whole life: add → expire.
     pub fn purge_xlines(&mut self) {
         let n = now();
-        let expired: Vec<(XKind, String)> = self
+        // capture the full record so the "expired" notice can say who set it, when,
+        // for how long, and why — not just the bare mask.
+        let expired: Vec<(XKind, String, String, String, u64, u64)> = self
             .xlines
             .iter()
             .filter(|x| x.expires != 0 && x.expires <= n)
-            .map(|x| (x.kind, x.mask.clone()))
+            .map(|x| {
+                (
+                    x.kind,
+                    x.mask.clone(),
+                    x.setter.clone(),
+                    x.reason.clone(),
+                    x.expires,
+                    x.set_at,
+                )
+            })
             .collect();
         if expired.is_empty() {
             return;
         }
         self.xlines.retain(|x| x.expires == 0 || x.expires > n);
-        for (kind, mask) in &expired {
-            let m = self.trf("XLINE: {0}-line on {1} expired", &[kind.tag(), mask.as_str()]);
+        for (kind, mask, setter, reason, expires, set_at) in &expired {
+            let origin = xline_origin(setter, *set_at, *expires);
+            let m = self.trf(
+                "XLINE: {0}-line on {1} expired ({2}): {3}",
+                &[kind.tag(), mask.as_str(), origin.as_str(), reason.as_str()],
+            );
             self.snotice_c('x', &m);
         }
         self.save_xlines(); // an expiry changed the set — persist it
@@ -406,10 +513,11 @@ impl Server {
         let mut out = String::new();
         for x in &self.xlines {
             out.push_str(&format!(
-                "{} {} {} {} {}\n",
+                "{} {} {} {} {} {}\n",
                 x.kind.tag(),
                 x.mask,
                 x.expires,
+                x.set_at,
                 x.setter,
                 x.reason
             ));
@@ -424,26 +532,12 @@ impl Server {
             return;
         };
         for line in text.lines() {
-            let mut it = line.splitn(5, ' ');
-            let (Some(tag), Some(mask), Some(exp), Some(setter), Some(reason)) =
-                (it.next(), it.next(), it.next(), it.next(), it.next())
-            else {
-                continue;
-            };
-            let Some(kind) = XKind::from_tag(tag) else {
-                continue;
-            };
-            let expires: u64 = exp.parse().unwrap_or(0);
-            if expires != 0 && expires <= n {
-                continue;
+            if let Some(x) = parse_db_line(line) {
+                if x.expires != 0 && x.expires <= n {
+                    continue; // already expired — don't reinstate it
+                }
+                self.xlines.push(x);
             }
-            self.xlines.push(XLine {
-                kind,
-                mask: mask.to_string(),
-                reason: reason.to_string(),
-                setter: setter.to_string(),
-                expires,
-            });
         }
     }
 }
@@ -469,5 +563,44 @@ mod tests {
         assert_eq!(human_duration(90061), "1 day 1 hour 1 minute 1 second");
         assert_eq!(human_duration(3600), "1 hour");
         assert_eq!(human_duration(0), "0 seconds");
+    }
+
+    #[test]
+    fn parse_db_line_reads_new_and_old_formats() {
+        // new format: tag mask expires set_at setter reason(may contain spaces)
+        let x = parse_db_line("Z 1.2.3.4 1700003600 1700000000 fold10 open proxy").unwrap();
+        assert_eq!(x.kind.tag(), "Z");
+        assert_eq!(x.mask, "1.2.3.4");
+        assert_eq!((x.expires, x.set_at), (1700003600, 1700000000));
+        assert_eq!(
+            (x.setter.as_str(), x.reason.as_str()),
+            ("fold10", "open proxy")
+        );
+        // old format (no set_at) still loads — set_at defaults to 0 (unknown)
+        let o = parse_db_line("G *@bad.example 0 op spam bot").unwrap();
+        assert_eq!((o.set_at, o.expires), (0, 0));
+        assert_eq!((o.setter.as_str(), o.reason.as_str()), ("op", "spam bot"));
+        // old-format TIMED line (real live shape): a non-zero expires in field 3 must
+        // not be mistaken for set_at, and a "svc@server" setter is never all-digits
+        let t =
+            parse_db_line("Z 1.2.3.4 1788441609 dnsbl@irc.echoircd.org listed in a dnsbl").unwrap();
+        assert_eq!((t.expires, t.set_at), (1788441609, 0));
+        assert_eq!(t.setter.as_str(), "dnsbl@irc.echoircd.org");
+        assert_eq!(t.reason.as_str(), "listed in a dnsbl");
+        // junk is skipped
+        assert!(parse_db_line("").is_none());
+        assert!(parse_db_line("Z").is_none());
+        assert!(parse_db_line("BOGUS mask 0 op reason").is_none()); // unknown tag
+    }
+
+    #[test]
+    fn xline_origin_shows_setter_when_and_duration() {
+        let s = xline_origin("fold10", 1000, 1000 + 3600);
+        assert!(
+            s.starts_with("set by fold10 on ") && s.contains("duration 1 hour"),
+            "{s}"
+        );
+        // pre-upgrade entry (set_at unknown) degrades to just the setter
+        assert_eq!(xline_origin("op", 0, 999), "set by op");
     }
 }

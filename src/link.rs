@@ -62,10 +62,10 @@ pub struct RemoteUser {
     pub host: String,
     pub realname: String,
     pub account: Option<String>,
-    pub ip: String,    // client IP (for network-wide clone limits); "" if a peer omitted it
+    pub ip: String, // client IP (for network-wide clone limits); "" if a peer omitted it
     pub modes: String, // user mode letters (no leading '+'); e.g. services wear "iHB"
-    pub sid: String,   // origin server id
-    pub via: Uid,      // local link uid it is reached through
+    pub sid: String, // origin server id
+    pub via: Uid,   // local link uid it is reached through
 }
 
 impl RemoteUser {
@@ -126,10 +126,13 @@ impl Server {
                 .find(|b| b.ip == addr.ip().to_string())
                 .map(|b| b.password.clone());
             if let Some(pass) = pass {
-                out.send(format!(
-                    "SERVER {} {} {} :{}",
-                    self.name, pass, self.sid, self.server_desc
-                ).into());
+                out.send(
+                    format!(
+                        "SERVER {} {} {} :{}",
+                        self.name, pass, self.sid, self.server_desc
+                    )
+                    .into(),
+                );
                 sent_server = true;
             }
         }
@@ -420,12 +423,18 @@ impl Server {
     fn user_intro_lines(&self, u: &User) -> Vec<String> {
         let mut v = vec![self.uid_line(u)];
         if let Some(acct) = &u.account {
-            v.push(format!(":{} METADATA {} accountname :{acct}", self.sid, u.uuid));
+            v.push(format!(
+                ":{} METADATA {} accountname :{acct}",
+                self.sid, u.uuid
+            ));
         }
         // ssl_cert so services learn the client's TLS fingerprint (cert auto-login,
         // fingerprint extbans). Flags `vsT` = valid/secure/trusted; no `E` (error).
         if let Some(fp) = &u.certfp {
-            v.push(format!(":{} METADATA {} ssl_cert :vsT {fp}", self.sid, u.uuid));
+            v.push(format!(
+                ":{} METADATA {} ssl_cert :vsT {fp}",
+                self.sid, u.uuid
+            ));
         }
         v
     }
@@ -814,8 +823,7 @@ impl Server {
     /// applied as a single CHGHOST line — not a CHGIDENT + CHGHOST pair, which would
     /// show the client two "changed host" notices.
     fn link_chghost_recv(&mut self, from: Uid, msg: &Message) {
-        let (Some(target), Some(host)) =
-            (msg.params.first().cloned(), msg.params.get(1).cloned())
+        let (Some(target), Some(host)) = (msg.params.first().cloned(), msg.params.get(1).cloned())
         else {
             return;
         };
@@ -835,8 +843,7 @@ impl Server {
     /// `:<src> CHGIDENT <target> <newident>` — a standalone services/oper ident
     /// change (a full `ident@host` vhost instead comes as one CHGHOST, see above).
     fn link_chgident_recv(&mut self, from: Uid, msg: &Message) {
-        let (Some(target), Some(ident)) =
-            (msg.params.first().cloned(), msg.params.get(1).cloned())
+        let (Some(target), Some(ident)) = (msg.params.first().cloned(), msg.params.get(1).cloned())
         else {
             return;
         };
@@ -919,7 +926,12 @@ impl Server {
             };
             let members: Vec<Uid> = self.channels[&key].members.keys().copied().collect();
             for m in members {
-                if self.users.get(&m).map(|u| u.caps.message_redaction).unwrap_or(false) {
+                if self
+                    .users
+                    .get(&m)
+                    .map(|u| u.caps.message_redaction)
+                    .unwrap_or(false)
+                {
                     self.send(m, line.clone());
                 }
             }
@@ -959,7 +971,11 @@ impl Server {
             }
             // profile fields NickServ SET populates — surface them over metadata-2
             "avatar" | "bio" | "pronouns" | "timezone" | "url" => {
-                let nick = self.users.get(&tuid).map(|u| u.nick.clone()).unwrap_or_default();
+                let nick = self
+                    .users
+                    .get(&tuid)
+                    .map(|u| u.nick.clone())
+                    .unwrap_or_default();
                 let setter = msg
                     .source
                     .as_deref()
@@ -1009,7 +1025,10 @@ impl Server {
             return;
         }
         let masks = u.signore.join(" ");
-        self.link_out(via, format!(":{} METADATA {} signore :{masks}", self.sid, u.uuid));
+        self.link_out(
+            via,
+            format!(":{} METADATA {} signore :{masks}", self.sid, u.uuid),
+        );
     }
 
     // --- SASL relay (client AUTHENTICATE ⇄ services) --------------------------
@@ -1043,7 +1062,10 @@ impl Server {
             .find(|s| s.via == via)
             .map(|s| s.sid.clone())
             .unwrap_or_else(|| "*".to_string());
-        self.link_out(via, format!(":{} ENCAP {mask} SASL {uuid} * {rest}", self.sid));
+        self.link_out(
+            via,
+            format!(":{} ENCAP {mask} SASL {uuid} * {rest}", self.sid),
+        );
     }
 
     /// A SASL step from services, unwrapped from its ENCAP: params are
@@ -1261,7 +1283,10 @@ impl Server {
             self.set_nick(luid, &local_uuid);
         }
         if change_remote {
-            self.link_out(via, format!(":{} SAVE {} {}", self.sid, remote_uuid, remote_ts));
+            self.link_out(
+                via,
+                format!(":{} SAVE {} {}", self.sid, remote_uuid, remote_ts),
+            );
         }
         change_remote
     }
@@ -1298,7 +1323,11 @@ impl Server {
         // collision with a local user: resolve by timestamp (force-rename the loser
         // to its UUID) rather than killing.
         if let Some(luid) = self.find_nick(&newnick) {
-            let remote_ts = msg.params.get(1).and_then(|t| t.parse().ok()).unwrap_or_else(now);
+            let remote_ts = msg
+                .params
+                .get(1)
+                .and_then(|t| t.parse().ok())
+                .unwrap_or_else(now);
             let (ruser, rip) = self
                 .remote_users
                 .get(&uuid)
@@ -1320,7 +1349,11 @@ impl Server {
         self.remote_nick.remove(&old.to_ascii_lowercase());
         self.remote_nick
             .insert(newnick.to_ascii_lowercase(), uuid.clone());
-        let ts = msg.params.get(1).cloned().unwrap_or_else(|| now().to_string());
+        let ts = msg
+            .params
+            .get(1)
+            .cloned()
+            .unwrap_or_else(|| now().to_string());
         self.propagate(&format!(":{uuid} NICK {newnick} {ts}"), Some(via));
     }
 
@@ -1358,7 +1391,11 @@ impl Server {
                     .uuid_prefix(&src)
                     .or_else(|| self.servers.get(&src).map(|sv| sv.name.clone()))
                     .unwrap_or_else(|| src.clone());
-                let nick = self.users.get(&tuid).map(|u| u.nick.clone()).unwrap_or_default();
+                let nick = self
+                    .users
+                    .get(&tuid)
+                    .map(|u| u.nick.clone())
+                    .unwrap_or_default();
                 self.send(tuid, format!(":{from} KILL {nick} :{reason}"));
                 self.remove_user(tuid, &format!("Killed ({reason})"));
             }
@@ -1391,8 +1428,7 @@ impl Server {
         if !self.source_behind(&src, via) {
             return; // reject an invite-bypass forged from behind another link
         }
-        let (Some(target), Some(chan)) =
-            (msg.params.first().cloned(), msg.params.get(1).cloned())
+        let (Some(target), Some(chan)) = (msg.params.first().cloned(), msg.params.get(1).cloned())
         else {
             return;
         };
@@ -1405,7 +1441,11 @@ impl Server {
                 u.invited.insert(key.clone()); // reverse index for O(1) quit scrub
             }
             let prefix = self.uuid_prefix(&src).unwrap_or_else(|| src.clone());
-            let nick = self.users.get(&luid).map(|u| u.nick.clone()).unwrap_or_default();
+            let nick = self
+                .users
+                .get(&luid)
+                .map(|u| u.nick.clone())
+                .unwrap_or_default();
             self.send(luid, format!(":{prefix} INVITE {nick} :{chan}"));
         } else {
             self.forward_to_target(&target, msg, via);
@@ -1433,7 +1473,17 @@ impl Server {
         let Ok(duration) = msg.params[4].parse::<u64>() else {
             return;
         };
-        self.add_xline(kind, &msg.params[1], duration, &msg.params[2], &msg.params[5]);
+        // params[3] is the origin's set-time — keep it so the ban's age/expiry and
+        // the eventual "expired" notice reflect when it was really set, not now.
+        let set_at = msg.params[3].parse::<u64>().unwrap_or_else(|_| now());
+        self.add_xline_at(
+            kind,
+            &msg.params[1],
+            duration,
+            &msg.params[2],
+            &msg.params[5],
+            set_at,
+        );
         self.propagate(&msg.to_wire(), Some(via));
     }
 
@@ -1458,9 +1508,20 @@ impl Server {
     }
 
     /// Announce a locally-set network ban to peers as ADDLINE.
-    pub fn propagate_addline(&self, kind: &str, mask: &str, setter: &str, duration: u64, reason: &str) {
+    pub fn propagate_addline(
+        &self,
+        kind: &str,
+        mask: &str,
+        setter: &str,
+        duration: u64,
+        reason: &str,
+    ) {
         self.propagate(
-            &format!(":{} ADDLINE {kind} {mask} {setter} {} {duration} :{reason}", self.sid, now()),
+            &format!(
+                ":{} ADDLINE {kind} {mask} {setter} {} {duration} :{reason}",
+                self.sid,
+                now()
+            ),
             None,
         );
     }
@@ -1542,7 +1603,11 @@ impl Server {
                 .map(|u| u.nick.clone())
                 .unwrap_or_default();
             let want_tag = src_is_service
-                && self.users.get(&dst).map(|u| u.caps.message_tags).unwrap_or(false);
+                && self
+                    .users
+                    .get(&dst)
+                    .map(|u| u.caps.message_tags)
+                    .unwrap_or(false);
             let tag = if want_tag { "@echo/services " } else { "" };
             self.send(dst, format!("{tag}:{prefix} {cmd} {nick} :{text}"));
         } else {
@@ -1763,7 +1828,11 @@ impl Server {
                 .map(|s| s.name.clone())
                 .unwrap_or_else(|| self.name.clone());
             let targets = vec![nick.as_str(); modes.len()].join(" ");
-            self.to_channel(&key, &format!(":{src} MODE {chan} +{modes} {targets}"), None);
+            self.to_channel(
+                &key,
+                &format!(":{src} MODE {chan} +{modes} {targets}"),
+                None,
+            );
         }
         self.propagate(&msg.to_wire(), Some(via));
     }
@@ -1844,7 +1913,10 @@ impl Server {
         let Some(prefix) = prefix else {
             return; // unknown source — don't act on a rename we can't attribute
         };
-        if self.rename_channel(&oldkey, &new, &prefix, &reason).is_some() {
+        if self
+            .rename_channel(&oldkey, &new, &prefix, &reason)
+            .is_some()
+        {
             self.propagate_rename(&source, &old, &new, &reason, Some(via));
         }
     }
@@ -1913,7 +1985,11 @@ impl Server {
             return;
         }
         let key = chan.to_ascii_lowercase();
-        let ts = self.channels.get(&key).map(|c| c.created).unwrap_or_else(now);
+        let ts = self
+            .channels
+            .get(&key)
+            .map(|c| c.created)
+            .unwrap_or_else(now);
         let mut out: Vec<String> = Vec::new();
         let mut pi = 0usize;
         let mut sign = '+';
@@ -1952,7 +2028,10 @@ impl Server {
         } else {
             format!(" {}", out.join(" "))
         };
-        self.propagate(&format!(":{src} FMODE {chan} {ts} {modestring}{pstr}"), None);
+        self.propagate(
+            &format!(":{src} FMODE {chan} {ts} {modestring}{pstr}"),
+            None,
+        );
     }
 
     /// Propagate a local user's topic change to links as `FTOPIC`, carrying the
@@ -1994,10 +2073,7 @@ impl Server {
             return;
         }
         let vuuid = self.nick_to_uuid(victim);
-        self.propagate(
-            &format!(":{} KICK {chan} {vuuid} :{reason}", u.uuid),
-            None,
-        );
+        self.propagate(&format!(":{} KICK {chan} {vuuid} :{reason}", u.uuid), None);
     }
 
     /// Set a status prefix on a channel member named by network uuid or nickname
@@ -2080,7 +2156,11 @@ impl Server {
         let prefix = self.uuid_prefix(&src).unwrap_or_default();
         self.to_channel(&key, &format!(":{prefix} TOPIC {chan} :{text}"), None);
         // relay onward as a timestamped FTOPIC (services/peers ignore a plain TOPIC)
-        let chants = self.channels.get(&key).map(|c| c.created).unwrap_or_else(now);
+        let chants = self
+            .channels
+            .get(&key)
+            .map(|c| c.created)
+            .unwrap_or_else(now);
         self.propagate(
             &format!(":{src} FTOPIC {chan} {chants} {} :{text}", now()),
             Some(via),
@@ -2430,10 +2510,16 @@ impl Server {
             // values; burst the access-controlling ones (key, limit) as timestamped
             // FMODEs so they survive netburst (the receiver's FMODE path is param-aware)
             if let Some(k) = &ch.modes.key {
-                lines.push(format!(":{} FMODE {} {} +k {}", self.sid, ch.name, ch.created, k));
+                lines.push(format!(
+                    ":{} FMODE {} {} +k {}",
+                    self.sid, ch.name, ch.created, k
+                ));
             }
             if let Some(l) = ch.modes.limit {
-                lines.push(format!(":{} FMODE {} {} +l {}", self.sid, ch.name, ch.created, l));
+                lines.push(format!(
+                    ":{} FMODE {} {} +l {}",
+                    self.sid, ch.name, ch.created, l
+                ));
             }
             // burst the ban / except / invite-exception lists as timestamped mode
             // changes sourced from this server
@@ -2576,7 +2662,7 @@ mod tests {
         // same user@ip (reconnect): the OLDER nick changes
         assert_eq!(collision_decision(200, 100, true), (false, true)); // remote older → remote
         assert_eq!(collision_decision(100, 200, true), (true, false)); // local older → local
-        // different user@ip: the NEWER nick changes
+                                                                       // different user@ip: the NEWER nick changes
         assert_eq!(collision_decision(100, 200, false), (false, true)); // remote newer → remote
         assert_eq!(collision_decision(200, 100, false), (true, false)); // local newer → local
     }
@@ -2637,7 +2723,10 @@ mod tests {
                 deferred: Vec::new(),
                 cap: false,
                 cap_302: false,
-                caps: Caps { chghost: true, ..Caps::default() },
+                caps: Caps {
+                    chghost: true,
+                    ..Caps::default()
+                },
                 sasl_mech: None,
                 channels: HashSet::default(),
                 invited: HashSet::default(),
@@ -2665,8 +2754,16 @@ mod tests {
         assert_eq!(s.users[&7].vhost.as_deref(), Some("echoircd.org"));
         // and the client saw exactly ONE CHGHOST line, carrying the final ident@host
         let chghosts: Vec<String> = urx.try_iter().filter(|l| l.contains("CHGHOST")).collect();
-        assert_eq!(chghosts.len(), 1, "exactly one CHGHOST expected, got: {chghosts:?}");
-        assert!(chghosts[0].contains("CHGHOST mike echoircd.org"), "got: {}", chghosts[0]);
+        assert_eq!(
+            chghosts.len(),
+            1,
+            "exactly one CHGHOST expected, got: {chghosts:?}"
+        );
+        assert!(
+            chghosts[0].contains("CHGHOST mike echoircd.org"),
+            "got: {}",
+            chghosts[0]
+        );
     }
 
     // A services bot IJOINing an existing channel with a status token (e.g. "ao")
@@ -2700,7 +2797,10 @@ mod tests {
         let msg = crate::message::parse(":42SB00000 IJOIN #echoircd 16 1 ao").unwrap();
         s.link_ijoin_recv(1, &msg);
         let m = &s.channels["#echoircd"].rmembers["42SB00000"];
-        assert!(m.admin(), "bot should hold +a (&) from the IJOIN status token");
+        assert!(
+            m.admin(),
+            "bot should hold +a (&) from the IJOIN status token"
+        );
         assert!(m.op(), "bot should hold +o (@) from the IJOIN status token");
     }
 
@@ -2803,9 +2903,14 @@ mod tests {
         s.link_ijoin_recv(1, &msg);
 
         let lines: Vec<String> = std::iter::from_fn(|| urx.try_recv().ok()).collect();
-        assert!(lines.iter().any(|l| l.contains("JOIN #echoircd")), "member should see the bot JOIN, got {lines:?}");
         assert!(
-            lines.iter().any(|l| l == ":services.example.net MODE #echoircd +ao echoIRCd echoIRCd"),
+            lines.iter().any(|l| l.contains("JOIN #echoircd")),
+            "member should see the bot JOIN, got {lines:?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l == ":services.example.net MODE #echoircd +ao echoIRCd echoIRCd"),
             "member must be told the bot's +ao status, got {lines:?}"
         );
     }
@@ -2846,7 +2951,10 @@ mod tests {
         let m = crate::message::parse(":42S FJOIN #c 2000 +nt :o,42SAAAAAA").unwrap();
         s.link_fjoin_recv(1, &m);
         let opped = s.channels["#c"].rmembers["42SAAAAAA"].op();
-        assert!(!opped, "a member bursted with a newer (losing) TS must be de-statused");
+        assert!(
+            !opped,
+            "a member bursted with a newer (losing) TS must be de-statused"
+        );
         assert_eq!(s.channels["#c"].created, 1000, "our older TS is kept");
     }
 
@@ -2900,8 +3008,14 @@ mod tests {
         s.link_fjoin_recv(1, &m);
         let ch = &s.channels["#c"];
         assert_eq!(ch.created, 1000, "we adopt the winning TS");
-        assert!(ch.bans.is_empty(), "our ban must be wiped on losing the TS war");
-        assert!(ch.topic.is_none(), "our topic must be wiped on losing the TS war");
+        assert!(
+            ch.bans.is_empty(),
+            "our ban must be wiped on losing the TS war"
+        );
+        assert!(
+            ch.topic.is_none(),
+            "our topic must be wiped on losing the TS war"
+        );
         assert!(ch.modes.moderated, "the winner's +m is adopted");
     }
 
@@ -2986,10 +3100,14 @@ mod tests {
         s.servers.insert("42S".into(), mk("42S", true));
         s.servers.insert("10H".into(), mk("10H", false));
         // from a service pseudo-client (uuid → sid 42S) and from the service SID itself
-        assert!(s.source_is_service(&crate::message::parse(":42SB00000 SVSMODE 0AAAAAAAB +r").unwrap()));
+        assert!(
+            s.source_is_service(&crate::message::parse(":42SB00000 SVSMODE 0AAAAAAAB +r").unwrap())
+        );
         assert!(s.source_is_service(&crate::message::parse(":42S SVSJOIN 0AAAAAAAB #c").unwrap()));
         // from an ordinary peer: rejected
-        assert!(!s.source_is_service(&crate::message::parse(":10HAAAAAA SVSNICK 0AAAAAAAB g").unwrap()));
+        assert!(
+            !s.source_is_service(&crate::message::parse(":10HAAAAAA SVSNICK 0AAAAAAAB g").unwrap())
+        );
     }
 
     // A NOTICE re-sourced from the services server itself (SET SNOTICE ON re-sources
@@ -3001,8 +3119,8 @@ mod tests {
     fn server_sourced_notice_reaches_the_user() {
         use crate::config::Config;
         use crate::extensible::Extensible;
-        use crate::users::{Caps, UserFlags};
         use crate::map::HashSet;
+        use crate::users::{Caps, UserFlags};
         use std::sync::atomic::AtomicU64;
         use std::sync::{mpsc, Arc};
 
@@ -3092,8 +3210,8 @@ mod tests {
     fn services_standard_reply_reaches_the_client() {
         use crate::config::Config;
         use crate::extensible::Extensible;
-        use crate::users::{Caps, UserFlags};
         use crate::map::HashSet;
+        use crate::users::{Caps, UserFlags};
         use std::sync::atomic::AtomicU64;
         use std::sync::{mpsc, Arc};
 

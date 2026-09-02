@@ -4,8 +4,8 @@
 //! [`crate::channels`] add their own `impl Server` blocks. No locks: only the
 //! single core thread ever holds a `Server`.
 
-use std::cell::RefCell;
 use crate::map::{HashMap, HashSet};
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::AtomicU64;
@@ -171,32 +171,32 @@ pub struct Server {
     pub brands: Vec<crate::config::BrandBlock>, // per-SNI server/network branding
     pub catalog: crate::i18n::Catalog, // active-locale message catalog (i18n; en = passthrough)
     pub help: crate::help::HelpBook,   // active-locale /HELP topics (help/<code>.conf)
-    pub cloak_key: Option<String>,    // host-cloaking key (see modules::cloak)
-    pub line_ctags: String,           // client-only tags of the line being handled
+    pub cloak_key: Option<String>,     // host-cloaking key (see modules::cloak)
+    pub line_ctags: String,            // client-only tags of the line being handled
     // --- server-to-server (see crate::link) ---
-    pub sid: String,                               // this server's 3-char id
-    pub server_desc: String,                       // this server's description
-    pub link_blocks: Vec<LinkBlock>,               // peers to accept / dial
-    pub links: HashMap<Uid, Link>,                 // local link connections
-    pub servers: HashMap<String, RemoteServer>,    // sid -> linked server
-    pub uuid_counter: u64,                         // mints local user UIDs
-    pub msgid_counter: u64,                        // mints IRCv3 `msgid` message tags
-    pub uuid_local: HashMap<String, Uid>,          // local users, by network uuid
-    pub remote_users: HashMap<String, RemoteUser>, // users on other servers
-    pub remote_nick: HashMap<String, String>,      // lower nick -> remote uuid
-    pub whowas: VecDeque<WhowasEntry>,             // recent nick history (WHOWAS)
-    pub conf_path: String,                         // config path, for REHASH
-    pub xlines: Vec<XLine>,                        // server bans (KLINE/GLINE/ZLINE)
-    pub mode_sudo: bool,                           // SAMODE/SAKICK: bypass rank checks
-    pub in_redirect: bool,                         // +L: guards against redirect loops
-    pub censor: Vec<crate::config::CensorRule>,    // +G bad words
-    pub amu: crate::config::AntiMixedCfg,          // antimixedutf8 module config
-    pub resolve_hosts: bool,                       // reverse-DNS clients on connect
-    pub use_resolved_host: bool,                   // apply the resolved name to the hostmask
+    pub sid: String,                                        // this server's 3-char id
+    pub server_desc: String,                                // this server's description
+    pub link_blocks: Vec<LinkBlock>,                        // peers to accept / dial
+    pub links: HashMap<Uid, Link>,                          // local link connections
+    pub servers: HashMap<String, RemoteServer>,             // sid -> linked server
+    pub uuid_counter: u64,                                  // mints local user UIDs
+    pub msgid_counter: u64,                                 // mints IRCv3 `msgid` message tags
+    pub uuid_local: HashMap<String, Uid>,                   // local users, by network uuid
+    pub remote_users: HashMap<String, RemoteUser>,          // users on other servers
+    pub remote_nick: HashMap<String, String>,               // lower nick -> remote uuid
+    pub whowas: VecDeque<WhowasEntry>,                      // recent nick history (WHOWAS)
+    pub conf_path: String,                                  // config path, for REHASH
+    pub xlines: Vec<XLine>,                                 // server bans (KLINE/GLINE/ZLINE)
+    pub mode_sudo: bool,                                    // SAMODE/SAKICK: bypass rank checks
+    pub in_redirect: bool,                                  // +L: guards against redirect loops
+    pub censor: Vec<crate::config::CensorRule>,             // +G bad words
+    pub amu: crate::config::AntiMixedCfg,                   // antimixedutf8 module config
+    pub resolve_hosts: bool,                                // reverse-DNS clients on connect
+    pub use_resolved_host: bool, // apply the resolved name to the hostmask
     pub dnsbl_zones: Vec<crate::modules::dnsbl::DnsblZone>, // DNS blocklists checked on connect
-    pub dnsbl_action: String,                      // mark | kline | gline | zline
-    pub dnsbl_reason: String,                      // ban reason on a DNSBL hit
-    pub sasl_server: String,                       // services server that handles SASL
+    pub dnsbl_action: String,    // mark | kline | gline | zline
+    pub dnsbl_reason: String,    // ban reason on a DNSBL hit
+    pub sasl_server: String,     // services server that handles SASL
     pub webirc: Vec<crate::config::WebircGateway>, // trusted web gateways
     /// Every `key = value` line from the config, so each module reads its own
     /// settings via [`Server::conf`] / [`conf_all`] / [`conf_bool`] / [`conf_num`]
@@ -235,15 +235,31 @@ pub struct Server {
 impl Server {
     pub fn new(cfg: Config, event_tx: Sender<Event>, conn_counter: Arc<AtomicU64>) -> Server {
         let (catalog, i18n_warn) = crate::i18n::Catalog::load(
-            cfg.raw.get("locale_dir").and_then(|v| v.last()).map(String::as_str).unwrap_or("lang"),
-            cfg.raw.get("locale").and_then(|v| v.last()).map(String::as_str).unwrap_or("en"),
+            cfg.raw
+                .get("locale_dir")
+                .and_then(|v| v.last())
+                .map(String::as_str)
+                .unwrap_or("lang"),
+            cfg.raw
+                .get("locale")
+                .and_then(|v| v.last())
+                .map(String::as_str)
+                .unwrap_or("en"),
         );
         for w in &i18n_warn {
             eprintln!("echoircd: {w}");
         }
         let (help, help_warn) = crate::help::HelpBook::load(
-            cfg.raw.get("help_dir").and_then(|v| v.last()).map(String::as_str).unwrap_or("help"),
-            cfg.raw.get("locale").and_then(|v| v.last()).map(String::as_str).unwrap_or("en"),
+            cfg.raw
+                .get("help_dir")
+                .and_then(|v| v.last())
+                .map(String::as_str)
+                .unwrap_or("help"),
+            cfg.raw
+                .get("locale")
+                .and_then(|v| v.last())
+                .map(String::as_str)
+                .unwrap_or("en"),
         );
         for w in &help_warn {
             eprintln!("echoircd: {w}");
@@ -361,16 +377,36 @@ impl Server {
         self.sasl_server = fresh.sasl_server;
         self.webirc = fresh.webirc;
         let (catalog, i18n_warn) = crate::i18n::Catalog::load(
-            fresh.raw.get("locale_dir").and_then(|v| v.last()).map(String::as_str).unwrap_or("lang"),
-            fresh.raw.get("locale").and_then(|v| v.last()).map(String::as_str).unwrap_or("en"),
+            fresh
+                .raw
+                .get("locale_dir")
+                .and_then(|v| v.last())
+                .map(String::as_str)
+                .unwrap_or("lang"),
+            fresh
+                .raw
+                .get("locale")
+                .and_then(|v| v.last())
+                .map(String::as_str)
+                .unwrap_or("en"),
         );
         for w in &i18n_warn {
             eprintln!("echoircd: {w}");
         }
         self.catalog = catalog;
         let (help, help_warn) = crate::help::HelpBook::load(
-            fresh.raw.get("help_dir").and_then(|v| v.last()).map(String::as_str).unwrap_or("help"),
-            fresh.raw.get("locale").and_then(|v| v.last()).map(String::as_str).unwrap_or("en"),
+            fresh
+                .raw
+                .get("help_dir")
+                .and_then(|v| v.last())
+                .map(String::as_str)
+                .unwrap_or("help"),
+            fresh
+                .raw
+                .get("locale")
+                .and_then(|v| v.last())
+                .map(String::as_str)
+                .unwrap_or("en"),
         );
         for w in &help_warn {
             eprintln!("echoircd: {w}");
@@ -378,8 +414,8 @@ impl Server {
         self.help = help;
         self.raw_config = fresh.raw;
         self.config_gen = self.config_gen.wrapping_add(1); // invalidate module config caches
-        // Re-evaluate which linked servers are services against the fresh
-        // `uline`/`sasl_server` config (re-evaluated on every rehash).
+                                                           // Re-evaluate which linked servers are services against the fresh
+                                                           // `uline`/`sasl_server` config (re-evaluated on every rehash).
         let names: Vec<(String, String)> = self
             .servers
             .iter()
@@ -501,7 +537,10 @@ impl Server {
         // full, so a bot flood behind the human-verification gate can't fill the
         // class limit and lock real users out. Loopback (web/services/tests) exempt.
         if crate::connguard::over_cap(self) && !ip.is_loopback() {
-            let m = self.trf("Closing link: (Server is busy — please try again shortly)", &[]);
+            let m = self.trf(
+                "Closing link: (Server is busy — please try again shortly)",
+                &[],
+            );
             self.send(uid, format!("ERROR :{m}"));
             self.remove_user(uid, "Too many unregistered connections");
             return;
@@ -671,7 +710,9 @@ impl Server {
                 }
                 // a panic here can't reach the core (we don't know which Event to send);
                 // log it so a stuck request is diagnosable instead of silent.
-                Err(_) => eprintln!("[worker] a background crypto/http task panicked; its request was dropped"),
+                Err(_) => eprintln!(
+                    "[worker] a background crypto/http task panicked; its request was dropped"
+                ),
             }
         });
         true
@@ -799,7 +840,12 @@ impl Server {
     /// Add `nick_low` (already lowercased) to `uid`'s callerid accept list and bump
     /// the reverse count. Caller has already checked it's absent and under the cap.
     pub fn accept_add(&mut self, uid: Uid, nick_low: String) {
-        if self.users.get_mut(&uid).map(|u| u.accept.push(nick_low.clone())).is_none() {
+        if self
+            .users
+            .get_mut(&uid)
+            .map(|u| u.accept.push(nick_low.clone()))
+            .is_none()
+        {
             return;
         }
         *self.accepted_nicks.entry(nick_low).or_insert(0) += 1;
@@ -1065,7 +1111,13 @@ impl Server {
         let line = {
             let u = self.users.get(&uid);
             let target = u
-                .map(|u| if u.nick.is_empty() { "*" } else { u.nick.as_str() })
+                .map(|u| {
+                    if u.nick.is_empty() {
+                        "*"
+                    } else {
+                        u.nick.as_str()
+                    }
+                })
                 .unwrap_or("*");
             // per-SNI brand as the message source (falls back to the global name)
             let srv = u
@@ -1382,12 +1434,22 @@ impl Server {
         let time_tag = format!("time={}", iso_time(now()));
         let account = self.users.get(&src).and_then(|su| su.account.clone());
         // SIGNORE (mutual server-ignore): the sender's mask + list, hoisted once.
-        let src_mask = self.users.get(&src).map(|su| su.prefix()).unwrap_or_default();
-        let src_signore: Vec<String> =
-            self.users.get(&src).map(|su| su.signore.clone()).unwrap_or_default();
+        let src_mask = self
+            .users
+            .get(&src)
+            .map(|su| su.prefix())
+            .unwrap_or_default();
+        let src_signore: Vec<String> = self
+            .users
+            .get(&src)
+            .map(|su| su.signore.clone())
+            .unwrap_or_default();
         // users/ignore-privdeaf: this sender's channel messages reach +D deaf members
-        let src_reaches_deaf =
-            crate::modules::opertypes::has_priv(self, src, crate::modules::opertypes::privs::USERS_IGNORE_PRIVDEAF);
+        let src_reaches_deaf = crate::modules::opertypes::has_priv(
+            self,
+            src,
+            crate::modules::opertypes::privs::USERS_IGNORE_PRIVDEAF,
+        );
         // one cached line per (server_time, account_tag, message_tags) combination
         let mut cache: [Option<std::sync::Arc<str>>; 8] = std::array::from_fn(|_| None);
         for m in members {
@@ -1402,8 +1464,12 @@ impl Server {
             }
             // SIGNORE: skip a member mutually server-ignored with the sender
             if (!src_signore.is_empty() || !u.signore.is_empty())
-                && (src_signore.iter().any(|p| crate::channels::glob_match(p, &u.prefix()))
-                    || u.signore.iter().any(|p| crate::channels::glob_match(p, &src_mask)))
+                && (src_signore
+                    .iter()
+                    .any(|p| crate::channels::glob_match(p, &u.prefix()))
+                    || u.signore
+                        .iter()
+                        .any(|p| crate::channels::glob_match(p, &src_mask)))
             {
                 continue;
             }
@@ -1421,7 +1487,10 @@ impl Server {
                         tags.push(time_tag.clone());
                     }
                     if at {
-                        tags.push(format!("account={}", account.as_deref().unwrap_or_default()));
+                        tags.push(format!(
+                            "account={}",
+                            account.as_deref().unwrap_or_default()
+                        ));
                     }
                     if mt {
                         if !msgid.is_empty() {
@@ -1641,7 +1710,8 @@ impl Server {
         for (&uid, u) in &self.users {
             let idle = now.saturating_sub(u.last_active);
             // a connection class may override the registration timeout / ping frequency
-            let mut reg_to = crate::modules::connclass::reg_timeout(self, uid).unwrap_or(reg_timeout);
+            let mut reg_to =
+                crate::modules::connclass::reg_timeout(self, uid).unwrap_or(reg_timeout);
             if let Some(ft) = flood_to {
                 reg_to = reg_to.min(ft);
             }
@@ -1673,7 +1743,10 @@ mod tests {
     fn version_token_and_comment() {
         assert_eq!(RELEASE, "5");
         let c = version_comment();
-        assert!(c.starts_with(&format!("echoircd {VERSION} \u{b7}")), "unexpected: {c}");
+        assert!(
+            c.starts_with(&format!("echoircd {VERSION} \u{b7}")),
+            "unexpected: {c}"
+        );
         assert!(c.contains("rustc ") && c.contains("built "));
     }
 
@@ -1759,12 +1832,15 @@ mod tests {
         assert!(!crate::connguard::flood_active(&s));
 
         // hard cap of 2 -> a pool of 3 is over
-        s.raw_config.insert("max_unregistered".into(), vec!["2".into()]);
+        s.raw_config
+            .insert("max_unregistered".into(), vec!["2".into()]);
         assert!(crate::connguard::over_cap(&s));
 
         // floodwater 2 -> flood mode; unregistered timeout cut to the configured value
-        s.raw_config.insert("unreg_floodwater".into(), vec!["2".into()]);
-        s.raw_config.insert("unreg_flood_timeout".into(), vec!["25".into()]);
+        s.raw_config
+            .insert("unreg_floodwater".into(), vec!["2".into()]);
+        s.raw_config
+            .insert("unreg_flood_timeout".into(), vec!["25".into()]);
         assert!(crate::connguard::flood_active(&s));
         assert_eq!(crate::connguard::flood_timeout(&s), Some(25));
 
@@ -1797,8 +1873,14 @@ mod tests {
         s.purge_flood_state();
         let ch = &s.channels["#c"];
         assert!(ch.msgflood_hits.contains_key(&1));
-        assert!(!ch.msgflood_hits.contains_key(&99), "departed member's +f state dropped");
-        assert!(!ch.recent_kicks.contains_key(&99), "expired +J entry dropped");
+        assert!(
+            !ch.msgflood_hits.contains_key(&99),
+            "departed member's +f state dropped"
+        );
+        assert!(
+            !ch.recent_kicks.contains_key(&99),
+            "expired +J entry dropped"
+        );
         assert!(ch.recent_kicks.contains_key(&88), "fresh +J entry kept");
     }
 
@@ -1837,7 +1919,10 @@ mod tests {
     fn xline_add_remove_expire_all_notify() {
         let mut s = srv();
         s.name = "irc.test".to_string();
-        s.conf_path = std::env::temp_dir().join("echo-xline-notify-test").display().to_string();
+        s.conf_path = std::env::temp_dir()
+            .join("echo-xline-notify-test")
+            .display()
+            .to_string();
         let orx = add_user(&mut s, 1, "op");
         if let Some(u) = s.users.get_mut(&1) {
             u.flags.oper = true;
@@ -1848,26 +1933,50 @@ mod tests {
         s.add_xline(crate::xline::XKind::Gline, "*@bad.example", 0, "op", "spam");
         assert!(s.remove_xline(crate::xline::XKind::Gline, "*@bad.example", "op"));
         assert!(!s.remove_xline(crate::xline::XKind::Gline, "*@bad.example", "op")); // gone: no re-announce
-        // timed K-line removed early → reports the time it had left
-        s.add_xline(crate::xline::XKind::Kline, "*@foo.example", 604800, "op", "temp");
+                                                                                     // timed K-line removed early → reports the time it had left
+        s.add_xline(
+            crate::xline::XKind::Kline,
+            "*@foo.example",
+            604800,
+            "op",
+            "temp",
+        );
         assert!(s.remove_xline(crate::xline::XKind::Kline, "*@foo.example", "op"));
-        // a timed Z-line whose expiry is forced into the past, then purged
+        // a timed Z-line forced into the past (but after its set-time) then purged —
+        // the "expired" notice must report who set it, for how long, and why
         s.add_xline(crate::xline::XKind::Zline, "192.0.2.5", 3600, "op", "temp2");
         for x in s.xlines.iter_mut() {
             if x.mask == "192.0.2.5" {
-                x.expires = 1;
+                x.set_at = 1000;
+                x.expires = 1000 + 3600; // in the past → purged; window = 1 hour
             }
         }
         s.purge_xlines();
-        let joined: String =
-            std::iter::from_fn(|| orx.try_recv().ok()).collect::<Vec<_>>().join("\n");
-        assert!(joined.contains("XLINE: op added a permanent G-line on *@bad.example: spam"), "add: {joined}");
-        assert!(joined.contains("XLINE: op removed a permanent G-line on *@bad.example"), "remove permanent: {joined}");
+        let joined: String = std::iter::from_fn(|| orx.try_recv().ok())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(
-            joined.contains("XLINE: op removed a timed K-line on *@foo.example (") && joined.contains("remaining)"),
-            "remove timed shows remaining: {joined}"
+            joined.contains("XLINE: op added a permanent G-line on *@bad.example: spam"),
+            "add: {joined}"
         );
-        assert!(joined.contains("XLINE: Z-line on 192.0.2.5 expired"), "expire: {joined}");
+        assert!(
+            joined.contains("XLINE: op removed a permanent G-line on *@bad.example")
+                && joined.contains("(set by op: spam)"),
+            "remove permanent shows origin: {joined}"
+        );
+        assert!(
+            joined.contains("XLINE: op removed a timed K-line on *@foo.example (")
+                && joined.contains("remaining)")
+                && joined.contains("(set by op: temp)"),
+            "remove timed shows remaining + origin: {joined}"
+        );
+        assert!(
+            joined.contains("XLINE: Z-line on 192.0.2.5 expired")
+                && joined.contains("set by op")
+                && joined.contains("duration 1 hour")
+                && joined.contains("temp2"),
+            "expire shows setter/duration/reason: {joined}"
+        );
     }
 
     #[test]
@@ -1875,7 +1984,10 @@ mod tests {
         use crate::channels::{Channel, Member};
         let mut s = srv();
         // #xlog takes only x-line (x) notices; #all takes every category
-        s.raw_config.insert("chanlog".to_string(), vec!["#xlog x".to_string(), "#all".to_string()]);
+        s.raw_config.insert(
+            "chanlog".to_string(),
+            vec!["#xlog x".to_string(), "#all".to_string()],
+        );
         let rx = add_user(&mut s, 1, "logbot");
         for name in ["#xlog", "#all"] {
             let mut c = Channel::new(name);
@@ -1886,12 +1998,26 @@ mod tests {
         s.snotice_c('c', "CONNMSG");
         let lines: Vec<String> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
         let logged = |chan: &str, needle: &str| {
-            lines.iter().any(|l| l.contains(&format!("PRIVMSG {chan} :")) && l.contains(needle))
+            lines
+                .iter()
+                .any(|l| l.contains(&format!("PRIVMSG {chan} :")) && l.contains(needle))
         };
-        assert!(logged("#xlog", "XLINEMSG"), "x-line notice goes to #xlog: {lines:?}");
-        assert!(logged("#all", "XLINEMSG"), "x-line notice goes to #all: {lines:?}");
-        assert!(!logged("#xlog", "CONNMSG"), "connect notice filtered out of #xlog: {lines:?}");
-        assert!(logged("#all", "CONNMSG"), "connect notice goes to #all: {lines:?}");
+        assert!(
+            logged("#xlog", "XLINEMSG"),
+            "x-line notice goes to #xlog: {lines:?}"
+        );
+        assert!(
+            logged("#all", "XLINEMSG"),
+            "x-line notice goes to #all: {lines:?}"
+        );
+        assert!(
+            !logged("#xlog", "CONNMSG"),
+            "connect notice filtered out of #xlog: {lines:?}"
+        );
+        assert!(
+            logged("#all", "CONNMSG"),
+            "connect notice goes to #all: {lines:?}"
+        );
     }
 
     #[test]
@@ -1933,16 +2059,40 @@ mod tests {
     #[test]
     fn banned_user_message_shows_expiry() {
         let mut s = srv();
-        s.conf_path = std::env::temp_dir().join("echo-ban-expiry-test").display().to_string();
+        s.conf_path = std::env::temp_dir()
+            .join("echo-ban-expiry-test")
+            .display()
+            .to_string();
         // permanent K-line: reason only, no expiry tail
-        s.add_xline(crate::xline::XKind::Kline, "*@perm.example", 0, "op", "spam");
+        s.add_xline(
+            crate::xline::XKind::Kline,
+            "*@perm.example",
+            0,
+            "op",
+            "spam",
+        );
         let perm = s.matched_xline("bob", "perm.example", "1.2.3.4").unwrap();
-        assert_eq!(perm, "K-lined: spam", "permanent ban shows no expiry: {perm}");
+        assert_eq!(
+            perm, "K-lined: spam",
+            "permanent ban shows no expiry: {perm}"
+        );
         // timed Z-line: reason + when it lifts
-        s.add_xline(crate::xline::XKind::Zline, "5.6.7.8", 604800, "op", "botnet");
+        s.add_xline(
+            crate::xline::XKind::Zline,
+            "5.6.7.8",
+            604800,
+            "op",
+            "botnet",
+        );
         let timed = s.matched_xline("bob", "any.host", "5.6.7.8").unwrap();
-        assert!(timed.starts_with("Z-lined: botnet (expires in "), "timed ban shows expiry: {timed}");
-        assert!(timed.contains(" on ") && timed.ends_with(')'), "with an absolute date: {timed}");
+        assert!(
+            timed.starts_with("Z-lined: botnet (expires in "),
+            "timed ban shows expiry: {timed}"
+        );
+        assert!(
+            timed.contains(" on ") && timed.ends_with(')'),
+            "with an absolute date: {timed}"
+        );
     }
 
     #[test]
@@ -1950,7 +2100,10 @@ mod tests {
         use std::net::Ipv4Addr;
         let mut s = srv();
         s.name = "irc.test".to_string();
-        s.conf_path = std::env::temp_dir().join("echo-dnsbl-test").display().to_string();
+        s.conf_path = std::env::temp_dir()
+            .join("echo-dnsbl-test")
+            .display()
+            .to_string();
         // an operator watching the xline (x) and dnsbl (d) snomasks
         let orx = add_user(&mut s, 1, "watcher");
         if let Some(u) = s.users.get_mut(&1) {
@@ -1978,8 +2131,9 @@ mod tests {
                 reply: Ipv4Addr::new(127, 0, 0, 2),
             },
         );
-        let joined: String =
-            std::iter::from_fn(|| orx.try_recv().ok()).collect::<Vec<_>>().join("\n");
+        let joined: String = std::iter::from_fn(|| orx.try_recv().ok())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(
             joined.contains(
                 "XLINE: dnsbl@irc.test added a timed Z-line on 2a06:1700:0:12::1, expires in 1 week (on "
@@ -1990,7 +2144,10 @@ mod tests {
             joined.contains("detected as being on the 'torexit.dan.me.uk' DNSBL: Tor exit node"),
             "dnsbl notice: {joined}"
         );
-        assert!(joined.contains("search/2a06:1700:0:12::1 for more information."), "%ip% substituted: {joined}");
+        assert!(
+            joined.contains("search/2a06:1700:0:12::1 for more information."),
+            "%ip% substituted: {joined}"
+        );
         assert!(!joined.contains("%ip%"), "no literal %ip% left: {joined}");
     }
 
@@ -2038,12 +2195,27 @@ mod tests {
 
         // The cap holder sees a RENAME; the plain client is walked PART -> JOIN.
         let ann: Vec<String> = arx.try_iter().collect();
-        assert!(ann.iter().any(|l| l.contains("RENAME #old #new")), "cap client got RENAME: {ann:?}");
-        assert!(!ann.iter().any(|l| l.contains("PART #old")), "cap client not PARTed");
+        assert!(
+            ann.iter().any(|l| l.contains("RENAME #old #new")),
+            "cap client got RENAME: {ann:?}"
+        );
+        assert!(
+            !ann.iter().any(|l| l.contains("PART #old")),
+            "cap client not PARTed"
+        );
         let bob: Vec<String> = brx.try_iter().collect();
-        assert!(bob.iter().any(|l| l.contains("PART #old")), "plain client PARTed: {bob:?}");
-        assert!(bob.iter().any(|l| l.contains("JOIN #new")), "plain client re-JOINed");
-        assert!(!bob.iter().any(|l| l.contains("RENAME")), "plain client got no RENAME");
+        assert!(
+            bob.iter().any(|l| l.contains("PART #old")),
+            "plain client PARTed: {bob:?}"
+        );
+        assert!(
+            bob.iter().any(|l| l.contains("JOIN #new")),
+            "plain client re-JOINed"
+        );
+        assert!(
+            !bob.iter().any(|l| l.contains("RENAME")),
+            "plain client got no RENAME"
+        );
     }
 
     #[test]
@@ -2053,11 +2225,18 @@ mod tests {
         s.join(1, "#chan", None);
         let _ = arx.try_iter().count();
         let key = s.rename_channel("#chan", "#Chan", "ann!u@localhost", "");
-        assert_eq!(key.as_deref(), Some("#chan"), "key unchanged on a case-only rename");
+        assert_eq!(
+            key.as_deref(),
+            Some("#chan"),
+            "key unchanged on a case-only rename"
+        );
         assert_eq!(s.channels["#chan"].name, "#Chan", "display casing updated");
         // Non-cap member: the spec says no PART/JOIN fallback for a case change.
         let ann: Vec<String> = arx.try_iter().collect();
-        assert!(!ann.iter().any(|l| l.contains("PART")), "no fallback on case-only: {ann:?}");
+        assert!(
+            !ann.iter().any(|l| l.contains("PART")),
+            "no fallback on case-only: {ann:?}"
+        );
     }
 
     #[test]
@@ -2082,16 +2261,24 @@ mod tests {
         let bob: Vec<String> = brx.try_iter().collect();
         let cara: Vec<String> = crx.try_iter().collect();
         let dave: Vec<String> = drx.try_iter().collect();
-        assert!(ann.iter().any(|l| l == ":dave!u@h PRIVMSG #c :hi"), "plain untagged: {ann:?}");
         assert!(
-            bob.iter().any(|l| l.starts_with("@time=") && l.ends_with(":dave!u@h PRIVMSG #c :hi")),
+            ann.iter().any(|l| l == ":dave!u@h PRIVMSG #c :hi"),
+            "plain untagged: {ann:?}"
+        );
+        assert!(
+            bob.iter()
+                .any(|l| l.starts_with("@time=") && l.ends_with(":dave!u@h PRIVMSG #c :hi")),
             "server-time tagged: {bob:?}"
         );
         assert!(
-            cara.iter().any(|l| l.contains("account=dv") && l.contains("msgid=abc123")),
+            cara.iter()
+                .any(|l| l.contains("account=dv") && l.contains("msgid=abc123")),
             "message-tags+account-tag both present: {cara:?}"
         );
-        assert!(dave.is_empty(), "sender is excluded from the fanout: {dave:?}");
+        assert!(
+            dave.is_empty(),
+            "sender is excluded from the fanout: {dave:?}"
+        );
     }
 
     #[test]
@@ -2123,8 +2310,14 @@ mod tests {
         let s = srv();
         let joined = s.isupport_lines(&s.network).join(" ");
         assert!(joined.contains("BOT=B"), "bot-mode letter: {joined}");
-        assert!(joined.contains("ACCOUNTEXTBAN=a"), "account-extban token: {joined}");
-        assert!(joined.contains("EXTBAN=,aG"), "'a' listed in EXTBAN: {joined}");
+        assert!(
+            joined.contains("ACCOUNTEXTBAN=a"),
+            "account-extban token: {joined}"
+        );
+        assert!(
+            joined.contains("EXTBAN=,aG"),
+            "'a' listed in EXTBAN: {joined}"
+        );
     }
 
     #[test]
@@ -2135,7 +2328,10 @@ mod tests {
         add_user(&mut s, 2, "bob"); // no account
         assert!(crate::modules::accountban::matches(&s, 1, "spam*"));
         assert!(!crate::modules::accountban::matches(&s, 1, "other"));
-        assert!(!crate::modules::accountban::matches(&s, 2, "*"), "no account never matches");
+        assert!(
+            !crate::modules::accountban::matches(&s, 2, "*"),
+            "no account never matches"
+        );
     }
 
     #[test]
@@ -2145,8 +2341,14 @@ mod tests {
         s.users.get_mut(&1).unwrap().caps.no_implicit_names = true;
         s.join(1, "#c", None);
         let al: Vec<String> = arx.try_iter().collect();
-        assert!(al.iter().any(|l| l.contains("JOIN #c")), "still gets its JOIN");
-        assert!(!al.iter().any(|l| l.contains(" 353 ")), "no NAMREPLY: {al:?}");
+        assert!(
+            al.iter().any(|l| l.contains("JOIN #c")),
+            "still gets its JOIN"
+        );
+        assert!(
+            !al.iter().any(|l| l.contains(" 353 ")),
+            "no NAMREPLY: {al:?}"
+        );
         assert!(!al.iter().any(|l| l.contains(" 366 ")), "no ENDOFNAMES");
         // a client without the cap still gets the implicit NAMES
         let brx = add_user(&mut s, 2, "bob");
