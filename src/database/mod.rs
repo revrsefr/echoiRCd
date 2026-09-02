@@ -10,4 +10,6 @@
 //! (no `unsafe`, no libpq, no async runtime) built on the openssl the daemon
 //! already links for TLS and SCRAM-SHA-256 auth.
 
+pub mod pgsql;
+pub mod proto;
 pub mod scram;
