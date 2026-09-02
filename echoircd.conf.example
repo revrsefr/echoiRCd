@@ -525,6 +525,13 @@ database {
     # pgsql_database "echoircd";     # defaults to pgsql_user if unset
     # pgsql_user     "echoircd";
     # pgsql_pass     "s3cret";       # (alias: pgsql_password)
+    #
+    # Where the persisted stores (xlines / permchannels / markread / reputation /
+    # webpush subscriptions) live. Default "file" keeps the flat `.db` files even
+    # when a database is configured; set "pgsql" to centralize them all in the
+    # database instead — the existing flat files are migrated in automatically on
+    # first start and kept as backups.
+    # store_backend  file;          # file (default) | pgsql
     # pgsql_tls      no;             # negotiate TLS to the database (encryption; no cert check)
     # pgsql_pool     2;              # worker connections / concurrent queries (1..16)
     # pgsql_connect_timeout 5;       # seconds to wait for a connection

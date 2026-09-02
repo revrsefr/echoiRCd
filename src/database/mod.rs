@@ -192,6 +192,7 @@ pub fn init(srv: &mut Server) {
     let Some((cfg, pool)) = config(srv) else {
         return; // no pgsql_host → subsystem stays inert
     };
+    ensure_schema(&cfg); // the central store table must exist before any load/save
     let queue: Queue = Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
     for _ in 0..pool {
         let (q, tx, c) = (queue.clone(), srv.event_tx.clone(), cfg.clone());
@@ -304,8 +305,152 @@ pub fn on_result(srv: &mut Server, id: u64, result: SqlResult) {
         .ext
         .get_mut::<SqlState>()
         .and_then(|st| st.pending.remove(&id));
-    if let Some(cb) = cb {
-        cb(srv, result);
+    match cb {
+        Some(cb) => cb(srv, result),
+        // id 0 (or an already-taken id): a fire-and-forget write — surface a failure
+        None => {
+            if let Err(e) = result {
+                eprintln!("echoircd: pgsql write failed: {e}");
+            }
+        }
+    }
+}
+
+// ── centralized store ────────────────────────────────────────────────────────
+// The drop-in replacement for the scattered flat `.db` files: every module's whole
+// serialized blob is one row in `echoircd_store(name, content, updated)`. Load the
+// blob synchronously at startup, persist it asynchronously (off-core) on change.
+
+const STORE_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS echoircd_store \
+     (name text PRIMARY KEY, content text NOT NULL, updated bigint NOT NULL DEFAULT 0)";
+const STORE_UPSERT: &str =
+    "INSERT INTO echoircd_store (name, content, updated) VALUES ($1, $2, $3) \
+     ON CONFLICT (name) DO UPDATE SET content = EXCLUDED.content, updated = EXCLUDED.updated";
+
+/// Whether a database is configured at all (the query API is available).
+pub fn is_enabled(srv: &Server) -> bool {
+    srv.ext.get::<SqlState>().is_some()
+}
+
+/// Whether persisted stores should live in the database. The database can be
+/// *configured* (for the query API / a future sqlauth) yet persistence still
+/// defaults to **flat files** — opt in explicitly with `store_backend = pgsql`.
+pub fn stores_in_db(srv: &Server) -> bool {
+    is_enabled(srv)
+        && srv
+            .conf("store_backend")
+            .map(|v| v.eq_ignore_ascii_case("pgsql") || v.eq_ignore_ascii_case("postgres"))
+            .unwrap_or(false)
+}
+
+/// Create the store table if missing (synchronous, at startup). Best-effort.
+fn ensure_schema(cfg: &PgConfig) {
+    let r = (|| -> Result<(), String> {
+        let mut c = PgConn::connect(cfg)?;
+        let out = c.query(STORE_SCHEMA, &[]).map_err(|e| e.into_message());
+        c.close();
+        out.map(|_| ())
+    })();
+    if let Err(e) = r {
+        eprintln!("echoircd: pgsql store schema init failed: {e}");
+    }
+}
+
+/// Load a store's blob, **database-first**, seeding the DB from the flat-file
+/// `fallback` the first time it's empty (auto-migration). Synchronous — called at
+/// startup before the event loop runs, where blocking is fine. On any DB error it
+/// falls back to `fallback`, so a database hiccup never loses the on-disk data.
+pub fn store_load_or_seed(srv: &Server, name: &str, fallback: Option<String>) -> Option<String> {
+    if !stores_in_db(srv) {
+        return fallback; // flat-file backend (the default)
+    }
+    let Some((cfg, _)) = config(srv) else {
+        return fallback;
+    };
+    let loaded = (|| -> Result<Option<String>, String> {
+        let mut c = PgConn::connect(&cfg)?;
+        let key = Some(name.as_bytes().to_vec());
+        let sel = c
+            .query(
+                "SELECT content FROM echoircd_store WHERE name = $1",
+                &[key.clone()],
+            )
+            .map_err(|e| e.into_message())?;
+        let existing = sel
+            .rows
+            .into_iter()
+            .next()
+            .and_then(|row| row.into_iter().next().flatten());
+        let result = match existing {
+            Some(content) => Some(content), // the DB is authoritative
+            None => {
+                // nothing stored yet — migrate the flat file in (synchronously, so
+                // it lands before any later async save can race it)
+                if let Some(ref content) = fallback {
+                    let now = crate::server::now() as i64;
+                    c.query(
+                        STORE_UPSERT,
+                        &[
+                            key,
+                            Some(content.clone().into_bytes()),
+                            Some(now.to_string().into_bytes()),
+                        ],
+                    )
+                    .map_err(|e| e.into_message())?;
+                }
+                fallback.clone()
+            }
+        };
+        c.close();
+        Ok(result)
+    })();
+    match loaded {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("echoircd: pgsql store load '{name}' failed ({e}); using flat file");
+            fallback
+        }
+    }
+}
+
+/// Persist a store's blob asynchronously — fire-and-forget: it runs on the worker
+/// pool and never blocks the core, and needs only `&Server` (no callback to
+/// register). Request id 0 is reserved for these callback-less writes; a failure is
+/// still logged by [`on_result`].
+pub fn store_save(srv: &Server, name: &str, content: String) {
+    let Some(st) = srv.ext.get::<SqlState>() else {
+        return; // not configured — the caller keeps using its flat file
+    };
+    let params = vec![
+        Some(name.as_bytes().to_vec()),
+        Some(content.into_bytes()),
+        Some((crate::server::now() as i64).to_string().into_bytes()),
+    ];
+    submit(
+        &st.queue,
+        SqlRequest {
+            id: 0, // fire-and-forget
+            sql: STORE_UPSERT.to_string(),
+            params,
+        },
+    );
+}
+
+/// Uniform load for a persisted store: the central DB when `store_backend = pgsql`
+/// (seeded from the flat file on first run), else the flat file. The flat file is
+/// always read so it can seed / back a database fallback. `None` ⇒ nothing yet.
+pub fn persist_load(srv: &Server, name: &str, path: &str) -> Option<String> {
+    let file = std::fs::read_to_string(path).ok();
+    store_load_or_seed(srv, name, file)
+}
+
+/// Uniform save for a persisted store: to the central DB when `store_backend =
+/// pgsql`, else the flat file — both off-core, so neither can stall the core.
+pub fn persist_save(srv: &Server, name: &str, path: &str, content: String) {
+    if stores_in_db(srv) {
+        store_save(srv, name, content);
+    } else {
+        srv.disk_write(path.to_string(), content);
     }
 }
 

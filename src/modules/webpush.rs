@@ -120,7 +120,7 @@ pub fn load(s: &mut Server) {
     let _ = s.ext.get_or_insert_with::<Vapid>(move || vapid);
 
     // subscriptions
-    if let Ok(text) = std::fs::read_to_string(subs_path(s)) {
+    if let Some(text) = crate::database::persist_load(s, "webpush_subs", &subs_path(s)) {
         let store = s.ext.get_or_insert_with::<Subs>(Subs::default);
         for line in text.lines() {
             let f: Vec<&str> = line.split(' ').collect();
@@ -159,7 +159,7 @@ fn save(s: &Server) {
             ));
         }
     }
-    s.disk_write(subs_path(s), out);
+    crate::database::persist_save(s, "webpush_subs", &subs_path(s), out);
 }
 
 /// The ISUPPORT `VAPID=<key>` token, advertised in the welcome burst. `None` when
@@ -228,7 +228,15 @@ fn encrypt_payload(payload: &[u8], ua_public: &[u8], auth: &[u8]) -> Option<Vec<
     let mut record = payload.to_vec();
     record.push(0x02); // single-record padding delimiter
     let mut tag = [0u8; 16];
-    let ct = encrypt_aead(Cipher::aes_128_gcm(), &cek, Some(&nonce), &[], &record, &mut tag).ok()?;
+    let ct = encrypt_aead(
+        Cipher::aes_128_gcm(),
+        &cek,
+        Some(&nonce),
+        &[],
+        &record,
+        &mut tag,
+    )
+    .ok()?;
 
     // header: salt(16) | rs(4, BE) | idlen(1) | keyid(as_public) ; then ciphertext|tag
     let mut body = Vec::with_capacity(21 + as_public.len() + ct.len() + 16);
@@ -332,7 +340,13 @@ fn payload_json(from: &str, target: &str, text: &str) -> String {
 fn mentions(text: &str, nick: &str) -> bool {
     let n = nick.to_ascii_lowercase();
     text.to_ascii_lowercase()
-        .split(|c: char| c.is_whitespace() || matches!(c, ',' | ':' | ';' | '.' | '!' | '?' | '<' | '>' | '(' | ')' | '"'))
+        .split(|c: char| {
+            c.is_whitespace()
+                || matches!(
+                    c,
+                    ',' | ':' | ';' | '.' | '!' | '?' | '<' | '>' | '(' | ')' | '"'
+                )
+        })
         .any(|w| w == n)
 }
 
@@ -357,7 +371,11 @@ fn maybe_push(s: &Server, from_uid: Uid, target: &str, text: &str) {
     if !s.conf_bool("webpush", true) || s.ext.get::<Vapid>().is_none() {
         return;
     }
-    let sender = s.users.get(&from_uid).map(|u| u.nick.clone()).unwrap_or_default();
+    let sender = s
+        .users
+        .get(&from_uid)
+        .map(|u| u.nick.clone())
+        .unwrap_or_default();
     // who to notify: a PM's target, or channel members whose nick is highlighted
     let mut recips: Vec<Uid> = Vec::new();
     if target.starts_with('#') {
@@ -426,13 +444,23 @@ impl Command for WebPushCmd {
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         if !s.conf_bool("webpush", true) || s.ext.get::<Vapid>().is_none() {
-            s.fail(uid, "WEBPUSH", "TEMPORARILY_UNAVAILABLE", "Web push is not available");
+            s.fail(
+                uid,
+                "WEBPUSH",
+                "TEMPORARILY_UNAVAILABLE",
+                "Web push is not available",
+            );
             return CmdResult::Fail;
         }
         match params[0].to_ascii_uppercase().as_str() {
             "REGISTER" => {
                 if params.len() < 3 {
-                    s.fail(uid, "WEBPUSH", "NEED_MORE_PARAMS", "WEBPUSH REGISTER <endpoint> <keys>");
+                    s.fail(
+                        uid,
+                        "WEBPUSH",
+                        "NEED_MORE_PARAMS",
+                        "WEBPUSH REGISTER <endpoint> <keys>",
+                    );
                     return CmdResult::Fail;
                 }
                 let endpoint = params[1].clone();
@@ -449,7 +477,12 @@ impl Command for WebPushCmd {
                     }
                 }
                 let (Some(p256dh), Some(auth)) = (p256dh, auth) else {
-                    s.fail(uid, "WEBPUSH", "INVALID_PARAMS", "keys must be p256dh=<b64url>;auth=<b64url>");
+                    s.fail(
+                        uid,
+                        "WEBPUSH",
+                        "INVALID_PARAMS",
+                        "keys must be p256dh=<b64url>;auth=<b64url>",
+                    );
                     return CmdResult::Fail;
                 };
                 if p256dh.len() != 65 || auth.len() != 16 {
@@ -461,7 +494,11 @@ impl Command for WebPushCmd {
                     let store = s.ext.get_or_insert_with::<Subs>(Subs::default);
                     let list = store.0.entry(id).or_default();
                     list.retain(|x| x.endpoint != endpoint); // replace an existing sub
-                    list.push(Sub { endpoint: endpoint.clone(), p256dh, auth });
+                    list.push(Sub {
+                        endpoint: endpoint.clone(),
+                        p256dh,
+                        auth,
+                    });
                 }
                 save(s);
                 s.send(uid, format!(":{} WEBPUSH REGISTER {endpoint}", s.name));
@@ -469,7 +506,12 @@ impl Command for WebPushCmd {
             }
             "UNREGISTER" => {
                 let Some(endpoint) = params.get(1) else {
-                    s.fail(uid, "WEBPUSH", "NEED_MORE_PARAMS", "WEBPUSH UNREGISTER <endpoint>");
+                    s.fail(
+                        uid,
+                        "WEBPUSH",
+                        "NEED_MORE_PARAMS",
+                        "WEBPUSH UNREGISTER <endpoint>",
+                    );
                     return CmdResult::Fail;
                 };
                 let id = identity(s, uid);
@@ -486,7 +528,12 @@ impl Command for WebPushCmd {
                 CmdResult::Ok
             }
             other => {
-                s.fail(uid, "WEBPUSH", "INVALID_PARAMS", &format!("unknown WEBPUSH subcommand {other}"));
+                s.fail(
+                    uid,
+                    "WEBPUSH",
+                    "INVALID_PARAMS",
+                    &format!("unknown WEBPUSH subcommand {other}"),
+                );
                 CmdResult::Fail
             }
         }
@@ -504,7 +551,8 @@ mod tests {
         let salt: Vec<u8> = (0..=0x0c).collect();
         let info: Vec<u8> = (0xf0..=0xf9).collect();
         let okm = hkdf(&salt, &ikm, &info, 42).unwrap();
-        let want = "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865";
+        let want =
+            "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865";
         let got: String = okm.iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(got, want);
     }
@@ -530,9 +578,11 @@ mod tests {
         let idlen = body[20] as usize;
         let as_public = &body[21..21 + idlen];
         let ciphertext = &body[21 + idlen..];
-        let as_pkey =
-            PKey::from_ec_key(EcKey::from_public_key(&g, &EcPoint::from_bytes(&g, as_public, &mut ctx).unwrap()).unwrap())
-                .unwrap();
+        let as_pkey = PKey::from_ec_key(
+            EcKey::from_public_key(&g, &EcPoint::from_bytes(&g, as_public, &mut ctx).unwrap())
+                .unwrap(),
+        )
+        .unwrap();
         let ua_pkey = PKey::from_ec_key(ua.clone()).unwrap();
         let mut d = Deriver::new(&ua_pkey).unwrap();
         d.set_peer(&as_pkey).unwrap();
@@ -544,7 +594,9 @@ mod tests {
         let cek = hkdf(salt, &ikm, b"Content-Encoding: aes128gcm\x00", 16).unwrap();
         let nonce = hkdf(salt, &ikm, b"Content-Encoding: nonce\x00", 12).unwrap();
         let (ct, tag) = ciphertext.split_at(ciphertext.len() - 16);
-        let rec = openssl::symm::decrypt_aead(Cipher::aes_128_gcm(), &cek, Some(&nonce), &[], ct, tag).unwrap();
+        let rec =
+            openssl::symm::decrypt_aead(Cipher::aes_128_gcm(), &cek, Some(&nonce), &[], ct, tag)
+                .unwrap();
         let end = rec.iter().rposition(|&b| b == 0x02).unwrap();
         assert_eq!(&rec[..end], plain);
     }

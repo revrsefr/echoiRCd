@@ -8,9 +8,6 @@
 //!
 //! Config: `permchannels_database` (path; default `<conf>.permchannels`).
 
-use std::fs;
-use std::io;
-
 use crate::channels::{Ban, Channel, Topic};
 use crate::module::Module;
 use crate::server::Server;
@@ -35,7 +32,9 @@ fn serialize(s: &Server) -> String {
     }
     chans.sort_by(|a, b| a.name.cmp(&b.name));
 
-    let mut out = String::from("# echoircd permanent channels — auto-generated; manual edits are overwritten\n");
+    let mut out = String::from(
+        "# echoircd permanent channels — auto-generated; manual edits are overwritten\n",
+    );
     for c in chans {
         out.push_str(&format!("C {} {}\n", c.name, c.created));
         out.push_str(&format!("M {}\n", c.modes.render(true)));
@@ -60,14 +59,6 @@ fn serialize(s: &Server) -> String {
         }
     }
     out
-}
-
-/// Atomic write: a full temp file then rename over the target, so a reader (or a
-/// crash) never sees a half-written database.
-fn atomic_write(path: &str, content: &str) -> io::Result<()> {
-    let tmp = format!("{path}.tmp");
-    fs::write(&tmp, content)?;
-    fs::rename(&tmp, path)
 }
 
 /// One channel record accumulated while parsing the database.
@@ -124,7 +115,9 @@ fn apply_modes(s: &mut Server, name: &str, key: &str, modes: &str) {
     }));
     s.mode_sudo = false;
     if outcome.is_err() {
-        eprintln!("[permchannels] a mode handler panicked applying {name}; skipped its remaining modes");
+        eprintln!(
+            "[permchannels] a mode handler panicked applying {name}; skipped its remaining modes"
+        );
     }
 }
 
@@ -162,7 +155,7 @@ fn build(s: &mut Server, rec: Record) {
 /// Restore permanent channels from disk. Called once at startup, before links come
 /// up (so the TS we assign can't desync a peer, matching how the DB is written).
 pub fn load(s: &mut Server) {
-    let Ok(text) = fs::read_to_string(db_path(s)) else {
+    let Some(text) = crate::database::persist_load(s, "permchannels", &db_path(s)) else {
         return;
     };
     let mut cur: Option<Record> = None;
@@ -182,7 +175,10 @@ pub fn load(s: &mut Server) {
                 }
                 let mut it = rest.split_whitespace();
                 let name = it.next().unwrap_or_default().to_string();
-                let created = it.next().and_then(|v| v.parse().ok()).unwrap_or_else(crate::server::now);
+                let created = it
+                    .next()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or_else(crate::server::now);
                 cur = Some(Record {
                     name,
                     created,
@@ -198,7 +194,8 @@ pub fn load(s: &mut Server) {
                 if let Some(rec) = cur.as_mut() {
                     // "<ts> <setter> :<text>"
                     let mut it = rest.splitn(3, ' ');
-                    if let (Some(ts), Some(setter), Some(text)) = (it.next(), it.next(), it.next()) {
+                    if let (Some(ts), Some(setter), Some(text)) = (it.next(), it.next(), it.next())
+                    {
                         if let Ok(ts) = ts.parse() {
                             rec.topic = Some(Topic {
                                 text: text.strip_prefix(':').unwrap_or(text).to_string(),
@@ -213,7 +210,8 @@ pub fn load(s: &mut Server) {
                 if let Some(rec) = cur.as_mut() {
                     // "<ts> <setter> <mask>"
                     let mut it = rest.splitn(3, ' ');
-                    if let (Some(ts), Some(setter), Some(mask)) = (it.next(), it.next(), it.next()) {
+                    if let (Some(ts), Some(setter), Some(mask)) = (it.next(), it.next(), it.next())
+                    {
                         if let Ok(ts) = ts.parse() {
                             rec.lists.push((
                                 tag.chars().next().unwrap(),
@@ -255,13 +253,8 @@ impl PermChannels {
         if cur == self.last {
             return;
         }
-        let path = db_path(s);
-        if cur.is_empty() {
-            let _ = fs::remove_file(&path);
-        } else if let Err(e) = atomic_write(&path, &cur) {
-            eprintln!("[permchannels] cannot write {path}: {e}");
-            return; // leave `last` stale so the next tick retries
-        }
+        // central DB when store_backend=pgsql, else the flat file (both off-core)
+        crate::database::persist_save(s, "permchannels", &db_path(s), cur.clone());
         self.last = cur;
     }
 }

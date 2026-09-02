@@ -318,12 +318,12 @@ pub fn save(s: &Server) {
             out.push_str(&format!("{ip} {} {}\n", e.score, e.last_seen));
         }
     }
-    s.disk_write(db_path(s), out); // off-core: a slow disk mustn't stall the event loop
+    crate::database::persist_save(s, "reputation", &db_path(s), out);
 }
 
 /// Reload persisted reputation at startup.
 pub fn load(s: &mut Server) {
-    let Ok(text) = std::fs::read_to_string(db_path(s)) else {
+    let Some(text) = crate::database::persist_load(s, "reputation", &db_path(s)) else {
         return;
     };
     let store = s.ext.get_or_insert_with::<Reputation>(Reputation::default);
@@ -344,9 +344,9 @@ mod tests {
     use crate::channels::{Channel, Member};
     use crate::config::Config;
     use crate::extensible::Extensible;
+    use crate::map::HashSet;
     use crate::socketengine::OutSink;
     use crate::users::{Caps, User, UserFlags};
-    use crate::map::HashSet;
     use std::sync::atomic::AtomicU64;
     use std::sync::{mpsc, Arc};
 

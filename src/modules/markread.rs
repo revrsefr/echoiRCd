@@ -76,16 +76,18 @@ fn load_str(store: &mut ReadMarkers, text: &str) {
 /// repeated writes to the same path, so frequent MARKREADs stay cheap.
 pub fn save(s: &Server) {
     if let Some(m) = s.ext.get::<ReadMarkers>() {
-        s.disk_write(db_path(s), dump_markers(m));
+        crate::database::persist_save(s, "markread", &db_path(s), dump_markers(m));
     }
 }
 
 /// Restore account-keyed markers at startup so read positions survive a restart.
 pub fn load(s: &mut Server) {
-    let Ok(text) = std::fs::read_to_string(db_path(s)) else {
+    let Some(text) = crate::database::persist_load(s, "markread", &db_path(s)) else {
         return;
     };
-    let store = s.ext.get_or_insert_with::<ReadMarkers>(ReadMarkers::default);
+    let store = s
+        .ext
+        .get_or_insert_with::<ReadMarkers>(ReadMarkers::default);
     load_str(store, &text);
 }
 
@@ -179,9 +181,15 @@ mod tests {
     #[test]
     fn markers_round_trip_and_drop_session_keys() {
         let mut m = ReadMarkers::default();
-        m.0.entry("alice".into()).or_default().insert("#chan".into(), 1700);
-        m.0.entry("alice".into()).or_default().insert("bob".into(), 42);
-        m.0.entry("~7".into()).or_default().insert("#chan".into(), 9999); // session: ephemeral
+        m.0.entry("alice".into())
+            .or_default()
+            .insert("#chan".into(), 1700);
+        m.0.entry("alice".into())
+            .or_default()
+            .insert("bob".into(), 42);
+        m.0.entry("~7".into())
+            .or_default()
+            .insert("#chan".into(), 9999); // session: ephemeral
 
         let text = dump_markers(&m);
         assert!(text.contains("alice #chan 1700"));
@@ -191,8 +199,14 @@ mod tests {
         // reload into a fresh store — the account markers come back, the session one doesn't
         let mut restored = ReadMarkers::default();
         load_str(&mut restored, &text);
-        assert_eq!(restored.0.get("alice").and_then(|t| t.get("#chan")), Some(&1700));
-        assert_eq!(restored.0.get("alice").and_then(|t| t.get("bob")), Some(&42));
+        assert_eq!(
+            restored.0.get("alice").and_then(|t| t.get("#chan")),
+            Some(&1700)
+        );
+        assert_eq!(
+            restored.0.get("alice").and_then(|t| t.get("bob")),
+            Some(&42)
+        );
         assert!(!restored.0.contains_key("~7"));
     }
 }

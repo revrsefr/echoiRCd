@@ -522,13 +522,16 @@ impl Server {
                 x.reason
             ));
         }
-        self.disk_write(self.xline_db_path(), out); // off-core: a slow disk mustn't stall the event loop
+        // central DB when store_backend=pgsql, else the flat file (both off-core)
+        crate::database::persist_save(self, "xlines", &self.xline_db_path(), out);
     }
 
     /// Reload persisted x-lines at startup, skipping any already expired.
     pub fn load_xlines(&mut self) {
         let n = now();
-        let Ok(text) = std::fs::read_to_string(self.xline_db_path()) else {
+        // central DB when store_backend=pgsql (seeded from the flat file), else file
+        let Some(text) = crate::database::persist_load(self, "xlines", &self.xline_db_path())
+        else {
             return;
         };
         for line in text.lines() {

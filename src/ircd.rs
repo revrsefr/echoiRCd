@@ -199,6 +199,7 @@ impl Ircd {
         conn_counter: std::sync::Arc<std::sync::atomic::AtomicU64>,
     ) -> Ircd {
         let mut server = Server::new(cfg, event_tx, conn_counter);
+        crate::database::init(&mut server); // DB pool + central store — before the loads below
         server.load_xlines(); // restore persisted bans
         crate::modules::metadata::load(&mut server); // restore channel metadata
         crate::modules::reputation::load(&mut server); // restore per-IP reputation
@@ -208,7 +209,6 @@ impl Ircd {
         crate::modules::geoip::init(&mut server); // load the GeoIP database
         crate::modules::customprefix::init(&server); // load prefix config
         crate::mode::init_custom_prefixes(); // register any config-defined prefix modes
-        crate::database::init(&mut server); // spawn the SQL worker pool if configured
         Ircd {
             server,
             commands: command_table(),
