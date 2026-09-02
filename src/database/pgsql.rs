@@ -33,6 +33,25 @@ pub struct QueryResult {
     pub affected: u64,
 }
 
+/// A query failure, split so the worker can tell a recoverable SQL error (the
+/// connection stays usable) from a transport error (reconnect before the next query).
+#[derive(Debug)]
+pub enum QueryError {
+    Sql(String),
+    Io(String),
+}
+
+impl QueryError {
+    pub fn into_message(self) -> String {
+        match self {
+            QueryError::Sql(s) | QueryError::Io(s) => s,
+        }
+    }
+    pub fn is_io(&self) -> bool {
+        matches!(self, QueryError::Io(_))
+    }
+}
+
 trait Stream: Read + Write + Send {}
 impl<T: Read + Write + Send> Stream for T {}
 
@@ -145,19 +164,23 @@ impl PgConn {
 
     /// Run one parameterized statement (extended protocol: Parse/Bind/Describe/
     /// Execute/Sync). `params` are text values; `None` binds a SQL NULL.
-    pub fn query(&mut self, sql: &str, params: &[Option<Vec<u8>>]) -> Result<QueryResult, String> {
+    pub fn query(
+        &mut self,
+        sql: &str,
+        params: &[Option<Vec<u8>>],
+    ) -> Result<QueryResult, QueryError> {
         let mut batch = Vec::new();
         batch.extend_from_slice(&proto::parse(sql));
         batch.extend_from_slice(&proto::bind(params));
         batch.extend_from_slice(&proto::describe_portal());
         batch.extend_from_slice(&proto::execute());
         batch.extend_from_slice(&proto::sync());
-        self.write(&batch)?;
+        self.write(&batch).map_err(QueryError::Io)?;
 
         let mut out = QueryResult::default();
         let mut failure: Option<String> = None;
         loop {
-            match self.read()? {
+            match self.read().map_err(QueryError::Io)? {
                 Backend::RowDescription(cols) => out.columns = cols,
                 Backend::DataRow(vals) => out.rows.push(vals),
                 Backend::CommandComplete(tag) => out.affected = affected_from_tag(&tag),
@@ -169,7 +192,7 @@ impl PgConn {
             }
         }
         match failure {
-            Some(e) => Err(e),
+            Some(e) => Err(QueryError::Sql(e)),
             None => Ok(out),
         }
     }

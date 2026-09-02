@@ -514,6 +514,24 @@ logging {
 }
 
 
+# ═══ SQL database (PostgreSQL) ═══════════════════════════════════════════════
+# A native, non-blocking PostgreSQL client that other modules can use to store and
+# read data. Every query runs on a background worker pool (never the core), so a
+# slow query or a stalled database cannot freeze the server. Inert unless pgsql_host
+# is set. Auth: trust / cleartext / MD5 / SCRAM-SHA-256 (the modern default).
+database {
+    # pgsql_host     "127.0.0.1";   # enable the subsystem by setting this
+    # pgsql_port     5432;
+    # pgsql_database "echoircd";     # defaults to pgsql_user if unset
+    # pgsql_user     "echoircd";
+    # pgsql_pass     "s3cret";       # (alias: pgsql_password)
+    # pgsql_tls      no;             # negotiate TLS to the database (encryption; no cert check)
+    # pgsql_pool     2;              # worker connections / concurrent queries (1..16)
+    # pgsql_connect_timeout 5;       # seconds to wait for a connection
+    # pgsql_timeout  30;             # seconds a single query read may stall before failing
+}
+
+
 # ═══ extra features / modules ════════════════════════════════════════════════
 modules {
     # abbreviation yes;   # a unique command prefix resolves to its command (WHOI→WHOIS)

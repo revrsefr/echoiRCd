@@ -14,7 +14,9 @@ use crate::config::Config;
 use crate::coremods::command_table;
 use crate::message;
 use crate::module::{Hook, ModResult, Module};
-use crate::numeric::{ERR_NEEDMOREPARAMS, ERR_NOTREGISTERED, ERR_PASSWDMISMATCH, ERR_UNKNOWNCOMMAND};
+use crate::numeric::{
+    ERR_NEEDMOREPARAMS, ERR_NOTREGISTERED, ERR_PASSWDMISMATCH, ERR_UNKNOWNCOMMAND,
+};
 use crate::server::Server;
 use crate::socketengine::OutSink;
 use crate::Uid;
@@ -27,13 +29,13 @@ pub enum Event {
         out: OutSink,
         sock: Option<TcpStream>,
         secure: bool,
-        certfp: Option<String>, // TLS client-cert fingerprint (clients only)
+        certfp: Option<String>,   // TLS client-cert fingerprint (clients only)
         tls_info: Option<String>, // negotiated TLS version/group/cipher (WHOIS 671)
         sni: Option<String>,      // TLS SNI hostname the client used (per-SNI branding)
-        local_port: u16,        // the listener port the client connected to
-        link: bool,             // a server-to-server connection, not a client
-        outbound: bool,         // (link) we dialed them
-        websocket: bool,        // arrived over the WebSocket transport
+        local_port: u16,          // the listener port the client connected to
+        link: bool,               // a server-to-server connection, not a client
+        outbound: bool,           // (link) we dialed them
+        websocket: bool,          // arrived over the WebSocket transport
     },
     Line {
         uid: Uid,
@@ -101,6 +103,11 @@ pub enum Event {
         id: String,
         reply: std::sync::mpsc::Sender<String>,
     },
+    /// A database query finished on a worker thread — deliver it to its callback.
+    SqlResult {
+        id: u64,
+        result: crate::database::SqlResult,
+    },
     /// Background timer tick — drives ping/idle timeouts.
     Tick,
     /// Re-read the config file and apply it live (from SIGHUP / the `rehash` CLI).
@@ -127,9 +134,18 @@ fn with_extra_tag(line: &str, tag: &str) -> String {
 fn write_event_label(ev: &Event, out: &mut String) {
     use std::fmt::Write;
     match ev {
-        Event::Connect { addr, link, outbound, .. } => {
+        Event::Connect {
+            addr,
+            link,
+            outbound,
+            ..
+        } => {
             if *link {
-                let _ = write!(out, "server link ({})", if *outbound { "outbound" } else { "inbound" });
+                let _ = write!(
+                    out,
+                    "server link ({})",
+                    if *outbound { "outbound" } else { "inbound" }
+                );
             } else {
                 let _ = write!(out, "connect from {}", addr.ip());
             }
@@ -148,6 +164,7 @@ fn write_event_label(ev: &Event, out: &mut String) {
         Event::RpcRequest { method, .. } => {
             let _ = write!(out, "RPC {method}");
         }
+        Event::SqlResult { .. } => out.push_str("SQL result"),
         Event::Tick => out.push_str("tick (ping/idle sweep)"),
         Event::Rehash => out.push_str("rehash"),
     }
@@ -191,6 +208,7 @@ impl Ircd {
         crate::modules::geoip::init(&mut server); // load the GeoIP database
         crate::modules::customprefix::init(&server); // load prefix config
         crate::mode::init_custom_prefixes(); // register any config-defined prefix modes
+        crate::database::init(&mut server); // spawn the SQL worker pool if configured
         Ircd {
             server,
             commands: command_table(),
@@ -224,7 +242,10 @@ impl Ircd {
                 g.clear();
                 write_event_label(&ev, &mut g);
             }
-            busy.store((base.elapsed().as_millis() as u64).max(1), Ordering::Relaxed);
+            busy.store(
+                (base.elapsed().as_millis() as u64).max(1),
+                Ordering::Relaxed,
+            );
             let start = Instant::now();
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.handle_event(ev)))
                 .is_err()
@@ -270,8 +291,9 @@ impl Ircd {
                 if link {
                     self.server.add_link(uid, addr, out, sock, outbound);
                 } else {
-                    self.server
-                        .add_conn(uid, addr, out, sock, secure, certfp, tls_info, sni, local_port);
+                    self.server.add_conn(
+                        uid, addr, out, sock, secure, certfp, tls_info, sni, local_port,
+                    );
                     if websocket {
                         if let Some(u) = self.server.users.get_mut(&uid) {
                             u.flags.via_websocket = true;
@@ -311,7 +333,12 @@ impl Ircd {
                 crate::modules::ident::on_result(&mut self.server, uid, ident);
                 self.try_register(uid); // ident may have been the last hold
             }
-            Event::OperAuth { uid, ok, level, oper_type } => {
+            Event::OperAuth {
+                uid,
+                ok,
+                level,
+                oper_type,
+            } => {
                 if ok {
                     self.server.oper_up(uid);
                     crate::modules::operlevels::set(&mut self.server, uid, level);
@@ -336,7 +363,9 @@ impl Ircd {
                         format!(":{} NOTICE {nick} :{m}", self.server.name)
                     }
                     None => {
-                        let m = self.server.trf("Could not hash with '{0}'", &[algo.as_str()]);
+                        let m = self
+                            .server
+                            .trf("Could not hash with '{0}'", &[algo.as_str()]);
                         format!(":{} NOTICE {nick} :{m}", self.server.name)
                     }
                 };
@@ -398,12 +427,14 @@ impl Ircd {
                 id,
                 reply,
             } => {
-                let resp =
-                    crate::modules::rpc::dispatch(&mut self.server, &method, &params, &id);
+                let resp = crate::modules::rpc::dispatch(&mut self.server, &method, &params, &id);
                 let _ = reply.send(resp);
                 // a `verify.pass` push may have cleared held connections — complete
                 // them now rather than waiting for the next tick.
                 self.drain_verified_pending();
+            }
+            Event::SqlResult { id, result } => {
+                crate::database::on_result(&mut self.server, id, result)
             }
             Event::Tick => self.on_tick(),
             Event::Rehash => self.on_rehash(),
@@ -732,7 +763,8 @@ impl Ircd {
         eprintln!("rehashing server config file.");
         match Config::try_load(&path) {
             Some(fresh) => {
-                self.server.announce("The server is rehashing its configuration.");
+                self.server
+                    .announce("The server is rehashing its configuration.");
                 self.server.apply_config(fresh);
                 self.server.announce("Server configuration reloaded.");
                 eprintln!("server configuration is reloaded.");
