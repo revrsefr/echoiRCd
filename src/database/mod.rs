@@ -25,6 +25,18 @@
 //!     },
 //! );
 //! ```
+//!
+//! Named parameters read better for wider queries and work the same way — each
+//! `$name` is rewritten to a `$1..$n` bind slot, never string-interpolated (see
+//! [`query_named`]):
+//! ```ignore
+//! database::query_named(
+//!     srv,
+//!     "SELECT score FROM rep WHERE ip = $ip AND score > $min",
+//!     vec![("ip", ip.into()), ("min", 10i64.into())],
+//!     move |srv, result| { /* rows.get(0, "score"), … */ },
+//! );
+//! ```
 
 pub mod pgsql;
 pub mod proto;
@@ -41,6 +53,7 @@ use pgsql::{PgConfig, PgConn, QueryResult};
 
 /// A bind parameter. Everything is sent to PostgreSQL in text format; the server
 /// coerces it to the column type. `impl From` conversions make call sites terse.
+#[derive(Debug)]
 pub enum SqlValue {
     Null,
     Text(String),
@@ -289,6 +302,154 @@ where
     );
 }
 
+/// Submit a query with **named** parameters (`$name`) — the ergonomic alternative to
+/// positional `$1` when a query references several values. Each distinct `$name` is
+/// bound to its entry's value through a real bind parameter (never string-
+/// interpolated), so it is exactly as injection-safe as [`query`]. A name may appear
+/// more than once (it reuses one bind slot); PostgreSQL-native `$1` placeholders,
+/// `'…'` string literals and `$tag$…$tag$` dollar-quoted bodies are passed through
+/// untouched. An unknown `$name` — or mixing named with positional `$1` — fails the
+/// query, and the callback receives the error.
+pub fn query_named<F>(srv: &mut Server, sql: &str, params: Vec<(&str, SqlValue)>, cb: F)
+where
+    F: FnOnce(&mut Server, SqlResult) + Send + 'static,
+{
+    match resolve_named(sql, params) {
+        Ok((rewritten, ordered)) => query(srv, &rewritten, ordered, cb),
+        Err(e) => cb(srv, Err(e)),
+    }
+}
+
+/// Rewrite `$name` placeholders to positional `$1..$n` and collect their values in
+/// binding order (a repeated name reuses its slot). Native `$<digit>` placeholders,
+/// single-quoted string literals and dollar-quoted string constants are copied
+/// through verbatim, so a `$name`-looking sequence inside them is never mistaken for
+/// a parameter.
+fn resolve_named(
+    sql: &str,
+    named: Vec<(&str, SqlValue)>,
+) -> Result<(String, Vec<SqlValue>), String> {
+    let mut pool: Vec<(&str, Option<SqlValue>)> =
+        named.into_iter().map(|(k, v)| (k, Some(v))).collect();
+    let mut slots: Vec<(&str, usize)> = Vec::new(); // name → 1-based bind slot
+    let mut ordered: Vec<SqlValue> = Vec::new();
+    let mut saw_positional = false;
+
+    let b = sql.as_bytes();
+    let n = b.len();
+    let mut out = String::with_capacity(n + 8);
+    let mut i = 0;
+    while i < n {
+        match b[i] {
+            // '…' string literal (with the '' escape) — copy verbatim
+            b'\'' => {
+                let start = i;
+                i += 1;
+                while i < n {
+                    if b[i] == b'\'' {
+                        if b.get(i + 1) == Some(&b'\'') {
+                            i += 2;
+                            continue;
+                        }
+                        i += 1;
+                        break;
+                    }
+                    i += 1;
+                }
+                out.push_str(&sql[start..i]);
+            }
+            b'$' => match b.get(i + 1).copied() {
+                // native positional $1.. — pass through
+                Some(d) if d.is_ascii_digit() => {
+                    saw_positional = true;
+                    let start = i;
+                    i += 1;
+                    while i < n && b[i].is_ascii_digit() {
+                        i += 1;
+                    }
+                    out.push_str(&sql[start..i]);
+                }
+                // $name  or  $tag$…$tag$ dollar-quoted literal
+                Some(a) if a == b'_' || a.is_ascii_alphabetic() => {
+                    let id_start = i + 1;
+                    let mut j = id_start;
+                    while j < n && (b[j] == b'_' || b[j].is_ascii_alphanumeric()) {
+                        j += 1;
+                    }
+                    if b.get(j) == Some(&b'$') {
+                        i = copy_dollar_quoted(sql, &mut out, i, j + 1);
+                    } else {
+                        let name = &sql[id_start..j];
+                        let existing = slots.iter().find(|(k, _)| *k == name).map(|&(_, s)| s);
+                        let slot = match existing {
+                            Some(s) => s,
+                            None => {
+                                let mut val = None;
+                                for entry in pool.iter_mut() {
+                                    if entry.0 == name && entry.1.is_some() {
+                                        val = entry.1.take();
+                                        break;
+                                    }
+                                }
+                                let Some(val) = val else {
+                                    return Err(format!(
+                                        "pgsql: no value for named parameter ${name}"
+                                    ));
+                                };
+                                ordered.push(val);
+                                let s = ordered.len();
+                                slots.push((name, s));
+                                s
+                            }
+                        };
+                        out.push('$');
+                        out.push_str(&slot.to_string());
+                        i = j;
+                    }
+                }
+                // $$…$$ dollar-quoted literal (empty tag)
+                Some(b'$') => i = copy_dollar_quoted(sql, &mut out, i, i + 2),
+                // a lone '$'
+                _ => {
+                    out.push('$');
+                    i += 1;
+                }
+            },
+            // an ordinary run up to the next '\'' or '$' (both ASCII, so the slice
+            // always ends on a char boundary — UTF-8 safe)
+            _ => {
+                let start = i;
+                while i < n && b[i] != b'\'' && b[i] != b'$' {
+                    i += 1;
+                }
+                out.push_str(&sql[start..i]);
+            }
+        }
+    }
+    if saw_positional && !ordered.is_empty() {
+        return Err("pgsql: query mixes positional ($1) and named ($name) parameters".into());
+    }
+    Ok((out, ordered))
+}
+
+/// Copy a `$tag$…$tag$` dollar-quoted string constant through verbatim, returning the
+/// index just past its closing delimiter. `body_start` is the index right after the
+/// opening delimiter (whose text is `sql[open..body_start]`).
+fn copy_dollar_quoted(sql: &str, out: &mut String, open: usize, body_start: usize) -> usize {
+    let delim = &sql[open..body_start];
+    match sql[body_start..].find(delim) {
+        Some(rel) => {
+            let end = body_start + rel + delim.len();
+            out.push_str(&sql[open..end]);
+            end
+        }
+        None => {
+            out.push_str(&sql[open..]); // unterminated — copy the remainder as-is
+            sql.len()
+        }
+    }
+}
+
 /// Push a request onto the shared queue and wake one idle worker.
 fn submit(queue: &Queue, req: SqlRequest) {
     let (lock, cv) = &**queue;
@@ -525,5 +686,59 @@ mod tests {
         assert_eq!(r.get(0, "missing"), None);
         assert_eq!(r.affected(), 1);
         assert!(!r.is_empty() && r.len() == 1);
+    }
+
+    fn params_bytes(v: Vec<SqlValue>) -> Vec<Option<Vec<u8>>> {
+        v.into_iter().map(SqlValue::into_param).collect()
+    }
+
+    #[test]
+    fn named_params_rewrite_in_binding_order() {
+        let (sql, ps) = resolve_named(
+            "SELECT score FROM rep WHERE ip = $ip AND score > $min",
+            vec![("ip", "1.2.3.4".into()), ("min", 10i64.into())],
+        )
+        .unwrap();
+        assert_eq!(sql, "SELECT score FROM rep WHERE ip = $1 AND score > $2");
+        // order follows first appearance in the SQL, not the params vec
+        assert_eq!(
+            params_bytes(ps),
+            vec![Some(b"1.2.3.4".to_vec()), Some(b"10".to_vec())]
+        );
+    }
+
+    #[test]
+    fn named_param_reuse_shares_one_slot() {
+        let (sql, ps) = resolve_named(
+            "UPDATE t SET a = $x WHERE b = $x OR c = $y",
+            vec![("x", 1i64.into()), ("y", 2i64.into())],
+        )
+        .unwrap();
+        assert_eq!(sql, "UPDATE t SET a = $1 WHERE b = $1 OR c = $2");
+        assert_eq!(ps.len(), 2); // $x bound once, reused
+    }
+
+    #[test]
+    fn named_skips_literals_and_dollar_quotes() {
+        // a $name inside a string literal or a dollar-quoted body is left alone
+        let (sql, ps) = resolve_named(
+            "SELECT '$notaparam', $tag$ raw $name $tag$, $real",
+            vec![("real", "z".into())],
+        )
+        .unwrap();
+        assert_eq!(sql, "SELECT '$notaparam', $tag$ raw $name $tag$, $1");
+        assert_eq!(params_bytes(ps), vec![Some(b"z".to_vec())]);
+    }
+
+    #[test]
+    fn named_unknown_parameter_is_an_error() {
+        let e = resolve_named("SELECT $nope", vec![]).unwrap_err();
+        assert!(e.contains("$nope"), "{e}");
+    }
+
+    #[test]
+    fn named_mixed_with_positional_is_an_error() {
+        let e = resolve_named("SELECT $1, $name", vec![("name", "x".into())]).unwrap_err();
+        assert!(e.contains("positional"), "{e}");
     }
 }
