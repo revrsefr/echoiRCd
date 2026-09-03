@@ -156,6 +156,13 @@ fn parse_db_line(line: &str) -> Option<XLine> {
     })
 }
 
+/// Schema for the normalized x-line store (used when `store_backend = pgsql`). No
+/// primary key: the set is snapshot-replaced wholesale, and a stray duplicate must not
+/// abort the transaction.
+const XLINES_DDL: &str = "CREATE TABLE IF NOT EXISTS echoircd_xlines \
+     (tag text NOT NULL, mask text NOT NULL, expires bigint NOT NULL DEFAULT 0, \
+      set_at bigint NOT NULL DEFAULT 0, setter text NOT NULL, reason text NOT NULL)";
+
 /// The " (expires in …)" tail appended to the reason a banned user is shown, or
 /// empty for a permanent ban (`expires` is the absolute unix expiry, 0 = permanent).
 /// Lets someone who hits a K/G/Z/R-line see when it lifts, not just why.
@@ -508,8 +515,34 @@ impl Server {
         }
     }
 
-    /// Persist all current x-lines so they survive a restart.
+    /// Persist all current x-lines so they survive a restart. With the database backend
+    /// each line is a row in `echoircd_xlines` (queryable, atomically snapshot-replaced);
+    /// with the file backend it stays one `tag mask expires set_at setter reason` blob.
     pub fn save_xlines(&self) {
+        if crate::database::stores_in_db(self) {
+            let rows: Vec<Vec<Option<Vec<u8>>>> = self
+                .xlines
+                .iter()
+                .map(|x| {
+                    vec![
+                        Some(x.kind.tag().to_string().into_bytes()),
+                        Some(x.mask.clone().into_bytes()),
+                        Some((x.expires as i64).to_string().into_bytes()),
+                        Some((x.set_at as i64).to_string().into_bytes()),
+                        Some(x.setter.clone().into_bytes()),
+                        Some(x.reason.clone().into_bytes()),
+                    ]
+                })
+                .collect();
+            crate::database::store_rows_replace(
+                self,
+                "echoircd_xlines",
+                "INSERT INTO echoircd_xlines (tag, mask, expires, set_at, setter, reason) \
+                 VALUES ($1, $2, $3, $4, $5, $6)",
+                rows,
+            );
+            return;
+        }
         let mut out = String::new();
         for x in &self.xlines {
             out.push_str(&format!(
@@ -522,14 +555,58 @@ impl Server {
                 x.reason
             ));
         }
-        // central DB when store_backend=pgsql, else the flat file (both off-core)
         crate::database::persist_save(self, "xlines", &self.xline_db_path(), out);
     }
 
-    /// Reload persisted x-lines at startup, skipping any already expired.
+    /// Reload persisted x-lines at startup, skipping any already expired. Prefers the
+    /// normalized table; if it's empty (first boot after enabling pgsql) it migrates the
+    /// legacy blob / flat file in and seeds the table; on any DB error it falls back to
+    /// the legacy text so bans are never lost.
     pub fn load_xlines(&mut self) {
         let n = now();
-        // central DB when store_backend=pgsql (seeded from the flat file), else file
+        if crate::database::stores_in_db(self) {
+            if let Some(rows) = crate::database::store_rows_load(
+                self,
+                XLINES_DDL,
+                "SELECT tag, mask, expires, set_at, setter, reason FROM echoircd_xlines",
+            ) {
+                if rows.is_empty() {
+                    self.load_xlines_text(); // migrate the legacy blob/file …
+                    self.save_xlines(); // … and seed the table
+                } else {
+                    for r in &rows {
+                        let g = |i: usize| r.get(i).and_then(|v| v.as_deref());
+                        let (Some(tag), Some(mask)) = (g(0), g(1)) else {
+                            continue;
+                        };
+                        let Some(kind) = XKind::from_tag(tag) else {
+                            continue;
+                        };
+                        let expires = g(2).and_then(|v| v.parse().ok()).unwrap_or(0);
+                        if expires != 0 && expires <= n {
+                            continue; // already expired — don't reinstate it
+                        }
+                        self.xlines.push(XLine {
+                            kind,
+                            mask: mask.to_string(),
+                            reason: g(5).unwrap_or("").to_string(),
+                            setter: g(4).unwrap_or("").to_string(),
+                            expires,
+                            set_at: g(3).and_then(|v| v.parse().ok()).unwrap_or(0),
+                        });
+                    }
+                }
+                return;
+            }
+            // the database was unreachable — fall through to the legacy text
+        }
+        self.load_xlines_text();
+    }
+
+    /// Parse x-lines from the legacy text form (the central blob when pgsql, else the
+    /// flat file) into memory, skipping already-expired lines.
+    fn load_xlines_text(&mut self) {
+        let n = now();
         let Some(text) = crate::database::persist_load(self, "xlines", &self.xline_db_path())
         else {
             return;
@@ -537,7 +614,7 @@ impl Server {
         for line in text.lines() {
             if let Some(x) = parse_db_line(line) {
                 if x.expires != 0 && x.expires <= n {
-                    continue; // already expired — don't reinstate it
+                    continue;
                 }
                 self.xlines.push(x);
             }
