@@ -42,6 +42,8 @@ pub fn startup(user: &str, database: &str) -> Vec<u8> {
     put_cstr(&mut body, database);
     put_cstr(&mut body, "client_encoding");
     put_cstr(&mut body, "UTF8");
+    put_cstr(&mut body, "application_name");
+    put_cstr(&mut body, "echoircd"); // identifies our connections in pg_stat_activity
     body.push(0); // end of parameters
     let mut v = Vec::with_capacity(body.len() + 4);
     put_i32(&mut v, (body.len() + 4) as i32);

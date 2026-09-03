@@ -24,6 +24,23 @@ pub struct PgConfig {
     pub io_timeout: Duration,
 }
 
+// A hand-written Debug that never prints the password, so the connection config is
+// safe to log or embed in an error/panic message.
+impl std::fmt::Debug for PgConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PgConfig")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("database", &self.database)
+            .field("user", &self.user)
+            .field("password", &"***")
+            .field("tls", &self.tls)
+            .field("connect_timeout", &self.connect_timeout)
+            .field("io_timeout", &self.io_timeout)
+            .finish()
+    }
+}
+
 /// The result of a query: column names, the rows (text values, `None` = SQL NULL),
 /// and the affected/returned row count from the CommandComplete tag.
 #[derive(Debug, Default)]
@@ -86,6 +103,14 @@ impl PgConn {
         conn.write(&proto::startup(&cfg.user, &cfg.database))?;
         conn.authenticate(cfg)?;
         conn.drain_to_ready()?;
+        // Ask the server to cancel a runaway query itself, matched to our socket
+        // read timeout — so a slow query surfaces as a clean SQL error on a still-
+        // usable connection instead of a socket timeout that forces a reconnect.
+        let ms = cfg.io_timeout.as_millis();
+        if ms > 0 {
+            conn.query(&format!("SET statement_timeout = {ms}"), &[])
+                .map_err(QueryError::into_message)?;
+        }
         Ok(conn)
     }
 
