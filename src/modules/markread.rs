@@ -33,6 +33,10 @@ fn db_path(s: &Server) -> String {
     }
 }
 
+/// Schema for the normalized read-marker store (used when `store_backend = pgsql`).
+const MARKREAD_DDL: &str = "CREATE TABLE IF NOT EXISTS echoircd_markread \
+     (identity text NOT NULL, target text NOT NULL, ts bigint NOT NULL)";
+
 /// Serialise the durable (account-keyed) markers as `identity target ts` lines.
 /// Session `~uid` keys are dropped — a uid doesn't outlive the connection, let
 /// alone a restart. Output is sorted so it's stable across coalesced writes.
@@ -72,16 +76,77 @@ fn load_str(store: &mut ReadMarkers, text: &str) {
     }
 }
 
-/// Persist the account-keyed markers. Off-core via `disk_write`, which coalesces
-/// repeated writes to the same path, so frequent MARKREADs stay cheap.
+/// Persist the account-keyed markers (off-core). With the database backend each marker
+/// is an `(identity, target, ts)` row in `echoircd_markread` (queryable, atomically
+/// snapshot-replaced); with the file backend it stays one coalesced blob. Session
+/// (`~uid`) identities are never durable.
 pub fn save(s: &Server) {
-    if let Some(m) = s.ext.get::<ReadMarkers>() {
-        crate::database::persist_save(s, "markread", &db_path(s), dump_markers(m));
+    let Some(m) = s.ext.get::<ReadMarkers>() else {
+        return;
+    };
+    if crate::database::stores_in_db(s) {
+        let mut rows: Vec<Vec<Option<Vec<u8>>>> = Vec::new();
+        for (id, targets) in &m.0 {
+            if id.starts_with('~') {
+                continue; // session key — not durable
+            }
+            for (t, ts) in targets {
+                rows.push(vec![
+                    Some(id.clone().into_bytes()),
+                    Some(t.clone().into_bytes()),
+                    Some((*ts as i64).to_string().into_bytes()),
+                ]);
+            }
+        }
+        crate::database::store_rows_replace(
+            s,
+            "echoircd_markread",
+            "INSERT INTO echoircd_markread (identity, target, ts) VALUES ($1, $2, $3)",
+            rows,
+        );
+        return;
     }
+    crate::database::persist_save(s, "markread", &db_path(s), dump_markers(m));
 }
 
 /// Restore account-keyed markers at startup so read positions survive a restart.
+/// Prefers the normalized table, migrating the legacy blob/file in if it's empty, and
+/// falling back to the legacy text on any DB error.
 pub fn load(s: &mut Server) {
+    if crate::database::stores_in_db(s) {
+        if let Some(rows) = crate::database::store_rows_load(
+            s,
+            MARKREAD_DDL,
+            "SELECT identity, target, ts FROM echoircd_markread",
+        ) {
+            if rows.is_empty() {
+                load_text(s); // migrate the legacy blob/file …
+                save(s); // … and seed the table
+            } else {
+                let store = s.ext.get_or_insert_with::<ReadMarkers>(ReadMarkers::default);
+                for r in &rows {
+                    let id = r.first().and_then(|v| v.as_deref());
+                    let t = r.get(1).and_then(|v| v.as_deref());
+                    let ts = r.get(2).and_then(|v| v.as_deref()).and_then(|v| v.parse().ok());
+                    if let (Some(id), Some(t), Some(ts)) = (id, t, ts) {
+                        store
+                            .0
+                            .entry(id.to_string())
+                            .or_default()
+                            .insert(t.to_string(), ts);
+                    }
+                }
+            }
+            return;
+        }
+        // the database was unreachable — fall through to the legacy text
+    }
+    load_text(s);
+}
+
+/// Parse markers from the legacy text form (the central blob when pgsql, else the flat
+/// file) into memory.
+fn load_text(s: &mut Server) {
     let Some(text) = crate::database::persist_load(s, "markread", &db_path(s)) else {
         return;
     };
