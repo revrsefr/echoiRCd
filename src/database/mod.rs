@@ -166,15 +166,21 @@ struct SqlRequest {
 
 type Queue = Arc<(Mutex<VecDeque<SqlRequest>>, Condvar)>;
 
-/// Per-server database state (stored in `Server.ext`): the submit queue shared with
-/// the worker pool, plus the in-core map of pending callbacks keyed by request id.
-struct SqlState {
+/// One configured database provider: its own worker-pool submit queue and the
+/// backpressure cap (the most requests allowed to wait before new ones are refused).
+struct Provider {
     queue: Queue,
+    queue_max: usize,
+}
+
+/// Per-server database state (stored in `Server.ext`): every configured provider keyed
+/// by id — the primary (the flat `pgsql_*` keys) is `""` — plus the in-core map of
+/// pending callbacks keyed by request id, shared across providers since a result
+/// routes back purely by id.
+struct SqlState {
+    providers: HashMap<String, Provider>,
     pending: HashMap<u64, Callback>,
     next_id: u64,
-    /// Backpressure cap: the most requests allowed to sit in the queue before new
-    /// ones are refused (a stalled database can't grow it without bound).
-    queue_max: usize,
 }
 
 /// Read `pgsql_*` config. Returns `None` (subsystem disabled) unless `pgsql_host`
@@ -208,6 +214,72 @@ fn config(srv: &Server) -> Option<(PgConfig, usize)> {
     Some((cfg, pool))
 }
 
+/// Parse an extra `provider "id=… host=… …"` line into (id, config, pool, queue_max).
+/// Unset fields inherit the primary's; quoted values may contain spaces (so a password
+/// with a space works). Returns `None` unless both an `id` and a `host` are given.
+fn parse_provider(
+    spec: &str,
+    base: &PgConfig,
+    base_pool: usize,
+    base_qmax: usize,
+) -> Option<(String, PgConfig, usize, usize)> {
+    let mut id = String::new();
+    let mut cfg = base.clone();
+    cfg.host = String::new(); // a named provider must name its own host, not inherit
+    let mut pool = base_pool;
+    let mut qmax = base_qmax;
+    let truthy = |v: &str| matches!(v, "yes" | "true" | "1" | "on");
+    for tok in split_quoted(spec) {
+        let Some((k, v)) = tok.split_once('=') else {
+            continue;
+        };
+        let v = v.to_string();
+        match k {
+            "id" => id = v,
+            "host" => cfg.host = v,
+            "port" => cfg.port = v.parse().unwrap_or(cfg.port),
+            "database" | "db" => cfg.database = v,
+            "user" => cfg.user = v,
+            "pass" | "password" => cfg.password = v,
+            "tls" => cfg.tls = truthy(&v),
+            "pool" => pool = v.parse().unwrap_or(pool),
+            "connect_timeout" => {
+                cfg.connect_timeout = Duration::from_secs(v.parse().unwrap_or(5))
+            }
+            "timeout" => cfg.io_timeout = Duration::from_secs(v.parse().unwrap_or(30)),
+            "queue_max" => qmax = v.parse().unwrap_or(qmax),
+            _ => {}
+        }
+    }
+    if id.is_empty() || cfg.host.is_empty() {
+        return None;
+    }
+    Some((id, cfg, pool.clamp(1, 16), qmax.max(16)))
+}
+
+/// Split a config line on whitespace, but keep `"…"`-quoted spans together (so a
+/// value may contain spaces). The quotes themselves are stripped.
+fn split_quoted(s: &str) -> Vec<String> {
+    let mut toks = Vec::new();
+    let mut cur = String::new();
+    let mut in_q = false;
+    for c in s.chars() {
+        match c {
+            '"' => in_q = !in_q,
+            c if c.is_whitespace() && !in_q => {
+                if !cur.is_empty() {
+                    toks.push(std::mem::take(&mut cur));
+                }
+            }
+            _ => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        toks.push(cur);
+    }
+    toks
+}
+
 /// Spawn the worker pool at startup if a database is configured. Called once from
 /// `Ircd::new` after the Server exists.
 pub fn init(srv: &mut Server) {
@@ -215,21 +287,48 @@ pub fn init(srv: &mut Server) {
         return; // no pgsql_host → subsystem stays inert
     };
     ensure_schema(&cfg); // the central store table must exist before any load/save
+    let qmax = srv.conf_num("pgsql_queue_max", 1024usize).max(16);
+    let event_tx = srv.event_tx.clone();
+    let mut providers = HashMap::new();
+    // the primary provider (the flat pgsql_* keys) is keyed by ""
+    spawn_provider(&event_tx, &mut providers, String::new(), cfg.clone(), pool, qmax);
+    // extra named providers — a module can target one by id (e.g. sqlauth → its own DB)
+    for spec in srv.conf_all("provider").to_vec() {
+        if let Some((id, pcfg, ppool, pqmax)) = parse_provider(&spec, &cfg, pool, qmax) {
+            spawn_provider(&event_tx, &mut providers, id, pcfg, ppool, pqmax);
+        }
+    }
+    srv.ext.set(SqlState {
+        providers,
+        pending: HashMap::new(),
+        next_id: 1,
+    });
+}
+
+/// Spawn one provider's worker pool and register its queue.
+fn spawn_provider(
+    event_tx: &Sender<Event>,
+    providers: &mut HashMap<String, Provider>,
+    id: String,
+    cfg: PgConfig,
+    pool: usize,
+    queue_max: usize,
+) {
     let queue: Queue = Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
     for _ in 0..pool {
-        let (q, tx, c) = (queue.clone(), srv.event_tx.clone(), cfg.clone());
+        let (q, tx, c) = (queue.clone(), event_tx.clone(), cfg.clone());
         std::thread::spawn(move || run_worker(c, q, tx));
     }
     eprintln!(
-        "echoircd: pgsql pool ({pool}) → {}@{}:{}/{} (tls={})",
-        cfg.user, cfg.host, cfg.port, cfg.database, cfg.tls
+        "echoircd: pgsql pool ({pool}) [{}] → {}@{}:{}/{} (tls={})",
+        if id.is_empty() { "primary" } else { &id },
+        cfg.user,
+        cfg.host,
+        cfg.port,
+        cfg.database,
+        cfg.tls
     );
-    srv.ext.set(SqlState {
-        queue,
-        pending: HashMap::new(),
-        next_id: 1,
-        queue_max: srv.conf_num("pgsql_queue_max", 1024usize).max(16),
-    });
+    providers.insert(id, Provider { queue, queue_max });
 }
 
 /// One persistent worker: owns a connection, pulls requests off the shared queue,
@@ -303,15 +402,37 @@ pub fn query<F>(srv: &mut Server, sql: &str, params: Vec<SqlValue>, cb: F)
 where
     F: FnOnce(&mut Server, SqlResult) + Send + 'static,
 {
-    let Some((queue, max)) = srv
+    dispatch(srv, "", sql, params, cb);
+}
+
+/// Like [`query`], but against a specific named provider (an extra `provider "id=…"`
+/// database). An unknown id fails the query through the callback.
+pub fn query_on<F>(srv: &mut Server, provider: &str, sql: &str, params: Vec<SqlValue>, cb: F)
+where
+    F: FnOnce(&mut Server, SqlResult) + Send + 'static,
+{
+    dispatch(srv, provider, sql, params, cb);
+}
+
+/// Route a query to `provider`'s pool (`""` = primary): register the callback under a
+/// fresh id and submit, refusing (callback gets an error) if the provider is unknown
+/// or its queue is full.
+fn dispatch<F>(srv: &mut Server, provider: &str, sql: &str, params: Vec<SqlValue>, cb: F)
+where
+    F: FnOnce(&mut Server, SqlResult) + Send + 'static,
+{
+    let target = srv
         .ext
         .get::<SqlState>()
-        .map(|st| (st.queue.clone(), st.queue_max))
-    else {
-        cb(
-            srv,
-            Err("pgsql: database not configured (set pgsql_host)".into()),
-        );
+        .and_then(|st| st.providers.get(provider))
+        .map(|p| (p.queue.clone(), p.queue_max));
+    let Some((queue, max)) = target else {
+        let msg = if srv.ext.get::<SqlState>().is_none() {
+            "pgsql: database not configured (set pgsql_host)".to_string()
+        } else {
+            format!("pgsql: unknown database provider '{provider}'")
+        };
+        cb(srv, Err(msg));
         return;
     };
     let id = {
@@ -358,6 +479,22 @@ where
 {
     match resolve_named(sql, params) {
         Ok((rewritten, ordered)) => query(srv, &rewritten, ordered, cb),
+        Err(e) => cb(srv, Err(e)),
+    }
+}
+
+/// Like [`query_named`], but against a specific named provider.
+pub fn query_named_on<F>(
+    srv: &mut Server,
+    provider: &str,
+    sql: &str,
+    params: Vec<(&str, SqlValue)>,
+    cb: F,
+) where
+    F: FnOnce(&mut Server, SqlResult) + Send + 'static,
+{
+    match resolve_named(sql, params) {
+        Ok((rewritten, ordered)) => query_on(srv, provider, &rewritten, ordered, cb),
         Err(e) => cb(srv, Err(e)),
     }
 }
@@ -645,7 +782,13 @@ pub fn store_load_or_seed(srv: &Server, name: &str, fallback: Option<String>) ->
 /// register). Request id 0 is reserved for these callback-less writes; a failure is
 /// still logged by [`on_result`].
 pub fn store_save(srv: &Server, name: &str, content: String) {
-    let Some(st) = srv.ext.get::<SqlState>() else {
+    // the centralized store always lives on the primary provider ("")
+    let Some((queue, max)) = srv
+        .ext
+        .get::<SqlState>()
+        .and_then(|st| st.providers.get(""))
+        .map(|p| (p.queue.clone(), p.queue_max))
+    else {
         return; // not configured — the caller keeps using its flat file
     };
     let params = vec![
@@ -654,14 +797,14 @@ pub fn store_save(srv: &Server, name: &str, content: String) {
         Some((crate::server::now() as i64).to_string().into_bytes()),
     ];
     let queued = submit(
-        &st.queue,
+        &queue,
         SqlRequest {
             id: 0,                             // fire-and-forget
             sql: STORE_UPSERT.to_string(),
             params,
             coalesce: Some(name.to_string()), // newest save for this store wins
         },
-        st.queue_max,
+        max,
     );
     if !queued {
         eprintln!("echoircd: pgsql store '{name}' save dropped (queue full)");
@@ -867,5 +1010,33 @@ mod tests {
         assert!(submit(&q, mk(), 2));
         assert!(!submit(&q, mk(), 2)); // full → refused, not appended
         assert_eq!(q.0.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn parse_provider_inherits_primary_and_overrides() {
+        let base = PgConfig {
+            host: "127.0.0.1".into(),
+            port: 5432,
+            database: "echoircd".into(),
+            user: "echoircd".into(),
+            password: "primary".into(),
+            tls: false,
+            connect_timeout: Duration::from_secs(5),
+            io_timeout: Duration::from_secs(30),
+        };
+        let (id, cfg, pool, qmax) =
+            parse_provider(r#"id=auth host=db.internal database=webapp pass="p w" pool=4"#, &base, 2, 1024)
+                .unwrap();
+        assert_eq!(id, "auth");
+        assert_eq!(cfg.host, "db.internal");
+        assert_eq!(cfg.database, "webapp");
+        assert_eq!(cfg.password, "p w"); // quoted value keeps its space
+        assert_eq!(cfg.user, "echoircd"); // inherited from the primary
+        assert_eq!(cfg.port, 5432); // inherited
+        assert_eq!(pool, 4);
+        assert_eq!(qmax, 1024);
+        // a named provider must give both an id and its own host
+        assert!(parse_provider("host=x", &base, 2, 1024).is_none());
+        assert!(parse_provider("id=x", &base, 2, 1024).is_none());
     }
 }
