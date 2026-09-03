@@ -112,6 +112,7 @@ impl<T: Into<SqlValue>> From<Option<T>> for SqlValue {
 
 /// A query result: column names, the rows (text values, `None` = SQL NULL), and the
 /// affected/returned row count from the CommandComplete tag.
+#[derive(Default)]
 pub struct SqlRows {
     pub columns: Vec<String>,
     pub rows: Vec<Vec<Option<String>>>,
@@ -154,6 +155,7 @@ impl SqlRows {
 pub type SqlResult = Result<SqlRows, String>;
 type Callback = Box<dyn FnOnce(&mut Server, SqlResult) + Send>;
 
+#[derive(Default)]
 struct SqlRequest {
     id: u64,
     sql: String,
@@ -162,6 +164,9 @@ struct SqlRequest {
     /// their store name here; a queued request with the same key is replaced in place
     /// rather than appended, so a burst can't pile up N copies of the same row.
     coalesce: Option<String>,
+    /// A multi-statement transaction (atomic snapshot replace of a normalized store).
+    /// When non-empty it runs instead of `sql`/`params`, all on one connection.
+    batch: Vec<(String, Vec<Option<Vec<u8>>>)>,
 }
 
 type Queue = Arc<(Mutex<VecDeque<SqlRequest>>, Condvar)>;
@@ -383,8 +388,14 @@ fn execute_request(conn: &mut Option<PgConn>, cfg: &PgConfig, req: &SqlRequest) 
                 Err(e) => return Err(e),
             }
         }
-        match conn.as_mut().unwrap().query(&req.sql, &req.params) {
-            Ok(qr) => return Ok(SqlRows::from(qr)),
+        let c = conn.as_mut().unwrap();
+        let outcome = if req.batch.is_empty() {
+            c.query(&req.sql, &req.params).map(SqlRows::from)
+        } else {
+            c.query_tx(&req.batch).map(|()| SqlRows::default())
+        };
+        match outcome {
+            Ok(rows) => return Ok(rows),
             Err(e) if e.is_io() && attempt == 0 => {
                 *conn = None;
                 continue;
@@ -450,6 +461,7 @@ where
             sql: sql.to_string(),
             params,
             coalesce: None,
+            batch: Vec::new(),
         },
         max,
     );
@@ -803,11 +815,85 @@ pub fn store_save(srv: &Server, name: &str, content: String) {
             sql: STORE_UPSERT.to_string(),
             params,
             coalesce: Some(name.to_string()), // newest save for this store wins
+            batch: Vec::new(),
         },
         max,
     );
     if !queued {
         eprintln!("echoircd: pgsql store '{name}' save dropped (queue full)");
+    }
+}
+
+// ── normalized stores ──────────────────────────────────────────────────────────
+// A store whose records map cleanly to columns (xlines, reputation, read markers)
+// can live in its own relational table instead of one opaque blob — queryable, and
+// each snapshot is written atomically. A module owns its schema and its row↔record
+// mapping; these helpers just move rows.
+
+/// Load every row of a normalized store table (synchronous, at startup). Creates the
+/// table from `ddl` first, so a fresh install simply gets an empty set. Returns `None`
+/// when the store backend isn't the database, or on any DB error — the caller then
+/// migrates from its legacy blob / flat file (so a hiccup never loses data).
+pub fn store_rows_load(
+    srv: &Server,
+    ddl: &str,
+    select_sql: &str,
+) -> Option<Vec<Vec<Option<String>>>> {
+    if !stores_in_db(srv) {
+        return None;
+    }
+    let (cfg, _) = config(srv)?;
+    let r = (|| -> Result<Vec<Vec<Option<String>>>, String> {
+        let mut c = PgConn::connect(&cfg)?;
+        c.query(ddl, &[]).map_err(|e| e.into_message())?;
+        let sel = c.query(select_sql, &[]).map_err(|e| e.into_message())?;
+        c.close();
+        Ok(sel.rows)
+    })();
+    match r {
+        Ok(rows) => Some(rows),
+        Err(e) => {
+            eprintln!("echoircd: pgsql rows load failed ({e})");
+            None
+        }
+    }
+}
+
+/// Atomically replace every row of a normalized store table with `rows` — off-core and
+/// fire-and-forget, as one transaction (DELETE + INSERT×N) so a crash can't leave the
+/// table half-written, and coalesced so a burst of snapshots collapses to the newest.
+/// `table` is a trusted constant (never user input), so interpolating it is safe.
+pub fn store_rows_replace(
+    srv: &Server,
+    table: &str,
+    insert_sql: &str,
+    rows: Vec<Vec<Option<Vec<u8>>>>,
+) {
+    let Some((queue, max)) = srv
+        .ext
+        .get::<SqlState>()
+        .and_then(|st| st.providers.get(""))
+        .map(|p| (p.queue.clone(), p.queue_max))
+    else {
+        return;
+    };
+    let mut batch: Vec<(String, Vec<Option<Vec<u8>>>)> = Vec::with_capacity(rows.len() + 1);
+    batch.push((format!("DELETE FROM {table}"), Vec::new()));
+    for row in rows {
+        batch.push((insert_sql.to_string(), row));
+    }
+    let queued = submit(
+        &queue,
+        SqlRequest {
+            id: 0,
+            coalesce: Some(format!("rows:{table}")),
+            batch,
+            ..SqlRequest::default()
+        },
+        max,
+    );
+    if !queued {
+        eprintln!("echoircd: pgsql rows replace for '{table}' dropped (queue full)");
     }
 }
 
@@ -874,6 +960,7 @@ mod tests {
                 sql: "SELECT $1::text AS v".into(),
                 params: vec![Some(b"hello".to_vec())],
                 coalesce: None,
+                batch: Vec::new(),
             },
             1024,
         );
@@ -978,6 +1065,7 @@ mod tests {
                 None,
             ],
             coalesce: Some(name.into()),
+            batch: Vec::new(),
         }
     }
 
@@ -1005,6 +1093,7 @@ mod tests {
             sql: "SELECT 1".into(),
             params: vec![],
             coalesce: None,
+            batch: Vec::new(),
         };
         assert!(submit(&q, mk(), 2));
         assert!(submit(&q, mk(), 2));

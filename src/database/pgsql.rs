@@ -222,6 +222,20 @@ impl PgConn {
         }
     }
 
+    /// Run several parameterized statements as one transaction on this connection: any
+    /// failure rolls the whole batch back, so a crash or error can't leave a partially
+    /// written table. Used for atomic snapshot replaces of a normalized store.
+    pub fn query_tx(&mut self, stmts: &[(String, Vec<Option<Vec<u8>>>)]) -> Result<(), QueryError> {
+        self.query("BEGIN", &[])?;
+        for (sql, params) in stmts {
+            if let Err(e) = self.query(sql, params) {
+                let _ = self.query("ROLLBACK", &[]);
+                return Err(e);
+            }
+        }
+        self.query("COMMIT", &[]).map(|_| ())
+    }
+
     /// Best-effort graceful close.
     pub fn close(&mut self) {
         let _ = self.write(&proto::terminate());
@@ -328,6 +342,25 @@ mod tests {
             r.rows,
             vec![vec![Some("hello".into()), Some("world".into())]]
         );
+
+        // transactional snapshot replace: a bad row rolls the whole batch back
+        c.query("CREATE TEMP TABLE rep (addr text primary key, score bigint)", &[])
+            .unwrap();
+        c.query_tx(&[
+            ("INSERT INTO rep (addr, score) VALUES ($1, $2)".into(), vec![Some(b"a".to_vec()), Some(b"1".to_vec())]),
+            ("INSERT INTO rep (addr, score) VALUES ($1, $2)".into(), vec![Some(b"b".to_vec()), Some(b"2".to_vec())]),
+        ])
+        .expect("commit");
+        assert_eq!(c.query("SELECT count(*) FROM rep", &[]).unwrap().rows[0][0], Some("2".into()));
+        // a duplicate key mid-batch must abort and leave the table unchanged
+        assert!(c
+            .query_tx(&[
+                ("DELETE FROM rep".into(), vec![]),
+                ("INSERT INTO rep (addr, score) VALUES ($1, $2)".into(), vec![Some(b"a".to_vec()), Some(b"9".to_vec())]),
+                ("INSERT INTO rep (addr, score) VALUES ($1, $2)".into(), vec![Some(b"a".to_vec()), Some(b"9".to_vec())]),
+            ])
+            .is_err());
+        assert_eq!(c.query("SELECT count(*) FROM rep", &[]).unwrap().rows[0][0], Some("2".into()));
         c.close();
     }
 }
