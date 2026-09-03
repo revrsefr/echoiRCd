@@ -544,6 +544,16 @@ database {
     # provider "id=auth host=db.internal database=webapp user=app pass=\"p w\" pool=2";
 }
 
+# SQL console — the oper command /SQL, for network administrators only (privilege
+# servers/sql, held by netadmin). Read-only by default; runs off-core. See /SQL HELP.
+sqlquery
+{
+    # sqlquery          yes;   # enable the /SQL command (default yes)
+    # sqlquery_write    no;    # allow non-SELECT statements — DANGEROUS (default no)
+    # sqlquery_maxrows  20;    # max rows returned to the oper (default 20)
+    # sqlquery_maxwidth 96;    # max characters shown per cell (default 96)
+}
+
 
 # ═══ extra features / modules ════════════════════════════════════════════════
 modules {

@@ -79,6 +79,7 @@ pub mod serverban;
 pub mod showfile;
 pub mod solvemsg;
 pub mod snoop;
+pub mod sqlquery;
 pub mod syslog;
 pub mod tline;
 pub mod whoisport;
@@ -163,5 +164,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(ojoin::commands())
         .chain(namedmodes::commands())
         .chain(webpush::commands())
+        .chain(sqlquery::commands())
         .collect()
 }
