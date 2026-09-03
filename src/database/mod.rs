@@ -156,6 +156,10 @@ struct SqlRequest {
     id: u64,
     sql: String,
     params: Vec<Option<Vec<u8>>>,
+    /// Fire-and-forget writes that supersede each other (a store's whole blob) carry
+    /// their store name here; a queued request with the same key is replaced in place
+    /// rather than appended, so a burst can't pile up N copies of the same row.
+    coalesce: Option<String>,
 }
 
 type Queue = Arc<(Mutex<VecDeque<SqlRequest>>, Condvar)>;
@@ -166,6 +170,9 @@ struct SqlState {
     queue: Queue,
     pending: HashMap<u64, Callback>,
     next_id: u64,
+    /// Backpressure cap: the most requests allowed to sit in the queue before new
+    /// ones are refused (a stalled database can't grow it without bound).
+    queue_max: usize,
 }
 
 /// Read `pgsql_*` config. Returns `None` (subsystem disabled) unless `pgsql_host`
@@ -219,6 +226,7 @@ pub fn init(srv: &mut Server) {
         queue,
         pending: HashMap::new(),
         next_id: 1,
+        queue_max: srv.conf_num("pgsql_queue_max", 1024usize).max(16),
     });
 }
 
@@ -239,27 +247,19 @@ fn run_worker(cfg: PgConfig, queue: Queue, core_tx: Sender<Event>) {
                 None => continue,
             }
         };
-        let result: SqlResult = 'run: {
-            for attempt in 0..2 {
-                if conn.is_none() {
-                    match PgConn::connect(&cfg) {
-                        Ok(c) => conn = Some(c),
-                        Err(e) => break 'run Err(e),
-                    }
+        // Isolate a panicking query (e.g. malformed data from a broken server): turn
+        // it into an error result instead of killing this worker — which would shrink
+        // the pool and leave that request's callback waiting forever.
+        let result: SqlResult =
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                execute_request(&mut conn, &cfg, &req)
+            })) {
+                Ok(r) => r,
+                Err(_) => {
+                    conn = None; // the connection state is now indeterminate — reconnect
+                    Err("pgsql: worker recovered from a panicking query".into())
                 }
-                match conn.as_mut().unwrap().query(&req.sql, &req.params) {
-                    Ok(qr) => break 'run Ok(SqlRows::from(qr)),
-                    // a transport error may just be a connection the server dropped
-                    // while idle — reconnect and retry the query once, transparently
-                    Err(e) if e.is_io() && attempt == 0 => {
-                        conn = None;
-                        continue;
-                    }
-                    Err(e) => break 'run Err(e.into_message()),
-                }
-            }
-            Err("pgsql: query failed".into())
-        };
+            };
         if core_tx
             .send(Event::SqlResult { id: req.id, result })
             .is_err()
@@ -269,6 +269,29 @@ fn run_worker(cfg: PgConfig, queue: Queue, core_tx: Sender<Event>) {
     }
 }
 
+/// Run one request on a worker: (re)connect if needed, then query. A transport error
+/// may just be a connection the server dropped while idle, so reconnect and retry the
+/// query once, transparently.
+fn execute_request(conn: &mut Option<PgConn>, cfg: &PgConfig, req: &SqlRequest) -> SqlResult {
+    for attempt in 0..2 {
+        if conn.is_none() {
+            match PgConn::connect(cfg) {
+                Ok(c) => *conn = Some(c),
+                Err(e) => return Err(e),
+            }
+        }
+        match conn.as_mut().unwrap().query(&req.sql, &req.params) {
+            Ok(qr) => return Ok(SqlRows::from(qr)),
+            Err(e) if e.is_io() && attempt == 0 => {
+                *conn = None;
+                continue;
+            }
+            Err(e) => return Err(e.into_message()),
+        }
+    }
+    Err("pgsql: query failed".into())
+}
+
 /// Submit a parameterized query. The callback runs later on the core thread with
 /// `&mut Server` and the result. If no database is configured, the callback is
 /// invoked immediately with an error (so callers always get a reply).
@@ -276,8 +299,11 @@ pub fn query<F>(srv: &mut Server, sql: &str, params: Vec<SqlValue>, cb: F)
 where
     F: FnOnce(&mut Server, SqlResult) + Send + 'static,
 {
-    let queue = srv.ext.get::<SqlState>().map(|st| st.queue.clone());
-    let Some(queue) = queue else {
+    let Some((queue, max)) = srv
+        .ext
+        .get::<SqlState>()
+        .map(|st| (st.queue.clone(), st.queue_max))
+    else {
         cb(
             srv,
             Err("pgsql: database not configured (set pgsql_host)".into()),
@@ -292,14 +318,26 @@ where
         id
     };
     let params: Vec<Option<Vec<u8>>> = params.into_iter().map(SqlValue::into_param).collect();
-    submit(
+    let queued = submit(
         &queue,
         SqlRequest {
             id,
             sql: sql.to_string(),
             params,
+            coalesce: None,
         },
+        max,
     );
+    if !queued {
+        // the backlog is full — hand the callback its error rather than dropping it
+        let cb = srv
+            .ext
+            .get_mut::<SqlState>()
+            .and_then(|st| st.pending.remove(&id));
+        if let Some(cb) = cb {
+            cb(srv, Err("pgsql: overloaded — query rejected (queue full)".into()));
+        }
+    }
 }
 
 /// Submit a query with **named** parameters (`$name`) — the ergonomic alternative to
@@ -450,13 +488,30 @@ fn copy_dollar_quoted(sql: &str, out: &mut String, open: usize, body_start: usiz
     }
 }
 
-/// Push a request onto the shared queue and wake one idle worker.
-fn submit(queue: &Queue, req: SqlRequest) {
+/// Push a request onto the shared queue and wake one idle worker. Returns whether it
+/// was accepted: a coalescing write supersedes the pending one for its key in place
+/// (always accepted); any other request is refused once the queue has reached `max`.
+fn submit(queue: &Queue, req: SqlRequest, max: usize) -> bool {
     let (lock, cv) = &**queue;
-    if let Ok(mut q) = lock.lock() {
-        q.push_back(req);
-        cv.notify_one();
+    let Ok(mut q) = lock.lock() else {
+        return false;
+    };
+    if let Some(key) = req.coalesce.clone() {
+        if let Some(slot) = q
+            .iter_mut()
+            .find(|r| r.coalesce.as_deref() == Some(key.as_str()))
+        {
+            *slot = req; // supersede the unwritten save for this store
+            cv.notify_one();
+            return true;
+        }
     }
+    if q.len() >= max {
+        return false;
+    }
+    q.push_back(req);
+    cv.notify_one();
+    true
 }
 
 /// Deliver a completed query to its waiting callback. Called by the core when it
@@ -587,14 +642,19 @@ pub fn store_save(srv: &Server, name: &str, content: String) {
         Some(content.into_bytes()),
         Some((crate::server::now() as i64).to_string().into_bytes()),
     ];
-    submit(
+    let queued = submit(
         &st.queue,
         SqlRequest {
-            id: 0, // fire-and-forget
+            id: 0,                             // fire-and-forget
             sql: STORE_UPSERT.to_string(),
             params,
+            coalesce: Some(name.to_string()), // newest save for this store wins
         },
+        st.queue_max,
     );
+    if !queued {
+        eprintln!("echoircd: pgsql store '{name}' save dropped (queue full)");
+    }
 }
 
 /// Uniform load for a persisted store: the central DB when `store_backend = pgsql`
@@ -659,7 +719,9 @@ mod tests {
                 id: 7,
                 sql: "SELECT $1::text AS v".into(),
                 params: vec![Some(b"hello".to_vec())],
+                coalesce: None,
             },
+            1024,
         );
         match rx
             .recv_timeout(Duration::from_secs(10))
@@ -740,5 +802,59 @@ mod tests {
     fn named_mixed_with_positional_is_an_error() {
         let e = resolve_named("SELECT $1, $name", vec![("name", "x".into())]).unwrap_err();
         assert!(e.contains("positional"), "{e}");
+    }
+
+    #[test]
+    fn named_handles_trailing_dollar_and_empty() {
+        assert_eq!(resolve_named("", vec![]).unwrap().0, "");
+        // a lone trailing '$' is copied through, never read as a placeholder
+        assert_eq!(
+            resolve_named("SELECT 1 $", vec![]).unwrap().0,
+            "SELECT 1 $"
+        );
+    }
+
+    fn store_write(name: &str, content: &str) -> SqlRequest {
+        SqlRequest {
+            id: 0,
+            sql: STORE_UPSERT.into(),
+            params: vec![
+                Some(name.as_bytes().to_vec()),
+                Some(content.as_bytes().to_vec()),
+                None,
+            ],
+            coalesce: Some(name.into()),
+        }
+    }
+
+    #[test]
+    fn submit_coalesces_fire_and_forget_by_key() {
+        let q: Queue = Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
+        assert!(submit(&q, store_write("permchannels", "v1"), 1024));
+        assert!(submit(&q, store_write("xlines", "a"), 1024));
+        assert!(submit(&q, store_write("permchannels", "v2"), 1024)); // supersedes v1
+        let (lock, _) = &*q;
+        let g = lock.lock().unwrap();
+        assert_eq!(g.len(), 2); // one row per store, not three
+        let pc = g
+            .iter()
+            .find(|r| r.coalesce.as_deref() == Some("permchannels"))
+            .unwrap();
+        assert_eq!(pc.params[1], Some(b"v2".to_vec())); // newest content kept
+    }
+
+    #[test]
+    fn submit_refuses_past_the_cap() {
+        let q: Queue = Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
+        let mk = || SqlRequest {
+            id: 1,
+            sql: "SELECT 1".into(),
+            params: vec![],
+            coalesce: None,
+        };
+        assert!(submit(&q, mk(), 2));
+        assert!(submit(&q, mk(), 2));
+        assert!(!submit(&q, mk(), 2)); // full → refused, not appended
+        assert_eq!(q.0.lock().unwrap().len(), 2);
     }
 }

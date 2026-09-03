@@ -536,6 +536,7 @@ database {
     # pgsql_pool     2;              # worker connections / concurrent queries (1..16)
     # pgsql_connect_timeout 5;       # seconds to wait for a connection
     # pgsql_timeout  30;             # seconds a single query read may stall before failing
+    # pgsql_queue_max 1024;          # backpressure: max queued queries before new ones are refused (min 16)
 }
 
 
