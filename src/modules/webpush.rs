@@ -120,32 +120,105 @@ pub fn load(s: &mut Server) {
     let _ = s.ext.get_or_insert_with::<Vapid>(move || vapid);
 
     // subscriptions
-    if let Some(text) = crate::database::persist_load(s, "webpush_subs", &subs_path(s)) {
-        let store = s.ext.get_or_insert_with::<Subs>(Subs::default);
-        for line in text.lines() {
-            let f: Vec<&str> = line.split(' ').collect();
-            if f.len() != 4 || line.starts_with('#') {
-                continue;
+    load_subs(s);
+}
+
+/// Schema for the normalized web-push store (used when `store_backend = pgsql`): one
+/// row per subscription, key material kept base64url-encoded (as in the blob) so the
+/// migration is a straight copy.
+const WEBPUSH_DDL: &str = "CREATE TABLE IF NOT EXISTS echoircd_webpush \
+     (identity text NOT NULL, endpoint text NOT NULL, p256dh text NOT NULL, auth text NOT NULL)";
+
+/// Restore push subscriptions: from the normalized table when `store_backend = pgsql`
+/// (migrating the legacy blob/file in and seeding it if empty), else the legacy text.
+/// On any DB error it falls back to the legacy text so subscriptions aren't lost.
+fn load_subs(s: &mut Server) {
+    if crate::database::stores_in_db(s) {
+        if let Some(rows) = crate::database::store_rows_load(
+            s,
+            WEBPUSH_DDL,
+            "SELECT identity, endpoint, p256dh, auth FROM echoircd_webpush",
+        ) {
+            if rows.is_empty() {
+                load_subs_text(s); // migrate the legacy blob/file …
+                save(s); // … and seed the table
+            } else {
+                let store = s.ext.get_or_insert_with::<Subs>(Subs::default);
+                for r in &rows {
+                    let g = |i: usize| r.get(i).and_then(|v| v.as_deref());
+                    if let (Some(id), Some(ep), Some(p), Some(a)) = (g(0), g(1), g(2), g(3)) {
+                        if let (Some(p256dh), Some(auth)) = (
+                            crate::modules::jwt::unb64url(p),
+                            crate::modules::jwt::unb64url(a),
+                        ) {
+                            store.0.entry(id.to_string()).or_default().push(Sub {
+                                endpoint: ep.to_string(),
+                                p256dh,
+                                auth,
+                            });
+                        }
+                    }
+                }
             }
-            if let (Some(p), Some(a)) = (
-                crate::modules::jwt::unb64url(f[2]),
-                crate::modules::jwt::unb64url(f[3]),
-            ) {
-                store.0.entry(f[0].to_string()).or_default().push(Sub {
-                    endpoint: f[1].to_string(),
-                    p256dh: p,
-                    auth: a,
-                });
-            }
+            return;
+        }
+        // the database was unreachable — fall through to the legacy text
+    }
+    load_subs_text(s);
+}
+
+/// Parse subscriptions from the legacy text form (the central blob when pgsql, else the
+/// flat file) into the store.
+fn load_subs_text(s: &mut Server) {
+    let Some(text) = crate::database::persist_load(s, "webpush_subs", &subs_path(s)) else {
+        return;
+    };
+    let store = s.ext.get_or_insert_with::<Subs>(Subs::default);
+    for line in text.lines() {
+        let f: Vec<&str> = line.split(' ').collect();
+        if f.len() != 4 || line.starts_with('#') {
+            continue;
+        }
+        if let (Some(p), Some(a)) = (
+            crate::modules::jwt::unb64url(f[2]),
+            crate::modules::jwt::unb64url(f[3]),
+        ) {
+            store.0.entry(f[0].to_string()).or_default().push(Sub {
+                endpoint: f[1].to_string(),
+                p256dh: p,
+                auth: a,
+            });
         }
     }
 }
 
-/// Persist the subscription store (durable across restart). Off-core via `disk_write`.
+/// Persist the subscription store (durable across restart, off-core). With the database
+/// backend each subscription is a row in `echoircd_webpush` (queryable, atomically
+/// snapshot-replaced); with the file backend it stays one coalesced blob.
 fn save(s: &Server) {
     let Some(store) = s.ext.get::<Subs>() else {
         return;
     };
+    if crate::database::stores_in_db(s) {
+        let mut rows: Vec<Vec<Option<Vec<u8>>>> = Vec::new();
+        for (id, subs) in &store.0 {
+            for sub in subs {
+                rows.push(vec![
+                    Some(id.clone().into_bytes()),
+                    Some(sub.endpoint.clone().into_bytes()),
+                    Some(b64url(&sub.p256dh).into_bytes()),
+                    Some(b64url(&sub.auth).into_bytes()),
+                ]);
+            }
+        }
+        crate::database::store_rows_replace(
+            s,
+            "echoircd_webpush",
+            "INSERT INTO echoircd_webpush (identity, endpoint, p256dh, auth) VALUES ($1, $2, $3, $4)",
+            rows,
+        );
+        return;
+    }
     let mut out = String::from("# echoircd web-push subscriptions — auto-generated\n");
     let mut ids: Vec<&String> = store.0.keys().collect();
     ids.sort();
