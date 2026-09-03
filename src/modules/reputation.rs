@@ -310,8 +310,33 @@ impl Command for ReputationCmd {
     }
 }
 
-/// Persist reputation (masked-ip score last_seen per line) so it survives a restart.
+/// Schema for the normalized reputation store (used when `store_backend = pgsql`).
+const REP_DDL: &str = "CREATE TABLE IF NOT EXISTS echoircd_reputation \
+     (addr text PRIMARY KEY, score bigint NOT NULL, last_seen bigint NOT NULL)";
+
+/// Persist reputation so it survives a restart. With the database backend each address
+/// is a row in `echoircd_reputation` (queryable, atomically snapshot-replaced); with
+/// the file backend it stays one `masked-ip score last_seen` blob.
 pub fn save(s: &Server) {
+    if crate::database::stores_in_db(s) {
+        let mut rows: Vec<Vec<Option<Vec<u8>>>> = Vec::new();
+        if let Some(r) = s.ext.get::<Reputation>() {
+            for (ip, e) in &r.0 {
+                rows.push(vec![
+                    Some(ip.to_string().into_bytes()),
+                    Some((e.score as i64).to_string().into_bytes()),
+                    Some((e.last_seen as i64).to_string().into_bytes()),
+                ]);
+            }
+        }
+        crate::database::store_rows_replace(
+            s,
+            "echoircd_reputation",
+            "INSERT INTO echoircd_reputation (addr, score, last_seen) VALUES ($1, $2, $3)",
+            rows,
+        );
+        return;
+    }
     let mut out = String::new();
     if let Some(r) = s.ext.get::<Reputation>() {
         for (ip, e) in &r.0 {
@@ -321,8 +346,46 @@ pub fn save(s: &Server) {
     crate::database::persist_save(s, "reputation", &db_path(s), out);
 }
 
-/// Reload persisted reputation at startup.
+/// Reload persisted reputation at startup. Prefers the normalized table; if it's empty
+/// (first boot after enabling pgsql) it migrates the legacy blob / flat file in and
+/// seeds the table — and on any DB error it falls back to the legacy text (no loss).
 pub fn load(s: &mut Server) {
+    if crate::database::stores_in_db(s) {
+        if let Some(rows) = crate::database::store_rows_load(
+            s,
+            REP_DDL,
+            "SELECT addr, score, last_seen FROM echoircd_reputation",
+        ) {
+            if rows.is_empty() {
+                load_text(s); // migrate the legacy blob/file …
+                save(s); // … and seed the table from it
+            } else {
+                let store = s.ext.get_or_insert_with::<Reputation>(Reputation::default);
+                for r in &rows {
+                    let ip = r.first().and_then(|v| v.as_deref());
+                    let sc = r.get(1).and_then(|v| v.as_deref());
+                    if let (Some(ip), Some(sc)) = (ip, sc) {
+                        if let (Ok(ip), Ok(score)) = (ip.parse::<IpAddr>(), sc.parse::<u32>()) {
+                            let last_seen = r
+                                .get(2)
+                                .and_then(|v| v.as_deref())
+                                .and_then(|v| v.parse().ok())
+                                .unwrap_or_else(now);
+                            store.0.insert(ip, Entry { score, last_seen });
+                        }
+                    }
+                }
+            }
+            return;
+        }
+        // the database was unreachable — fall through to the legacy text so we keep data
+    }
+    load_text(s);
+}
+
+/// Parse reputation from its legacy text form (the central blob when pgsql, else the
+/// flat file) into memory.
+fn load_text(s: &mut Server) {
     let Some(text) = crate::database::persist_load(s, "reputation", &db_path(s)) else {
         return;
     };
