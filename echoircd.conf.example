@@ -537,6 +537,11 @@ database {
     # pgsql_connect_timeout 5;       # seconds to wait for a connection
     # pgsql_timeout  30;             # seconds a single query read may stall before failing
     # pgsql_queue_max 1024;          # backpressure: max queued queries before new ones are refused (min 16)
+    #
+    # Extra named databases a module can target by id (e.g. a sqlauth module pointing
+    # at an existing web-app DB). Repeatable; unset fields inherit the primary above;
+    # quote values that contain spaces. The primary (the pgsql_* keys) is the default.
+    # provider "id=auth host=db.internal database=webapp user=app pass=\"p w\" pool=2";
 }
 
 
