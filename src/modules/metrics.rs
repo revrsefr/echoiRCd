@@ -21,11 +21,15 @@ pub struct Metrics {
     pub commands: AtomicU64,
     pub messages: AtomicU64,
     pub connects: AtomicU64,
+    pub pgsql_queries: AtomicU64,
+    pub pgsql_errors: AtomicU64,
+    pub pgsql_dropped: AtomicU64,
     // gauges (republished each tick)
     pub users: AtomicU64,
     pub channels: AtomicU64,
     pub servers: AtomicU64,
     pub links: AtomicU64,
+    pub pgsql_queue_depth: AtomicU64,
 }
 
 static METRICS: OnceLock<Arc<Metrics>> = OnceLock::new();
@@ -40,25 +44,93 @@ pub fn handle() -> Arc<Metrics> {
 fn render(m: &Metrics) -> String {
     let mut o = String::new();
     let counter = |o: &mut String, name: &str, help: &str, v: u64| {
-        o.push_str(&format!("# HELP {name} {help}\n# TYPE {name} counter\n{name} {v}\n"));
+        o.push_str(&format!(
+            "# HELP {name} {help}\n# TYPE {name} counter\n{name} {v}\n"
+        ));
     };
     let gauge = |o: &mut String, name: &str, help: &str, v: u64| {
-        o.push_str(&format!("# HELP {name} {help}\n# TYPE {name} gauge\n{name} {v}\n"));
+        o.push_str(&format!(
+            "# HELP {name} {help}\n# TYPE {name} gauge\n{name} {v}\n"
+        ));
     };
-    counter(&mut o, "echoircd_commands_total", "Commands dispatched.", m.commands.load(Relaxed));
-    counter(&mut o, "echoircd_messages_total", "PRIVMSG/NOTICE handled.", m.messages.load(Relaxed));
-    counter(&mut o, "echoircd_connects_total", "Client registrations completed.", m.connects.load(Relaxed));
-    gauge(&mut o, "echoircd_users", "Registered users online.", m.users.load(Relaxed));
-    gauge(&mut o, "echoircd_channels", "Channels in existence.", m.channels.load(Relaxed));
-    gauge(&mut o, "echoircd_servers", "Servers known on the network.", m.servers.load(Relaxed));
-    gauge(&mut o, "echoircd_links", "Direct server links.", m.links.load(Relaxed));
+    counter(
+        &mut o,
+        "echoircd_commands_total",
+        "Commands dispatched.",
+        m.commands.load(Relaxed),
+    );
+    counter(
+        &mut o,
+        "echoircd_messages_total",
+        "PRIVMSG/NOTICE handled.",
+        m.messages.load(Relaxed),
+    );
+    counter(
+        &mut o,
+        "echoircd_connects_total",
+        "Client registrations completed.",
+        m.connects.load(Relaxed),
+    );
+    gauge(
+        &mut o,
+        "echoircd_users",
+        "Registered users online.",
+        m.users.load(Relaxed),
+    );
+    gauge(
+        &mut o,
+        "echoircd_channels",
+        "Channels in existence.",
+        m.channels.load(Relaxed),
+    );
+    gauge(
+        &mut o,
+        "echoircd_servers",
+        "Servers known on the network.",
+        m.servers.load(Relaxed),
+    );
+    gauge(
+        &mut o,
+        "echoircd_links",
+        "Direct server links.",
+        m.links.load(Relaxed),
+    );
+    counter(
+        &mut o,
+        "echoircd_pgsql_queries_total",
+        "Database queries executed by the worker pool.",
+        m.pgsql_queries.load(Relaxed),
+    );
+    counter(
+        &mut o,
+        "echoircd_pgsql_errors_total",
+        "Database queries that returned an error.",
+        m.pgsql_errors.load(Relaxed),
+    );
+    counter(
+        &mut o,
+        "echoircd_pgsql_dropped_total",
+        "Database queries refused because the submit queue was full.",
+        m.pgsql_dropped.load(Relaxed),
+    );
+    gauge(
+        &mut o,
+        "echoircd_pgsql_queue_depth",
+        "Database queries currently waiting in the submit queue.",
+        m.pgsql_queue_depth.load(Relaxed),
+    );
     o
 }
 
 /// Start the scrape endpoint if `metrics_bind` is configured. Serves any GET with
 /// the exposition text; it carries no secrets, so bind it somewhere private.
 pub fn maybe_start(cfg: &Config) {
-    let Some(bind) = cfg.raw.get("metrics_bind").and_then(|v| v.last()).filter(|s| !s.is_empty()) else {
+    let Some(bind) = cfg
+        .raw
+        .get("metrics_bind")
+        .and_then(|v| v.last())
+        .filter(|s| !s.is_empty())
+    else {
         return;
     };
     let bind = bind.to_string();

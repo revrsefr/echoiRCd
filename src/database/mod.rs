@@ -43,11 +43,13 @@ pub mod proto;
 pub mod scram;
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::Ordering::Relaxed;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use crate::ircd::Event;
+use crate::modules::metrics;
 use crate::server::Server;
 use pgsql::{PgConfig, PgConn, QueryResult};
 
@@ -242,11 +244,13 @@ fn run_worker(cfg: PgConfig, queue: Queue, core_tx: Sender<Event>) {
             while q.is_empty() {
                 q = cv.wait(q).unwrap_or_else(|e| e.into_inner());
             }
-            match q.pop_front() {
-                Some(r) => r,
-                None => continue,
-            }
+            let Some(r) = q.pop_front() else { continue };
+            metrics::handle()
+                .pgsql_queue_depth
+                .store(q.len() as u64, Relaxed);
+            r
         };
+        metrics::handle().pgsql_queries.fetch_add(1, Relaxed);
         // Isolate a panicking query (e.g. malformed data from a broken server): turn
         // it into an error result instead of killing this worker — which would shrink
         // the pool and leave that request's callback waiting forever.
@@ -507,9 +511,13 @@ fn submit(queue: &Queue, req: SqlRequest, max: usize) -> bool {
         }
     }
     if q.len() >= max {
+        metrics::handle().pgsql_dropped.fetch_add(1, Relaxed);
         return false;
     }
     q.push_back(req);
+    metrics::handle()
+        .pgsql_queue_depth
+        .store(q.len() as u64, Relaxed);
     cv.notify_one();
     true
 }
@@ -517,6 +525,9 @@ fn submit(queue: &Queue, req: SqlRequest, max: usize) -> bool {
 /// Deliver a completed query to its waiting callback. Called by the core when it
 /// receives an [`Event::SqlResult`].
 pub fn on_result(srv: &mut Server, id: u64, result: SqlResult) {
+    if result.is_err() {
+        metrics::handle().pgsql_errors.fetch_add(1, Relaxed);
+    }
     let cb = srv
         .ext
         .get_mut::<SqlState>()
