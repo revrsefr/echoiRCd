@@ -251,10 +251,10 @@ fn fjoin_ts_arbitration_lower_ts_wins() {
 }
 
 proptest::proptest! {
-    // Randomised churn: an arbitrary interleaving of join/part on both nodes must
-    // always leave the two sides converged on #c.
+    // Randomised churn across two channels: an arbitrary interleaving of join/part on
+    // both nodes must always leave the two sides converged — members, TS and modes.
     #[test]
-    fn random_churn_converges(ops in proptest::collection::vec(0u8..4, 0..40)) {
+    fn random_churn_converges(ops in proptest::collection::vec(0u8..8, 0..60)) {
         let mut a = Node::new("1AA", "a.test", "b.test", "10.0.0.2");
         let mut b = Node::new("2BB", "b.test", "a.test", "10.0.0.1");
         let au = a.add_user(1, "ann");
@@ -265,13 +265,20 @@ proptest::proptest! {
                 0 => a.srv.join(au, "#c", None),
                 1 => { a.srv.part(au, "#c", "x"); }
                 2 => b.srv.join(bu, "#c", None),
-                _ => { b.srv.part(bu, "#c", "x"); }
+                3 => { b.srv.part(bu, "#c", "x"); }
+                4 => a.srv.join(au, "#d", None),
+                5 => { a.srv.part(au, "#d", "x"); }
+                6 => b.srv.join(bu, "#d", None),
+                _ => { b.srv.part(bu, "#d", "x"); }
             }
             pump(&mut a, &mut b);
         }
-        // drain any residue and compare
+        // drain any residue and compare both channels end-to-end
         pump(&mut a, &mut b);
-        proptest::prop_assert_eq!(members(&a, "#c"), members(&b, "#c"));
-        proptest::prop_assert_eq!(chan_ts(&a, "#c"), chan_ts(&b, "#c"));
+        for key in ["#c", "#d"] {
+            proptest::prop_assert_eq!(members(&a, key), members(&b, key));
+            proptest::prop_assert_eq!(chan_ts(&a, key), chan_ts(&b, key));
+            proptest::prop_assert_eq!(chan_modes(&a, key), chan_modes(&b, key));
+        }
     }
 }
