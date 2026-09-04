@@ -191,22 +191,42 @@ fn main() {
         cfg.bind.clone()
     };
     let mut client_listeners: Vec<mio::net::TcpListener> = Vec::new();
-    for b in &plaintext_binds {
-        match b.parse::<std::net::SocketAddr>() {
-            Ok(a) => match mio::net::TcpListener::bind(a) {
-                Ok(l) => {
-                    eprintln!("echoircd plaintext on {b}");
-                    client_listeners.push(l);
-                }
-                Err(e) => eprintln!("echoircd: cannot bind {b}: {e}"),
-            },
-            Err(e) => eprintln!("echoircd: bad bind address {b}: {e}"),
+    if echoircd::upgrade::is_upgrade() {
+        // graceful upgrade: adopt the plaintext listeners the previous image handed us,
+        // so there's no rebind gap while the binary is swapped.
+        for (role, l) in echoircd::upgrade::inherited() {
+            if role == "client" && l.set_nonblocking(true).is_ok() {
+                client_listeners.push(mio::net::TcpListener::from_std(l));
+            }
+        }
+        eprintln!(
+            "echoircd: adopted {} plaintext listener(s) across the upgrade",
+            client_listeners.len()
+        );
+    }
+    if client_listeners.is_empty() {
+        for b in &plaintext_binds {
+            match b.parse::<std::net::SocketAddr>() {
+                Ok(a) => match mio::net::TcpListener::bind(a) {
+                    Ok(l) => {
+                        eprintln!("echoircd plaintext on {b}");
+                        client_listeners.push(l);
+                    }
+                    Err(e) => eprintln!("echoircd: cannot bind {b}: {e}"),
+                },
+                Err(e) => eprintln!("echoircd: bad bind address {b}: {e}"),
+            }
         }
     }
     if client_listeners.is_empty() {
         eprintln!("echoircd: no plaintext listener could bind; exiting");
         std::process::exit(1);
     }
+    // The fds to hand to the next binary on a SIGUSR2 graceful upgrade.
+    let upgrade_fds: Vec<(&str, std::os::fd::RawFd)> = client_listeners
+        .iter()
+        .map(|l| ("client", std::os::fd::AsRawFd::as_raw_fd(l)))
+        .collect();
 
     // Write a pidfile only when `pidfile` is configured, so throwaway instances in
     // the same directory (e.g. the integration-test harness) can't clobber a real
@@ -295,6 +315,25 @@ fn main() {
             });
         }
         Err(e) => eprintln!("echoircd: SIGHUP handler unavailable: {e}"),
+    }
+
+    // SIGUSR2 → graceful binary upgrade: re-exec the new build in place, handing over
+    // the listening sockets so there's no rebind gap or refused-connection window.
+    match signal_hook::iterator::Signals::new([signal_hook::consts::SIGUSR2]) {
+        Ok(mut signals) => {
+            let fds = upgrade_fds.clone();
+            thread::spawn(move || {
+                for _ in signals.forever() {
+                    eprintln!(
+                        "echoircd: SIGUSR2 — graceful upgrade, re-exec preserving {} listener(s)",
+                        fds.len()
+                    );
+                    let e = echoircd::upgrade::reexec(&fds);
+                    eprintln!("echoircd: upgrade re-exec failed, staying up: {e}");
+                }
+            });
+        }
+        Err(e) => eprintln!("echoircd: SIGUSR2 handler unavailable: {e}"),
     }
 
     // reactor worker pool: shared by the plaintext acceptor and the direct-TLS

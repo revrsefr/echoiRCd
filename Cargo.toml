@@ -42,6 +42,9 @@ rustls-pemfile = "2"
 # isolates the one unsafe FFI call the safe openssl crate lacks, so the daemon stays
 # `#![forbid(unsafe_code)]`.
 sslgroup = { path = "sslgroup" }
+# Adopt live sockets across exec() for the zero-downtime upgrade (SIGUSR2). Isolates
+# the two low-level fd calls so our crate stays #![forbid(unsafe_code)].
+fdinherit = { path = "fdinherit" }
 
 [dev-dependencies]
 # integration tests spawn the built binary and act as a TLS client against it

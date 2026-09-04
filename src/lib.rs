@@ -42,6 +42,7 @@ pub mod server;
 pub mod socketengine;
 pub mod tls;
 pub mod tls_rustls;
+pub mod upgrade;
 pub mod users;
 pub mod watch;
 pub mod websocket;
