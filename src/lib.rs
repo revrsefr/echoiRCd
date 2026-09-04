@@ -35,6 +35,7 @@ pub mod numeric;
 pub mod proxy;
 pub mod regex;
 pub mod resolver;
+pub mod reuseport;
 #[cfg(test)]
 mod s2s_sim;
 pub mod server;

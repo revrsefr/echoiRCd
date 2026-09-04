@@ -31,6 +31,9 @@ ahash = "0.8"
 mimalloc = "0.1"
 # SIMD byte search — accelerates the newline scan in the line framer.
 memchr = "2"
+# Low-level socket control the std API doesn't expose: SO_REUSEPORT (multi-core accept
+# loops + zero-gap binary reload). Safe wrappers; its `unsafe` stays internal.
+socket2 = { version = "0.5", features = ["all"] }
 # Pure-Rust TLS backend, opt-in via `tls_backend = rustls` (default stays openssl).
 # ring provider (no aws-lc-rs); its `unsafe` stays internal like every other crate.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
