@@ -1,0 +1,9 @@
+[package]
+name = "fdinherit"
+version = "0.1.0"
+edition = "2021"
+description = "Adopt and make-inheritable raw file descriptors across exec(), so the daemon can hand its live sockets to a freshly-exec'd image (zero-downtime upgrade). Isolates the two low-level calls so the daemon stays #![forbid(unsafe_code)]."
+license = "MIT"
+
+[dependencies]
+libc = "0.2"
