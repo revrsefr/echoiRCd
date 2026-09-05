@@ -57,6 +57,21 @@ pub fn inherited() -> Vec<(String, TcpListener)> {
         .collect()
 }
 
+/// Remove and return the inherited listeners tagged `role` from the set produced by
+/// [`inherited`], so each fd is adopted exactly once across the whole startup.
+pub fn take(inherited: &mut Vec<(String, TcpListener)>, role: &str) -> Vec<TcpListener> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < inherited.len() {
+        if inherited[i].0 == role {
+            out.push(inherited.remove(i).1);
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

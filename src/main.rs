@@ -190,21 +190,32 @@ fn main() {
     } else {
         cfg.bind.clone()
     };
-    let mut client_listeners: Vec<mio::net::TcpListener> = Vec::new();
-    if echoircd::upgrade::is_upgrade() {
-        // graceful upgrade: adopt the plaintext listeners the previous image handed us,
-        // so there's no rebind gap while the binary is swapped.
-        for (role, l) in echoircd::upgrade::inherited() {
-            if role == "client" && l.set_nonblocking(true).is_ok() {
-                client_listeners.push(mio::net::TcpListener::from_std(l));
-            }
+    // Graceful-upgrade handover: adopt any inherited listeners (parsed once, split by
+    // role), and register every listener's fd so SIGUSR2 can hand them all to the next
+    // binary. `inherited` is empty on a normal start.
+    let mut inherited = echoircd::upgrade::inherited();
+    let upgrade_reg = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(
+        &'static str,
+        std::os::fd::RawFd,
+    )>::new()));
+    let register_fd = |role: &'static str, fd: std::os::fd::RawFd| {
+        if let Ok(mut r) = upgrade_reg.lock() {
+            r.push((role, fd));
         }
+    };
+
+    let mut client_listeners: Vec<mio::net::TcpListener> = Vec::new();
+    for l in echoircd::upgrade::take(&mut inherited, "client") {
+        if l.set_nonblocking(true).is_ok() {
+            client_listeners.push(mio::net::TcpListener::from_std(l));
+        }
+    }
+    if !client_listeners.is_empty() {
         eprintln!(
             "echoircd: adopted {} plaintext listener(s) across the upgrade",
             client_listeners.len()
         );
-    }
-    if client_listeners.is_empty() {
+    } else {
         for b in &plaintext_binds {
             match b.parse::<std::net::SocketAddr>() {
                 Ok(a) => match mio::net::TcpListener::bind(a) {
@@ -222,11 +233,9 @@ fn main() {
         eprintln!("echoircd: no plaintext listener could bind; exiting");
         std::process::exit(1);
     }
-    // The fds to hand to the next binary on a SIGUSR2 graceful upgrade.
-    let upgrade_fds: Vec<(&str, std::os::fd::RawFd)> = client_listeners
-        .iter()
-        .map(|l| ("client", std::os::fd::AsRawFd::as_raw_fd(l)))
-        .collect();
+    for l in &client_listeners {
+        register_fd("client", std::os::fd::AsRawFd::as_raw_fd(l));
+    }
 
     // Write a pidfile only when `pidfile` is configured, so throwaway instances in
     // the same directory (e.g. the integration-test harness) can't clobber a real
@@ -321,9 +330,10 @@ fn main() {
     // the listening sockets so there's no rebind gap or refused-connection window.
     match signal_hook::iterator::Signals::new([signal_hook::consts::SIGUSR2]) {
         Ok(mut signals) => {
-            let fds = upgrade_fds.clone();
+            let reg = upgrade_reg.clone();
             thread::spawn(move || {
                 for _ in signals.forever() {
+                    let fds = reg.lock().map(|g| g.clone()).unwrap_or_default();
                     eprintln!(
                         "echoircd: SIGUSR2 — graceful upgrade, re-exec preserving {} listener(s)",
                         fds.len()
@@ -399,33 +409,45 @@ fn main() {
                     }
                 };
                 if let Some(backend) = backend {
-                    for bind_tls in &cfg.bind_tls {
-                        match TcpListener::bind(bind_tls) {
-                            Ok(tls_listener) => {
-                                eprintln!("echoircd TLS on {bind_tls}");
-                                let tls_tx = tx.clone();
-                                let tls_counter = counter.clone();
-                                let tls_proxy_trust = proxy_trust.clone();
-                                let tls_reactors = reactors.clone();
-                                let tls_limiter = accept_limiter.clone();
-                                let backend = backend.clone();
-                                thread::spawn(move || {
-                                    socketengine::accept_loop(
-                                        tls_listener,
-                                        tls_tx,
-                                        Some(backend),
-                                        tls_counter,
-                                        false,
-                                        max_line,
-                                        tls_proxy_trust,
-                                        tls_reactors,
-                                        tls_limiter,
-                                        handshake_timeout,
-                                    )
-                                });
+                    let mut tls_listeners = echoircd::upgrade::take(&mut inherited, "tls");
+                    if tls_listeners.is_empty() {
+                        for bind_tls in &cfg.bind_tls {
+                            match TcpListener::bind(bind_tls) {
+                                Ok(l) => {
+                                    eprintln!("echoircd TLS on {bind_tls}");
+                                    tls_listeners.push(l);
+                                }
+                                Err(e) => eprintln!("echoircd: cannot bind TLS {bind_tls}: {e}"),
                             }
-                            Err(e) => eprintln!("echoircd: cannot bind TLS {bind_tls}: {e}"),
                         }
+                    } else {
+                        eprintln!(
+                            "echoircd: adopted {} TLS listener(s) across the upgrade",
+                            tls_listeners.len()
+                        );
+                    }
+                    for tls_listener in tls_listeners {
+                        register_fd("tls", std::os::fd::AsRawFd::as_raw_fd(&tls_listener));
+                        let tls_tx = tx.clone();
+                        let tls_counter = counter.clone();
+                        let tls_proxy_trust = proxy_trust.clone();
+                        let tls_reactors = reactors.clone();
+                        let tls_limiter = accept_limiter.clone();
+                        let backend = backend.clone();
+                        thread::spawn(move || {
+                            socketengine::accept_loop(
+                                tls_listener,
+                                tls_tx,
+                                Some(backend),
+                                tls_counter,
+                                false,
+                                max_line,
+                                tls_proxy_trust,
+                                tls_reactors,
+                                tls_limiter,
+                                handshake_timeout,
+                            )
+                        });
                     }
                 }
             }
@@ -434,30 +456,42 @@ fn main() {
     }
 
     // server-to-server link listeners (bind_server, repeatable — see crate::link)
-    for bind_srv in &cfg.bind_server {
-        match TcpListener::bind(bind_srv) {
-            Ok(sl) => {
-                eprintln!("echoircd S2S link listener on {bind_srv} (sid {})", cfg.sid);
-                let s_tx = tx.clone();
-                let s_counter = counter.clone();
-                thread::spawn(move || {
-                    // links stay on the thread path: no reactor handoff, no rate limit
-                    socketengine::accept_loop(
-                        sl,
-                        s_tx,
-                        None,
-                        s_counter,
-                        true,
-                        max_line,
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        handshake_timeout,
-                    )
-                });
+    let mut server_listeners = echoircd::upgrade::take(&mut inherited, "server");
+    if server_listeners.is_empty() {
+        for bind_srv in &cfg.bind_server {
+            match TcpListener::bind(bind_srv) {
+                Ok(sl) => {
+                    eprintln!("echoircd S2S link listener on {bind_srv} (sid {})", cfg.sid);
+                    server_listeners.push(sl);
+                }
+                Err(e) => eprintln!("echoircd: cannot bind server port {bind_srv}: {e}"),
             }
-            Err(e) => eprintln!("echoircd: cannot bind server port {bind_srv}: {e}"),
         }
+    } else {
+        eprintln!(
+            "echoircd: adopted {} S2S listener(s) across the upgrade",
+            server_listeners.len()
+        );
+    }
+    for sl in server_listeners {
+        register_fd("server", std::os::fd::AsRawFd::as_raw_fd(&sl));
+        let s_tx = tx.clone();
+        let s_counter = counter.clone();
+        thread::spawn(move || {
+            // links stay on the thread path: no reactor handoff, no rate limit
+            socketengine::accept_loop(
+                sl,
+                s_tx,
+                None,
+                s_counter,
+                true,
+                max_line,
+                Vec::new(),
+                Vec::new(),
+                None,
+                handshake_timeout,
+            )
+        });
     }
 
     // optional JSON-RPC-over-HTTP control interface (see crate::modules::rpc)
