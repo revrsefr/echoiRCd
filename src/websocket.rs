@@ -131,7 +131,13 @@ pub fn accept_key(client_key: &str) -> String {
 }
 
 /// Start the ws:// and/or wss:// listeners if configured. Called from `main`.
-pub fn maybe_start(cfg: &Config, core: Sender<Event>, counter: Arc<AtomicU64>) {
+pub fn maybe_start(
+    cfg: &Config,
+    core: Sender<Event>,
+    counter: Arc<AtomicU64>,
+    inherited: &mut Vec<(String, TcpListener)>,
+    reg: &Arc<std::sync::Mutex<Vec<(&'static str, std::os::fd::RawFd)>>>,
+) {
     let get = |k: &str| cfg.raw.get(k).and_then(|v| v.last()).map(|s| s.as_str());
     let dur = |k: &str, d: u64| {
         get(k)
@@ -160,29 +166,60 @@ pub fn maybe_start(cfg: &Config, core: Sender<Event>, counter: Arc<AtomicU64>) {
         native_ping: get("ws_nativeping").map(crate::config::yesish).unwrap_or(true),
     };
 
-    if let Some(bind) = get("bind_ws").map(str::to_string) {
-        match TcpListener::bind(&bind) {
-            Ok(l) => {
-                eprintln!("echoircd WebSocket (ws) on {bind}");
-                let (c, n, w) = (core.clone(), counter.clone(), wscfg.clone());
-                thread::spawn(move || accept_ws(l, c, n, None, w));
+    if let Some(bind) = get("bind_ws") {
+        let mut ws_listeners = crate::upgrade::take(inherited, "ws");
+        if ws_listeners.is_empty() {
+            match TcpListener::bind(bind) {
+                Ok(l) => {
+                    eprintln!("echoircd WebSocket (ws) on {bind}");
+                    ws_listeners.push(l);
+                }
+                Err(e) => eprintln!("echoircd: cannot bind ws {bind}: {e}"),
             }
-            Err(e) => eprintln!("echoircd: cannot bind ws {bind}: {e}"),
+        } else {
+            eprintln!(
+                "echoircd: adopted {} ws listener(s) across the upgrade",
+                ws_listeners.len()
+            );
+        }
+        for l in ws_listeners {
+            if let Ok(mut r) = reg.lock() {
+                r.push(("ws", std::os::fd::AsRawFd::as_raw_fd(&l)));
+            }
+            let (c, n, w) = (core.clone(), counter.clone(), wscfg.clone());
+            thread::spawn(move || accept_ws(l, c, n, None, w));
         }
     }
 
-    if let Some(bind) = get("bind_wss").map(str::to_string) {
+    if let Some(bind) = get("bind_wss") {
         match (get("tls_cert"), get("tls_key")) {
             (Some(cert), Some(key)) => match OpensslBackend::new(cert, key, Vec::new()) {
-                Ok(backend) => match TcpListener::bind(&bind) {
-                    Ok(l) => {
-                        eprintln!("echoircd WebSocket (wss) on {bind} (openssl)");
-                        let backend: Arc<dyn TlsBackend> = Arc::new(backend);
+                Ok(backend) => {
+                    let backend: Arc<dyn TlsBackend> = Arc::new(backend);
+                    let mut wss_listeners = crate::upgrade::take(inherited, "wss");
+                    if wss_listeners.is_empty() {
+                        match TcpListener::bind(bind) {
+                            Ok(l) => {
+                                eprintln!("echoircd WebSocket (wss) on {bind} (openssl)");
+                                wss_listeners.push(l);
+                            }
+                            Err(e) => eprintln!("echoircd: cannot bind wss {bind}: {e}"),
+                        }
+                    } else {
+                        eprintln!(
+                            "echoircd: adopted {} wss listener(s) across the upgrade",
+                            wss_listeners.len()
+                        );
+                    }
+                    for l in wss_listeners {
+                        if let Ok(mut r) = reg.lock() {
+                            r.push(("wss", std::os::fd::AsRawFd::as_raw_fd(&l)));
+                        }
                         let (c, n, w) = (core.clone(), counter.clone(), wscfg.clone());
+                        let backend = backend.clone();
                         thread::spawn(move || accept_ws(l, c, n, Some(backend), w));
                     }
-                    Err(e) => eprintln!("echoircd: cannot bind wss {bind}: {e}"),
-                },
+                }
                 Err(e) => eprintln!("echoircd: wss disabled (cert/key error): {e}"),
             },
             _ => eprintln!("echoircd: bind_wss set but tls_cert/tls_key missing — wss OFF"),
