@@ -307,10 +307,15 @@ fn resolve_io_threads(io_threads: usize) -> usize {
     if io_threads > 0 {
         return io_threads;
     }
+    // Default: one reactor per core, reserving one for the single-threaded core loop,
+    // capped so a very large box doesn't spawn an absurd number of I/O threads. The
+    // reactor pool is where client I/O (framing + TLS) spreads across cores, so it
+    // should scale with the machine; set `io_threads` to pin an exact count.
     thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1)
-        .clamp(1, 4)
+        .saturating_sub(1)
+        .clamp(1, 16)
 }
 
 /// Start the reactor worker pool and return the acceptors' handles to it. Sized by
