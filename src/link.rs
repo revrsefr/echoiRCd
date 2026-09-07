@@ -67,6 +67,7 @@ pub struct RemoteUser {
     pub sid: String, // origin server id
     pub via: Uid,   // local link uid it is reached through
     pub nick_ts: u64, // nick timestamp, for TS6 remote-vs-remote collision arbitration
+    pub away: Option<String>, // away reason (None = present), for away-notify + WHOIS 301
 }
 
 impl RemoteUser {
@@ -206,6 +207,7 @@ impl Server {
             "METADATA" if registered => self.link_metadata(uid, msg),
             "CHGHOST" if registered => self.link_chghost_recv(uid, msg),
             "CHGIDENT" if registered => self.link_chgident_recv(uid, msg),
+            "AWAY" if registered => self.link_away_recv(uid, msg),
             "SWSTDRPL" if registered => self.link_stdreply_recv(uid, msg),
             "OPERTYPE" if registered => self.link_opertype_recv(uid, msg),
             "REDACT" if registered => self.link_redact_recv(uid, msg),
@@ -828,6 +830,35 @@ impl Server {
     /// An `ident@host` vhost arrives as ONE CHGHOST (host param `ident@host`) and is
     /// applied as a single CHGHOST line — not a CHGIDENT + CHGHOST pair, which would
     /// show the client two "changed host" notices.
+    /// `:<uuid> AWAY [:<reason>]` — a remote user's away state changed. Update our copy
+    /// (for WHOIS 301), tell local away-notify members who share a channel, relay onward.
+    fn link_away_recv(&mut self, via: Uid, msg: &Message) {
+        let Some(uuid) = msg.source.clone() else {
+            return;
+        };
+        if !self.sourced_via(&uuid, via) {
+            return;
+        }
+        let reason = msg.params.first().cloned().filter(|r| !r.is_empty());
+        let line = match self.remote_users.get_mut(&uuid) {
+            Some(ru) => {
+                ru.away = reason.clone();
+                let prefix = ru.prefix();
+                match &reason {
+                    Some(r) => format!(":{prefix} AWAY :{r}"),
+                    None => format!(":{prefix} AWAY"),
+                }
+            }
+            None => return,
+        };
+        self.notify_common_local_if(&uuid, &line, |c| c.away_notify);
+        let fwd = match &reason {
+            Some(r) => format!(":{uuid} AWAY :{r}"),
+            None => format!(":{uuid} AWAY"),
+        };
+        self.propagate(&fwd, Some(via));
+    }
+
     fn link_chghost_recv(&mut self, from: Uid, msg: &Message) {
         let (Some(target), Some(host)) = (msg.params.first().cloned(), msg.params.get(1).cloned())
         else {
@@ -1227,6 +1258,7 @@ impl Server {
                 sid,
                 via,
                 nick_ts: nickts,
+                away: None,
             },
         );
         // Re-propagate to our other peers. If a collision renamed the loser, rewrite
@@ -2988,6 +3020,7 @@ mod tests {
                     sid: sid.to_string(),
                     via: 1,
                     nick_ts: ts,
+                    away: None,
                 },
             );
         }
@@ -3038,6 +3071,7 @@ mod tests {
                 sid: "42S".into(),
                 via: 1,
                 nick_ts: 100,
+                away: None,
             },
         );
         // a local member with a captured sink, sharing #c with the remote user
@@ -3134,6 +3168,7 @@ mod tests {
                 sid: "42S".into(),
                 via: 1,
                 nick_ts: 0,
+                away: None,
             },
         );
         let (utx, urx) = mpsc::channel();
@@ -3209,6 +3244,113 @@ mod tests {
         );
     }
 
+    // A remote user's AWAY must update our copy (for WHOIS 301) and reach local
+    // away-notify members. Regression: AWAY didn't cross S2S at all.
+    #[test]
+    fn remote_away_updates_copy_and_notifies_cap_members() {
+        use crate::config::Config;
+        use crate::extensible::Extensible;
+        use crate::users::{Caps, UserFlags};
+        use std::sync::atomic::AtomicU64;
+        use std::sync::{mpsc, Arc};
+        let (tx, _rx) = mpsc::channel();
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+        s.remote_users.insert(
+            "42SB00000".to_string(),
+            RemoteUser {
+                uuid: "42SB00000".to_string(),
+                nick: "bob".into(),
+                ident: "b".into(),
+                host: "h".into(),
+                realname: "r".into(),
+                account: None,
+                ip: String::new(),
+                modes: String::new(),
+                sid: "42S".into(),
+                via: 1,
+                nick_ts: 0,
+                away: None,
+            },
+        );
+        let (utx, urx) = mpsc::channel();
+        s.users.insert(
+            7,
+            User {
+                uid: 7,
+                uuid: "0AAAAAAAB".into(),
+                nick: "alice".into(),
+                ident: "a".into(),
+                realname: "a".into(),
+                host: "localhost".into(),
+                cloak: String::new(),
+                vhost: None,
+                secure: false,
+                certfp: None,
+                tls_info: None,
+                sni: None,
+                brand_server: None,
+                brand_network: None,
+                account: None,
+                signon: 0,
+                nick_ts: 0,
+                addr: "127.0.0.1:1".parse().unwrap(),
+                port: 6667,
+                registered: true,
+                dns_pending: false,
+                ident_pending: false,
+                auth_pending: false,
+                waitpong: None,
+                class: None,
+                pass: None,
+                deferred: Vec::new(),
+                cap: false,
+                cap_302: false,
+                caps: {
+                    let mut c = Caps::default();
+                    c.away_notify = true;
+                    c
+                },
+                sasl_mech: None,
+                channels: HashSet::default(),
+                invited: HashSet::default(),
+                watch: Vec::new(),
+                monitor: Vec::new(),
+                silence: Vec::new(),
+                signore: Vec::new(),
+                accept: Vec::new(),
+                quitting: None,
+                flags: UserFlags::default(),
+                last_active: 0,
+                ping_sent: false,
+                ext: Extensible::default(),
+                out: OutSink::Thread(utx),
+                sock: None,
+            },
+        );
+        s.uuid_local.insert("0AAAAAAAB".into(), 7);
+        let mut ch = Channel::new("#c");
+        ch.members.insert(7, Member::default());
+        ch.rmembers.insert("42SB00000".into(), Member::default());
+        s.channels.insert("#c".into(), ch);
+
+        let msg = crate::message::parse(":42SB00000 AWAY :lunch").unwrap();
+        s.link_away_recv(1, &msg);
+        assert_eq!(
+            s.remote_users["42SB00000"].away.as_deref(),
+            Some("lunch"),
+            "our copy records the away reason"
+        );
+        let lines: Vec<String> = std::iter::from_fn(|| urx.try_recv().ok()).collect();
+        assert!(
+            lines.iter().any(|l| l == ":bob!b@h AWAY :lunch"),
+            "away-notify member must see AWAY, got {lines:?}"
+        );
+
+        let back = crate::message::parse(":42SB00000 AWAY").unwrap();
+        s.link_away_recv(1, &back);
+        assert_eq!(s.remote_users["42SB00000"].away, None, "away cleared on return");
+    }
+
     // A services bot IJOINing an existing channel with a status token (e.g. "ao")
     // must join holding those prefix modes. Regression: an early S2S build accepted
     // the IJOIN but ignored the token, so BotServ bots joined bare and had to be
@@ -3235,6 +3377,7 @@ mod tests {
                 sid: "42S".into(),
                 via: 1,
                 nick_ts: 0,
+                away: None,
             },
         );
         // echo joins it to an existing channel as protected admin + op (+ao)
@@ -3285,6 +3428,7 @@ mod tests {
                 sid: "42S".into(),
                 via: 1,
                 nick_ts: 0,
+                away: None,
             },
         );
         // a local member already sitting in the channel, with a captured sink
@@ -3385,6 +3529,7 @@ mod tests {
                 sid: "42S".into(),
                 via: 1,
                 nick_ts: 0,
+                away: None,
             },
         );
         // we already hold #c at an OLD (winning) TS
@@ -3424,6 +3569,7 @@ mod tests {
                 sid: "42S".into(),
                 via: 1,
                 nick_ts: 0,
+                away: None,
             },
         );
         s

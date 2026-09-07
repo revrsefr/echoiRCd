@@ -157,6 +157,12 @@ impl Command for Away {
             None => format!(":{prefix} AWAY"),
         };
         s.notify_peers(uid, &line, |c| c.away_notify);
+        // propagate to linked servers so remote away-notify clients + WHOIS see it too
+        let prop = match &msg {
+            Some(m) => format!("AWAY :{m}"),
+            None => "AWAY".to_string(),
+        };
+        s.propagate_from_user(uid, &prop);
         if now_away {
             s.numeric(uid, RPL_NOWAWAY, ":You have been marked as being away");
         } else {

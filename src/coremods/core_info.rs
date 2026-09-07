@@ -148,6 +148,10 @@ impl Command for Whois {
                             &format!("{} {a} :is logged in as", ru.nick),
                         );
                     }
+                    // 301: away status, if the remote user is marked away
+                    if let Some(a) = &ru.away {
+                        s.numeric(uid, RPL_AWAY, &format!("{} :{a}", ru.nick));
+                    }
                     // 335: mark remote bots (+B), e.g. services / BotServ bots
                     if ru.modes.contains('B') {
                         s.numeric(uid, RPL_WHOISBOT, &format!("{} :is a bot", ru.nick));
