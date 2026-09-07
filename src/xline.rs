@@ -18,6 +18,7 @@ pub enum XKind {
     Cban,    // a forbidden channel-name glob
     Svshold, // a services-reserved nick glob (like Qline, but services-owned)
     Rline,   // a regex over "nick!user@host realname"
+    Jupe,    // a forbidden server-name glob (blocks it from linking)
 }
 
 impl XKind {
@@ -32,6 +33,7 @@ impl XKind {
             XKind::Cban => "CBAN",
             XKind::Svshold => "SVSHOLD",
             XKind::Rline => "R",
+            XKind::Jupe => "JUPE",
         }
     }
 
@@ -47,6 +49,7 @@ impl XKind {
             "CBAN" => XKind::Cban,
             "SVSHOLD" => XKind::Svshold,
             "R" => XKind::Rline,
+            "JUPE" => XKind::Jupe,
             _ => return None,
         })
     }
@@ -237,6 +240,21 @@ impl Server {
                 x.kind == XKind::Svshold
                     && (x.expires == 0 || x.expires > n)
                     && glob_match(&x.mask, nick)
+            })
+            .map(|x| x.reason.clone())
+    }
+
+    /// The reason server name `name` is juped (forbidden from linking), if any.
+    /// Case-insensitive; the mask may be a glob.
+    pub fn matched_jupe(&self, name: &str) -> Option<String> {
+        let n = now();
+        let name = name.to_ascii_lowercase();
+        self.xlines
+            .iter()
+            .find(|x| {
+                x.kind == XKind::Jupe
+                    && (x.expires == 0 || x.expires > n)
+                    && glob_match(&x.mask.to_ascii_lowercase(), &name)
             })
             .map(|x| x.reason.clone())
     }
@@ -671,6 +689,17 @@ mod tests {
         assert!(parse_db_line("").is_none());
         assert!(parse_db_line("Z").is_none());
         assert!(parse_db_line("BOGUS mask 0 op reason").is_none()); // unknown tag
+    }
+
+    #[test]
+    fn jupe_tag_round_trips() {
+        // a JUPE persists + loads like any x-line, and the tag maps both ways
+        let x = parse_db_line("JUPE rogue.example.net 0 fold10 compromised link").unwrap();
+        assert!(x.kind == XKind::Jupe);
+        assert_eq!(x.kind.tag(), "JUPE");
+        assert!(XKind::from_tag("JUPE") == Some(XKind::Jupe));
+        assert_eq!(x.mask, "rogue.example.net");
+        assert_eq!(x.reason.as_str(), "compromised link");
     }
 
     #[test]

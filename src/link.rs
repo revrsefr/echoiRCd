@@ -279,6 +279,10 @@ impl Server {
             msg.params[2].clone(),
             msg.params[3].clone(),
         );
+        if let Some(reason) = self.matched_jupe(&name) {
+            self.reject_link(uid, &format!("Server name is juped: {reason}"));
+            return;
+        }
         let Some(block) = self.link_blocks.iter().find(|b| b.name == name).cloned() else {
             self.reject_link(uid, "No link block for that server name");
             return;

@@ -36,6 +36,7 @@ pub fn commands() -> Vec<Box<dyn Command>> {
         Box::new(Qline),
         Box::new(Cban),
         Box::new(Rline),
+        Box::new(Jupe),
         Box::new(Connect),
         Box::new(Squit),
         Box::new(ChgHost),
@@ -752,6 +753,21 @@ fn do_xline(s: &mut Server, uid: Uid, params: &[String], kind: XKind) -> CmdResu
     s.add_xline(kind, &mask, dur, &nick, &reason);
     s.propagate_addline(kind.tag(), &mask, &nick, dur, &reason);
     CmdResult::Ok
+}
+
+/// JUPE — forbid a server NAME glob from linking (blocks a rogue/compromised
+/// link name). Mask alone removes; mask + [duration] + reason adds.
+struct Jupe;
+impl Command for Jupe {
+    fn name(&self) -> &'static str {
+        "JUPE"
+    }
+    fn min_params(&self) -> usize {
+        1
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        do_xline(s, uid, params, XKind::Jupe)
+    }
 }
 
 /// KLINE — ban a `user@host` mask on this server.
