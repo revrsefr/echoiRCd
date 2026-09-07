@@ -66,6 +66,7 @@ pub struct RemoteUser {
     pub modes: String, // user mode letters (no leading '+'); e.g. services wear "iHB"
     pub sid: String, // origin server id
     pub via: Uid,   // local link uid it is reached through
+    pub nick_ts: u64, // nick timestamp, for TS6 remote-vs-remote collision arbitration
 }
 
 impl RemoteUser {
@@ -1182,22 +1183,24 @@ impl Server {
             .map(|m| m.trim_start_matches('+').to_string())
             .unwrap_or_default();
         let realname = msg.params.last().cloned().unwrap_or_default();
+        let nickts: u64 = msg.params[1].parse().unwrap_or_else(|_| now());
         // nick collision with a local user: resolve by timestamp, force-renaming the
         // loser to its UUID rather than killing anyone.
         if let Some(luid) = self.find_nick(&nick) {
-            let nickts: u64 = msg.params[1].parse().unwrap_or_else(|_| now());
             let rsvc = self.server_is_service(&sid);
             if self.resolve_collision(via, luid, nickts, &ident, &ip, &uuid, rsvc) {
                 nick = uuid.clone(); // the incoming user lost: introduce it under its UUID
             }
         }
-        // Collision with an existing REMOTE user: rename the incoming one to its UUID
-        // rather than silently dropping it — a drop would leave a routing ghost (the
-        // user recorded nowhere here yet never forwarded to our other peers, so its
-        // later JOIN/PRIVMSG/QUIT all fail our source guards). Full TS arbitration
-        // would need the peer's stored nick-TS, which RemoteUser doesn't carry.
-        if self.remote_nick.contains_key(&nick.to_ascii_lowercase()) {
-            nick = uuid.clone();
+        // Collision with an existing REMOTE user: full TS6 arbitration (DoCollision).
+        // If the incoming user loses it takes its UUID here; if the existing one loses
+        // it is renamed to its UUID + SAVEd network-wide (so no routing ghost either way).
+        if let Some(existing) = self.remote_nick.get(&nick.to_ascii_lowercase()).cloned() {
+            if existing != uuid
+                && self.resolve_remote_collision(via, &existing, nickts, &ident, &ip, &uuid, &sid)
+            {
+                nick = uuid.clone();
+            }
         }
         let renamed = nick != msg.params[2];
         self.remote_nick
@@ -1215,6 +1218,7 @@ impl Server {
                 modes,
                 sid,
                 via,
+                nick_ts: nickts,
             },
         );
         // Re-propagate to our other peers. If a collision renamed the loser, rewrite
@@ -1304,6 +1308,69 @@ impl Server {
         change_remote
     }
 
+    /// Remote-vs-remote nick collision (TS6, mirrors InspIRCd `DoCollision`). An
+    /// existing remote user (`existing_uuid`) already holds the nick the incoming
+    /// remote user (`remote_uuid`, on server `remote_sid`) wants. Force-rename the
+    /// loser to its UUID: the existing one right here + a network-wide SAVE broadcast;
+    /// the incoming one via a SAVE back to its source (its caller renames it locally).
+    /// Returns whether the INCOMING user must change to its UUID.
+    #[allow(clippy::too_many_arguments)]
+    fn resolve_remote_collision(
+        &mut self,
+        via: Uid,
+        existing_uuid: &str,
+        remote_ts: u64,
+        remote_user: &str,
+        remote_ip: &str,
+        remote_uuid: &str,
+        remote_sid: &str,
+    ) -> bool {
+        let (existing_ts, existing_user, existing_ip) = match self.remote_users.get(existing_uuid) {
+            Some(r) => (r.nick_ts, r.ident.clone(), r.ip.clone()),
+            None => return false, // it vanished: no collision, incoming keeps its nick
+        };
+        let same = existing_user == remote_user && existing_ip == remote_ip;
+        // a services pseudo-client always keeps its nick; the other side yields.
+        let (change_existing, change_incoming) = if self.server_is_service(remote_sid) {
+            (true, false)
+        } else if self.uuid_is_service(existing_uuid) {
+            (false, true)
+        } else {
+            collision_decision(existing_ts, remote_ts, same)
+        };
+        if change_existing {
+            self.save_remote_user(existing_uuid);
+        }
+        if change_incoming {
+            self.link_out(
+                via,
+                format!(":{} SAVE {} {}", self.sid, remote_uuid, remote_ts),
+            );
+        }
+        change_incoming
+    }
+
+    /// A remote user lost a nick collision: rename our copy of it to its UUID and
+    /// broadcast a SAVE so the whole network converges (its owner renames it; the echo
+    /// back is a harmless no-op). Mirrors the local side of `DoCollision`.
+    fn save_remote_user(&mut self, uuid: &str) {
+        let (old, ts) = match self.remote_users.get_mut(uuid) {
+            Some(r) => {
+                let old = r.nick.clone();
+                r.nick = uuid.to_string();
+                (old, r.nick_ts)
+            }
+            None => return,
+        };
+        if old.eq_ignore_ascii_case(uuid) {
+            return; // already at its UUID
+        }
+        self.remote_nick.remove(&old.to_ascii_lowercase());
+        self.remote_nick
+            .insert(uuid.to_ascii_lowercase(), uuid.to_string());
+        self.propagate(&format!(":{} SAVE {} {}", self.sid, uuid, ts), None);
+    }
+
     /// `:<src> SAVE <uuid> <ts>` — force our local user to its UUID if the ts still
     /// matches (it lost a collision elsewhere), or forward toward a remote target.
     fn link_save_recv(&mut self, via: Uid, msg: &Message) {
@@ -1351,10 +1418,35 @@ impl Server {
                 return; // remote lost: it keeps its old nick; a SAVE will move it to UUID
             }
         }
+        // collision with ANOTHER remote user: TS6 arbitration (DoCollision).
+        if let Some(existing) = self.remote_nick.get(&newnick.to_ascii_lowercase()).cloned() {
+            if existing != uuid {
+                let remote_ts = msg
+                    .params
+                    .get(1)
+                    .and_then(|t| t.parse().ok())
+                    .unwrap_or_else(now);
+                let (ruser, rip, rsid) = self
+                    .remote_users
+                    .get(&uuid)
+                    .map(|r| (r.ident.clone(), r.ip.clone(), r.sid.clone()))
+                    .unwrap_or_default();
+                if self.resolve_remote_collision(via, &existing, remote_ts, &ruser, &rip, &uuid, &rsid)
+                {
+                    return; // the changer lost; a SAVE will move it to its UUID
+                }
+            }
+        }
+        let new_ts: u64 = msg
+            .params
+            .get(1)
+            .and_then(|t| t.parse().ok())
+            .unwrap_or_else(now);
         let old = match self.remote_users.get_mut(&uuid) {
             Some(ru) => {
                 let old = ru.nick.clone();
                 ru.nick = newnick.clone();
+                ru.nick_ts = new_ts;
                 old
             }
             None => return,
@@ -1362,12 +1454,7 @@ impl Server {
         self.remote_nick.remove(&old.to_ascii_lowercase());
         self.remote_nick
             .insert(newnick.to_ascii_lowercase(), uuid.clone());
-        let ts = msg
-            .params
-            .get(1)
-            .cloned()
-            .unwrap_or_else(|| now().to_string());
-        self.propagate(&format!(":{uuid} NICK {newnick} {ts}"), Some(via));
+        self.propagate(&format!(":{uuid} NICK {newnick} {new_ts}"), Some(via));
     }
 
     fn link_quit_recv(&mut self, via: Uid, msg: &Message) {
@@ -2796,6 +2883,55 @@ mod tests {
         );
     }
 
+    // Remote-vs-remote nick collision: TS6 arbitration must rename the LOSER to its
+    // UUID (older nick-TS wins for different people), not always the incoming one.
+    #[test]
+    fn remote_vs_remote_collision_ts6_arbitration() {
+        use crate::config::Config;
+        use std::sync::atomic::AtomicU64;
+        use std::sync::{mpsc, Arc};
+        let (tx, _rx) = mpsc::channel();
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+
+        fn add_remote(s: &mut Server, uuid: &str, nick: &str, sid: &str, ip: &str, ts: u64) {
+            s.remote_users.insert(
+                uuid.to_string(),
+                RemoteUser {
+                    uuid: uuid.to_string(),
+                    nick: nick.to_string(),
+                    ident: "u".into(),
+                    host: "h".into(),
+                    realname: "r".into(),
+                    account: None,
+                    ip: ip.into(),
+                    modes: String::new(),
+                    sid: sid.to_string(),
+                    via: 1,
+                    nick_ts: ts,
+                },
+            );
+        }
+
+        // different people (differing IPs), incoming NEWER → incoming yields.
+        add_remote(&mut s, "1AAAAAAAA", "foo", "1AA", "1.1.1.1", 100);
+        assert!(
+            s.resolve_remote_collision(1, "1AAAAAAAA", 200, "u", "9.9.9.9", "2BBAAAAAA", "2BB"),
+            "newer incoming must change to its UUID"
+        );
+        assert_eq!(s.remote_users["1AAAAAAAA"].nick, "foo", "older existing keeps the nick");
+
+        // different people, incoming OLDER → incoming wins, existing renamed to its UUID.
+        add_remote(&mut s, "1AABBBBBB", "bar", "1AA", "1.1.1.1", 300);
+        assert!(
+            !s.resolve_remote_collision(1, "1AABBBBBB", 50, "u", "9.9.9.9", "2BBBBBBBB", "2BB"),
+            "older incoming wins and keeps its nick"
+        );
+        assert_eq!(
+            s.remote_users["1AABBBBBB"].nick, "1AABBBBBB",
+            "the losing existing remote is renamed to its UUID"
+        );
+    }
+
     // A services bot IJOINing an existing channel with a status token (e.g. "ao")
     // must join holding those prefix modes. Regression: an early S2S build accepted
     // the IJOIN but ignored the token, so BotServ bots joined bare and had to be
@@ -2821,6 +2957,7 @@ mod tests {
                 modes: "iHkB".into(),
                 sid: "42S".into(),
                 via: 1,
+                nick_ts: 0,
             },
         );
         // echo joins it to an existing channel as protected admin + op (+ao)
@@ -2870,6 +3007,7 @@ mod tests {
                 modes: "iHkB".into(),
                 sid: "42S".into(),
                 via: 1,
+                nick_ts: 0,
             },
         );
         // a local member already sitting in the channel, with a captured sink
@@ -2969,6 +3107,7 @@ mod tests {
                 modes: String::new(),
                 sid: "42S".into(),
                 via: 1,
+                nick_ts: 0,
             },
         );
         // we already hold #c at an OLD (winning) TS
@@ -3007,6 +3146,7 @@ mod tests {
                 modes: String::new(),
                 sid: "42S".into(),
                 via: 1,
+                nick_ts: 0,
             },
         );
         s
