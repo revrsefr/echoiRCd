@@ -184,7 +184,16 @@ impl Command for IsOn {
             .filter(|n| s.find_nick(n).is_some() || s.find_remote(n).is_some())
             .map(|n| n.to_string())
             .collect();
-        s.numeric(uid, RPL_ISON, &format!(":{}", on.join(" ")));
+        // split across multiple 303s so a long ISON query can't exceed 512 bytes;
+        // always send at least one (empty) reply so the client sees a result
+        let lines = crate::coremods::core_watch::chunk_join(&on, ' ', 400);
+        if lines.is_empty() {
+            s.numeric(uid, RPL_ISON, ":");
+        } else {
+            for chunk in lines {
+                s.numeric(uid, RPL_ISON, &format!(":{chunk}"));
+            }
+        }
         CmdResult::Ok
     }
 }

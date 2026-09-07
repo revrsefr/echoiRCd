@@ -22,7 +22,7 @@ pub fn commands() -> Vec<Box<dyn Command>> {
 /// Split `items` into `sep`-joined groups each ≤ `budget` bytes, so a MONITOR/WATCH
 /// list reply never blows past the 512-byte line limit — the IRCv3 MONITOR spec
 /// requires long target lists to be spread across multiple numerics.
-fn chunk_join(items: &[String], sep: char, budget: usize) -> Vec<String> {
+pub(crate) fn chunk_join(items: &[String], sep: char, budget: usize) -> Vec<String> {
     let mut out = Vec::new();
     let mut line = String::new();
     for it in items {
