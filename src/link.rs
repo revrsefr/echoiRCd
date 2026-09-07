@@ -841,6 +841,13 @@ impl Server {
                 _ => self.change_host_ident_quiet(tuid, None, Some(&host)),
             },
             None => {
+                // remote target: update our copy + tell local cap members, then relay
+                match host.split_once('@') {
+                    Some((i, h)) if !i.is_empty() && !h.is_empty() => {
+                        self.apply_remote_host_ident(&target, Some(i), Some(h))
+                    }
+                    _ => self.apply_remote_host_ident(&target, None, Some(&host)),
+                }
                 self.forward_to_target(&target, msg, from);
             }
         }
@@ -856,6 +863,7 @@ impl Server {
         match self.link_local_target(&target) {
             Some(tuid) => self.change_host_ident_quiet(tuid, Some(&ident), None),
             None => {
+                self.apply_remote_host_ident(&target, Some(&ident), None);
                 self.forward_to_target(&target, msg, from);
             }
         }
@@ -2079,6 +2087,17 @@ impl Server {
     /// `uuid` (deduped). Surfaces a remote user's nick change to local clients, whose
     /// member lists would otherwise keep showing the stale nick.
     fn notify_common_local(&self, uuid: &str, line: &str) {
+        self.notify_common_local_if(uuid, line, |_| true);
+    }
+
+    /// Like [`Self::notify_common_local`] but only to members whose caps satisfy
+    /// `want` (e.g. `|c| c.chghost` so a remote CHGHOST reaches only cap-aware clients).
+    fn notify_common_local_if(
+        &self,
+        uuid: &str,
+        line: &str,
+        want: impl Fn(&crate::users::Caps) -> bool,
+    ) {
         let mut notify: HashSet<Uid> = HashSet::default();
         for c in self.channels.values() {
             if c.rmembers.contains_key(uuid) {
@@ -2088,8 +2107,47 @@ impl Server {
             }
         }
         for m in notify {
-            self.send(m, line.to_string());
+            if self.users.get(&m).is_some_and(|u| want(&u.caps)) {
+                self.send(m, line.to_string());
+            }
         }
+    }
+
+    /// A remote user's host/ident changed (a CHGHOST/CHGIDENT whose target lives
+    /// behind another server): update our copy so messages/WHOIS/NAMES show the new
+    /// mask, and give local chghost-cap members a live CHGHOST. (Non-cap members see
+    /// the new mask on their next NAMES; a full host-cycle for them is a TODO.)
+    fn apply_remote_host_ident(
+        &mut self,
+        target: &str,
+        new_ident: Option<&str>,
+        new_host: Option<&str>,
+    ) {
+        let uuid = if self.remote_users.contains_key(target) {
+            target.to_string()
+        } else if let Some(u) = self.remote_nick.get(&target.to_ascii_lowercase()) {
+            u.clone()
+        } else {
+            return;
+        };
+        let old_prefix = match self.remote_users.get(&uuid) {
+            Some(r) => r.prefix(),
+            None => return,
+        };
+        let (ident, host) = match self.remote_users.get_mut(&uuid) {
+            Some(r) => {
+                if let Some(i) = new_ident {
+                    r.ident = i.to_string();
+                }
+                if let Some(h) = new_host {
+                    r.host = h.to_string();
+                }
+                (r.ident.clone(), r.host.clone())
+            }
+            None => return,
+        };
+        let line = format!(":{old_prefix} CHGHOST {ident} {host}");
+        self.notify_common_local_if(&uuid, &line, |c| c.chghost);
     }
 
     /// Relay `:<sender-uuid> <rest>` to every link (MODE/TOPIC/KICK propagation).
@@ -3047,6 +3105,107 @@ mod tests {
         assert!(
             lines.iter().any(|l| l == ":bob!b@h NICK bobby"),
             "local member must see the remote nick change, got {lines:?}"
+        );
+    }
+
+    // A remote user's CHGHOST must update our copy (so messages/WHOIS show the new
+    // mask) and reach local chghost-cap members. Regression: remote-target CHGHOST
+    // only forwarded, leaving our copy stale and local clients uninformed.
+    #[test]
+    fn remote_chghost_updates_copy_and_notifies_cap_members() {
+        use crate::config::Config;
+        use crate::extensible::Extensible;
+        use crate::users::{Caps, UserFlags};
+        use std::sync::atomic::AtomicU64;
+        use std::sync::{mpsc, Arc};
+        let (tx, _rx) = mpsc::channel();
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+        s.remote_users.insert(
+            "42SB00000".to_string(),
+            RemoteUser {
+                uuid: "42SB00000".to_string(),
+                nick: "bob".into(),
+                ident: "b".into(),
+                host: "old.host".into(),
+                realname: "r".into(),
+                account: None,
+                ip: String::new(),
+                modes: String::new(),
+                sid: "42S".into(),
+                via: 1,
+                nick_ts: 0,
+            },
+        );
+        let (utx, urx) = mpsc::channel();
+        s.users.insert(
+            7,
+            User {
+                uid: 7,
+                uuid: "0AAAAAAAB".into(),
+                nick: "alice".into(),
+                ident: "a".into(),
+                realname: "a".into(),
+                host: "localhost".into(),
+                cloak: String::new(),
+                vhost: None,
+                secure: false,
+                certfp: None,
+                tls_info: None,
+                sni: None,
+                brand_server: None,
+                brand_network: None,
+                account: None,
+                signon: 0,
+                nick_ts: 0,
+                addr: "127.0.0.1:1".parse().unwrap(),
+                port: 6667,
+                registered: true,
+                dns_pending: false,
+                ident_pending: false,
+                auth_pending: false,
+                waitpong: None,
+                class: None,
+                pass: None,
+                deferred: Vec::new(),
+                cap: false,
+                cap_302: false,
+                caps: {
+                    let mut c = Caps::default();
+                    c.chghost = true;
+                    c
+                },
+                sasl_mech: None,
+                channels: HashSet::default(),
+                invited: HashSet::default(),
+                watch: Vec::new(),
+                monitor: Vec::new(),
+                silence: Vec::new(),
+                signore: Vec::new(),
+                accept: Vec::new(),
+                quitting: None,
+                flags: UserFlags::default(),
+                last_active: 0,
+                ping_sent: false,
+                ext: Extensible::default(),
+                out: OutSink::Thread(utx),
+                sock: None,
+            },
+        );
+        s.uuid_local.insert("0AAAAAAAB".into(), 7);
+        let mut ch = Channel::new("#c");
+        ch.members.insert(7, Member::default());
+        ch.rmembers.insert("42SB00000".into(), Member::default());
+        s.channels.insert("#c".into(), ch);
+
+        let msg = crate::message::parse(":42S CHGHOST 42SB00000 newident@new.host").unwrap();
+        s.link_chghost_recv(1, &msg);
+
+        assert_eq!(s.remote_users["42SB00000"].host, "new.host", "our copy's host updated");
+        assert_eq!(s.remote_users["42SB00000"].ident, "newident", "our copy's ident updated");
+        let lines: Vec<String> = std::iter::from_fn(|| urx.try_recv().ok()).collect();
+        assert!(
+            lines.iter().any(|l| l == ":bob!b@old.host CHGHOST newident new.host"),
+            "chghost-cap member must get the CHGHOST, got {lines:?}"
         );
     }
 
