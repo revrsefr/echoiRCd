@@ -19,6 +19,27 @@ pub fn commands() -> Vec<Box<dyn Command>> {
     ]
 }
 
+/// Split `items` into `sep`-joined groups each ≤ `budget` bytes, so a MONITOR/WATCH
+/// list reply never blows past the 512-byte line limit — the IRCv3 MONITOR spec
+/// requires long target lists to be spread across multiple numerics.
+fn chunk_join(items: &[String], sep: char, budget: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut line = String::new();
+    for it in items {
+        if !line.is_empty() && line.len() + 1 + it.len() > budget {
+            out.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(sep);
+        }
+        line.push_str(it);
+    }
+    if !line.is_empty() {
+        out.push(line);
+    }
+    out
+}
+
 // --- WATCH ------------------------------------------------------------------
 
 /// Report a nick's current presence as RPL_NOWON (604) or RPL_NOWOFF (605).
@@ -111,8 +132,8 @@ impl Command for Watch {
                         RPL_WATCHSTAT,
                         &format!(":You have {mine} and are on {on_me} WATCH entries"),
                     );
-                    if !watched.is_empty() {
-                        s.numeric(uid, RPL_WATCHLIST, &format!(":{}", watched.join(" ")));
+                    for chunk in chunk_join(&watched, ' ', 400) {
+                        s.numeric(uid, RPL_WATCHLIST, &format!(":{chunk}"));
                     }
                     s.numeric(uid, RPL_ENDOFWATCHLIST, ":End of WATCH S");
                 }
@@ -147,11 +168,11 @@ fn monitor_report(s: &Server, uid: Uid, nicks: &[String]) {
             None => offline.push(n.clone()),
         }
     }
-    if !online.is_empty() {
-        s.numeric(uid, RPL_MONONLINE, &format!(":{}", online.join(",")));
+    for chunk in chunk_join(&online, ',', 400) {
+        s.numeric(uid, RPL_MONONLINE, &format!(":{chunk}"));
     }
-    if !offline.is_empty() {
-        s.numeric(uid, RPL_MONOFFLINE, &format!(":{}", offline.join(",")));
+    for chunk in chunk_join(&offline, ',', 400) {
+        s.numeric(uid, RPL_MONOFFLINE, &format!(":{chunk}"));
     }
 }
 
@@ -220,8 +241,8 @@ impl Command for Monitor {
                     .get(&uid)
                     .map(|u| u.monitor.clone())
                     .unwrap_or_default();
-                if !list.is_empty() {
-                    s.numeric(uid, RPL_MONLIST, &format!(":{}", list.join(",")));
+                for chunk in chunk_join(&list, ',', 400) {
+                    s.numeric(uid, RPL_MONLIST, &format!(":{chunk}"));
                 }
                 s.numeric(uid, RPL_ENDOFMONLIST, ":End of MONITOR list");
             }
@@ -458,5 +479,27 @@ impl Command for Accept {
             }
         }
         CmdResult::Ok
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::chunk_join;
+
+    #[test]
+    fn chunk_join_splits_and_preserves_order() {
+        let items: Vec<String> = (0..50).map(|i| format!("nick{i:04}")).collect();
+        let chunks = chunk_join(&items, ',', 40);
+        assert!(chunks.len() > 1, "a long list must split into several lines");
+        assert!(
+            chunks.iter().all(|c| c.len() <= 40),
+            "each chunk stays within budget"
+        );
+        // rejoining recovers every item, in order, nothing lost
+        let rejoined: Vec<String> = chunks.join(",").split(',').map(String::from).collect();
+        assert_eq!(rejoined, items);
+        // a short list is one line; empty is no lines
+        assert_eq!(chunk_join(&["a".into(), "b".into()], ',', 40).len(), 1);
+        assert!(chunk_join(&[], ',', 40).is_empty());
     }
 }
