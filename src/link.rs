@@ -1354,11 +1354,12 @@ impl Server {
     /// broadcast a SAVE so the whole network converges (its owner renames it; the echo
     /// back is a harmless no-op). Mirrors the local side of `DoCollision`.
     fn save_remote_user(&mut self, uuid: &str) {
-        let (old, ts) = match self.remote_users.get_mut(uuid) {
+        let (old, ts, ident, host) = match self.remote_users.get_mut(uuid) {
             Some(r) => {
                 let old = r.nick.clone();
+                let (ident, host) = (r.ident.clone(), r.host.clone());
                 r.nick = uuid.to_string();
-                (old, r.nick_ts)
+                (old, r.nick_ts, ident, host)
             }
             None => return,
         };
@@ -1368,6 +1369,7 @@ impl Server {
         self.remote_nick.remove(&old.to_ascii_lowercase());
         self.remote_nick
             .insert(uuid.to_ascii_lowercase(), uuid.to_string());
+        self.notify_common_local(uuid, &format!(":{old}!{ident}@{host} NICK {uuid}"));
         self.propagate(&format!(":{} SAVE {} {}", self.sid, uuid, ts), None);
     }
 
@@ -1442,18 +1444,21 @@ impl Server {
             .get(1)
             .and_then(|t| t.parse().ok())
             .unwrap_or_else(now);
-        let old = match self.remote_users.get_mut(&uuid) {
+        let (old, ident, host) = match self.remote_users.get_mut(&uuid) {
             Some(ru) => {
                 let old = ru.nick.clone();
+                let (ident, host) = (ru.ident.clone(), ru.host.clone());
                 ru.nick = newnick.clone();
                 ru.nick_ts = new_ts;
-                old
+                (old, ident, host)
             }
             None => return,
         };
         self.remote_nick.remove(&old.to_ascii_lowercase());
         self.remote_nick
             .insert(newnick.to_ascii_lowercase(), uuid.clone());
+        // local members sharing a channel must see the rename (their list shows `old`)
+        self.notify_common_local(&uuid, &format!(":{old}!{ident}@{host} NICK {newnick}"));
         self.propagate(&format!(":{uuid} NICK {newnick} {new_ts}"), Some(via));
     }
 
@@ -2067,6 +2072,23 @@ impl Server {
         self.channels.retain(|_, c| c.keep_alive());
         if let Some(ru) = self.remote_users.remove(uuid) {
             self.remote_nick.remove(&ru.nick.to_ascii_lowercase());
+        }
+    }
+
+    /// Send `line` once to every LOCAL user who shares a channel with remote user
+    /// `uuid` (deduped). Surfaces a remote user's nick change to local clients, whose
+    /// member lists would otherwise keep showing the stale nick.
+    fn notify_common_local(&self, uuid: &str, line: &str) {
+        let mut notify: HashSet<Uid> = HashSet::default();
+        for c in self.channels.values() {
+            if c.rmembers.contains_key(uuid) {
+                for &m in c.members.keys() {
+                    notify.insert(m);
+                }
+            }
+        }
+        for m in notify {
+            self.send(m, line.to_string());
         }
     }
 
@@ -2929,6 +2951,102 @@ mod tests {
         assert_eq!(
             s.remote_users["1AABBBBBB"].nick, "1AABBBBBB",
             "the losing existing remote is renamed to its UUID"
+        );
+    }
+
+    // A remote user's nick change must reach LOCAL members who share a channel — their
+    // member list would otherwise keep the stale nick. Regression: link_nick_recv
+    // updated S2S state + propagated to peers but never told local clients.
+    #[test]
+    fn remote_nick_change_reaches_local_members() {
+        use crate::config::Config;
+        use crate::extensible::Extensible;
+        use crate::users::{Caps, UserFlags};
+        use std::sync::atomic::AtomicU64;
+        use std::sync::{mpsc, Arc};
+        let (tx, _rx) = mpsc::channel();
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+        s.remote_users.insert(
+            "42SB00000".to_string(),
+            RemoteUser {
+                uuid: "42SB00000".to_string(),
+                nick: "bob".into(),
+                ident: "b".into(),
+                host: "h".into(),
+                realname: "r".into(),
+                account: None,
+                ip: String::new(),
+                modes: String::new(),
+                sid: "42S".into(),
+                via: 1,
+                nick_ts: 100,
+            },
+        );
+        // a local member with a captured sink, sharing #c with the remote user
+        let (utx, urx) = mpsc::channel();
+        s.users.insert(
+            7,
+            User {
+                uid: 7,
+                uuid: "0AAAAAAAB".into(),
+                nick: "alice".into(),
+                ident: "a".into(),
+                realname: "a".into(),
+                host: "localhost".into(),
+                cloak: String::new(),
+                vhost: None,
+                secure: false,
+                certfp: None,
+                tls_info: None,
+                sni: None,
+                brand_server: None,
+                brand_network: None,
+                account: None,
+                signon: 0,
+                nick_ts: 0,
+                addr: "127.0.0.1:1".parse().unwrap(),
+                port: 6667,
+                registered: true,
+                dns_pending: false,
+                ident_pending: false,
+                auth_pending: false,
+                waitpong: None,
+                class: None,
+                pass: None,
+                deferred: Vec::new(),
+                cap: false,
+                cap_302: false,
+                caps: Caps::default(),
+                sasl_mech: None,
+                channels: HashSet::default(),
+                invited: HashSet::default(),
+                watch: Vec::new(),
+                monitor: Vec::new(),
+                silence: Vec::new(),
+                signore: Vec::new(),
+                accept: Vec::new(),
+                quitting: None,
+                flags: UserFlags::default(),
+                last_active: 0,
+                ping_sent: false,
+                ext: Extensible::default(),
+                out: OutSink::Thread(utx),
+                sock: None,
+            },
+        );
+        s.uuid_local.insert("0AAAAAAAB".into(), 7);
+        let mut ch = Channel::new("#c");
+        ch.members.insert(7, Member::default());
+        ch.rmembers.insert("42SB00000".into(), Member::default());
+        s.channels.insert("#c".into(), ch);
+
+        let msg = crate::message::parse(":42SB00000 NICK bobby 200").unwrap();
+        s.link_nick_recv(1, &msg);
+
+        let lines: Vec<String> = std::iter::from_fn(|| urx.try_recv().ok()).collect();
+        assert!(
+            lines.iter().any(|l| l == ":bob!b@h NICK bobby"),
+            "local member must see the remote nick change, got {lines:?}"
         );
     }
 
