@@ -147,18 +147,44 @@ pub fn report(s: &mut Server, uid: Uid, outcome: Outcome) {
             s.notice_star(uid, "Checking for DNSBL");
             s.notice_star(uid, "Checking for DNSBL done, no hit.");
         }
-        Outcome::Hit { zone, reply: _ } => {
+        Outcome::Hit { zone, reply } => {
             s.notice_star(uid, "Checking for DNSBL");
             s.notice_star(uid, "Checking for DNSBL done.");
-            act(s, uid, &zone);
+            act(s, uid, &zone, reply);
         }
     }
+}
+
+/// DroneBL's published listing classes — the last octet of the `127.0.0.x` reply says
+/// WHY the IP is listed. See https://dronebl.org/docs/howtouse. DroneBL-specific.
+fn dronebl_class(code: u8) -> Option<&'static str> {
+    Some(match code {
+        2 => "sample/testing",
+        3 => "IRC drone",
+        5 => "bottler",
+        6 => "unknown spambot or drone",
+        7 => "DDoS drone",
+        8 => "SOCKS proxy",
+        9 => "HTTP proxy",
+        10 => "ProxyChain",
+        11 => "web-page proxy",
+        12 => "open DNS resolver",
+        13 => "brute-force attacker",
+        14 => "open Wingate proxy",
+        15 => "compromised router/gateway",
+        16 => "autorooting worm",
+        17 => "auto-detected botnet",
+        18 => "DNS/MX hostname seen on IRC",
+        19 => "abused VPN service",
+        255 => "uncategorized threat",
+        _ => return None,
+    })
 }
 
 /// Act on a hit against blocklist `domain` per its (or the global) action: `mark`
 /// just informs; the `*line` actions add a ban and close; `kill` closes without a
 /// persistent ban. Emits the XLINE notice (via `add_xline`) then the DNSBL one.
-fn act(s: &mut Server, uid: Uid, domain: &str) {
+fn act(s: &mut Server, uid: Uid, domain: &str, reply: Ipv4Addr) {
     let (mask, ident, host, ip) = match s.users.get(&uid) {
         Some(u) => (u.prefix(), u.ident.clone(), u.host.clone(), u.addr.ip()),
         None => return,
@@ -167,6 +193,17 @@ fn act(s: &mut Server, uid: Uid, domain: &str) {
     // an explicitly E-lined (exempt) host is never auto-banned or killed by a blocklist
     // — the registration ban path and the enforce sweep honor E-lines, so this must too
     let exempt = s.is_exempt(&ident, &host, &ipstr);
+    // the reply's last octet is the blocklist's listing class — surface WHY the IP is
+    // listed (SOCKS proxy vs botnet vs brute-force …). DroneBL codes get named.
+    let code = reply.octets()[3];
+    let class_desc = if domain.to_ascii_lowercase().contains("dronebl") {
+        match dronebl_class(code) {
+            Some(name) => format!("{name} [{code}]"),
+            None => format!("class {code}"),
+        }
+    } else {
+        format!("class {code}")
+    };
     // Resolve this hit's per-zone settings, each falling back to the global default.
     let zone = s
         .dnsbl_zones
@@ -186,8 +223,11 @@ fn act(s: &mut Server, uid: Uid, domain: &str) {
         .as_ref()
         .and_then(|z| z.reason.clone())
         .unwrap_or_else(|| s.dnsbl_reason.clone());
-    // Reason templating: %ip% → the client IP, %dnsbl% → the zone domain.
-    let reason = reason_tmpl.replace("%ip%", &ipstr).replace("%dnsbl%", domain);
+    // Reason templating: %ip% → client IP, %dnsbl% → zone domain, %class% → listing class.
+    let reason = reason_tmpl
+        .replace("%ip%", &ipstr)
+        .replace("%dnsbl%", domain)
+        .replace("%class%", &class_desc);
     let setter = format!("dnsbl@{}", s.name);
     // Apply the action first so the XLINE notice precedes the DNSBL one, matching
     // how an operator watching both snomasks sees a blocklist ban land.
@@ -212,7 +252,7 @@ fn act(s: &mut Server, uid: Uid, domain: &str) {
         }
     };
     s.snotice_c('d', &format!(
-        "DNSBL: Connecting user {mask} ({ipstr}) detected as being on the '{domain}' DNSBL: {name}"
+        "DNSBL: Connecting user {mask} ({ipstr}) detected as being on the '{domain}' DNSBL: {name} ({class_desc})"
     ));
     if closes {
         // pre-registration users aren't caught by add_xline's enforce sweep, so close
