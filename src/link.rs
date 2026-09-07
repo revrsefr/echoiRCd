@@ -2553,9 +2553,15 @@ impl Server {
         // FMODE inserts a channel timestamp before the mode string
         let mode_idx = if msg.command == "FMODE" { 2 } else { 1 };
 
-        // a user-mode change: relay onward, and drop it if aimed at a local (we
-        // don't re-toggle umodes here — services force user modes via SVSMODE)
+        // a user-mode change: reflect it on our record of the remote user (WHOIS
+        // 335/379 read `RemoteUser.modes`) and relay onward. We don't re-toggle a LOCAL
+        // user's umodes here — services force those via SVSMODE.
         if !msg.params[0].starts_with('#') {
+            if let (Some(target), Some(changes)) = (msg.params.first(), msg.params.get(1)) {
+                if let Some(ru) = self.remote_users.get_mut(target) {
+                    apply_umode_string(&mut ru.modes, changes);
+                }
+            }
             self.propagate(&msg.to_wire(), Some(via));
             return;
         }
@@ -2868,6 +2874,24 @@ fn collision_decision(local_ts: u64, remote_ts: u64, same_person: bool) -> (bool
         (false, true)
     } else {
         (true, false)
+    }
+}
+
+/// Apply a `+ab-c`-style user-mode delta to a stored mode-letter string, so a remote
+/// user's `modes` stay current for WHOIS when their umodes change over the link.
+fn apply_umode_string(modes: &mut String, changes: &str) {
+    let mut adding = true;
+    for c in changes.chars() {
+        match c {
+            '+' => adding = true,
+            '-' => adding = false,
+            _ if adding => {
+                if !modes.contains(c) {
+                    modes.push(c);
+                }
+            }
+            _ => modes.retain(|m| m != c),
+        }
     }
 }
 
@@ -3349,6 +3373,17 @@ mod tests {
         let back = crate::message::parse(":42SB00000 AWAY").unwrap();
         s.link_away_recv(1, &back);
         assert_eq!(s.remote_users["42SB00000"].away, None, "away cleared on return");
+    }
+
+    #[test]
+    fn apply_umode_string_toggles_letters() {
+        let mut m = "iH".to_string();
+        apply_umode_string(&mut m, "+B");
+        assert!(m.contains('B'), "added B");
+        apply_umode_string(&mut m, "-H+x");
+        assert!(!m.contains('H') && m.contains('x'), "removed H, added x");
+        apply_umode_string(&mut m, "+i"); // already set
+        assert_eq!(m.matches('i').count(), 1, "no duplicate letter");
     }
 
     // A services bot IJOINing an existing channel with a status token (e.g. "ao")
