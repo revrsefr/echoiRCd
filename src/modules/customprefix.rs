@@ -98,7 +98,7 @@ pub fn init(s: &Server) {
                 match tok.split_once('=') {
                     Some(("letter", v)) => letter = v.chars().next(),
                     Some(("prefix", v)) => sigil = v.chars().next(),
-                    Some(("rank", v)) => rank = v.parse().unwrap_or(1),
+                    Some(("rank", v)) => rank = parse_rank(v).unwrap_or(1),
                     Some(("ranktoset", v)) => rts = parse_rank(v),
                     Some(("ranktounset", v)) => rtu = parse_rank(v),
                     Some(("depriv", v)) => depriv = yesish(v),
