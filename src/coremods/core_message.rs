@@ -745,6 +745,10 @@ impl Command for TagMsg {
             if moderated && mrank < RANK_VOICE {
                 return CmdResult::Fail;
             }
+            // +b m: mute — a muted user can't emit tags either (PRIVMSG enforces this)
+            if s.extban_active(uid, &key, 'm') && mrank < RANK_VOICE {
+                return CmdResult::Fail;
+            }
             let echo = s
                 .users
                 .get(&uid)
