@@ -159,11 +159,14 @@ pub fn report(s: &mut Server, uid: Uid, outcome: Outcome) {
 /// just informs; the `*line` actions add a ban and close; `kill` closes without a
 /// persistent ban. Emits the XLINE notice (via `add_xline`) then the DNSBL one.
 fn act(s: &mut Server, uid: Uid, domain: &str) {
-    let (mask, ip) = match s.users.get(&uid) {
-        Some(u) => (u.prefix(), u.addr.ip()),
+    let (mask, ident, host, ip) = match s.users.get(&uid) {
+        Some(u) => (u.prefix(), u.ident.clone(), u.host.clone(), u.addr.ip()),
         None => return,
     };
     let ipstr = ip.to_string();
+    // an explicitly E-lined (exempt) host is never auto-banned or killed by a blocklist
+    // — the registration ban path and the enforce sweep honor E-lines, so this must too
+    let exempt = s.is_exempt(&ident, &host, &ipstr);
     // Resolve this hit's per-zone settings, each falling back to the global default.
     let zone = s
         .dnsbl_zones
@@ -188,21 +191,25 @@ fn act(s: &mut Server, uid: Uid, domain: &str) {
     let setter = format!("dnsbl@{}", s.name);
     // Apply the action first so the XLINE notice precedes the DNSBL one, matching
     // how an operator watching both snomasks sees a blocklist ban land.
-    let closes = match action.as_str() {
-        "kline" => {
-            s.add_xline(XKind::Kline, &format!("*@{ipstr}"), dur, &setter, &reason);
-            true
+    let closes = if exempt {
+        false // E-lined: notify the oper snomask but never ban or kill
+    } else {
+        match action.as_str() {
+            "kline" => {
+                s.add_xline(XKind::Kline, &format!("*@{ipstr}"), dur, &setter, &reason);
+                true
+            }
+            "gline" => {
+                s.add_xline(XKind::Gline, &format!("*@{ipstr}"), dur, &setter, &reason);
+                true
+            }
+            "zline" => {
+                s.add_xline(XKind::Zline, &ipstr, dur, &setter, &reason);
+                true
+            }
+            "kill" | "reject" => true,
+            _ => false, // "mark" or unknown: notify only, let them in
         }
-        "gline" => {
-            s.add_xline(XKind::Gline, &format!("*@{ipstr}"), dur, &setter, &reason);
-            true
-        }
-        "zline" => {
-            s.add_xline(XKind::Zline, &ipstr, dur, &setter, &reason);
-            true
-        }
-        "kill" | "reject" => true,
-        _ => false, // "mark" or unknown: notify only, let them in
     };
     s.snotice_c('d', &format!(
         "DNSBL: Connecting user {mask} ({ipstr}) detected as being on the '{domain}' DNSBL: {name}"
