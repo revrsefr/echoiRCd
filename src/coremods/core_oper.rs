@@ -1321,11 +1321,11 @@ impl Command for SaKick {
             .cloned()
             .unwrap_or_else(|| "Kicked by services".to_string());
         let prefix = s.users[&uid].prefix();
-        s.to_channel(
-            &key,
-            &format!(":{prefix} KICK {chan} {victim} :{reason}"),
-            None,
-        );
+        let kickline = format!(":{prefix} KICK {chan} {victim} :{reason}");
+        // record the KICK directly (event-playback has no kick hook; a Hook::Part
+        // would mis-record it as a voluntary PART)
+        crate::modules::chathistory::record_event(s, &key, &kickline);
+        s.to_channel(&key, &kickline, None);
         s.propagate_kick(uid, chan, victim, &reason);
         if let Some(ch) = s.channels.get_mut(&key) {
             ch.members.remove(&tuid);
@@ -1334,8 +1334,6 @@ impl Command for SaKick {
             u.channels.remove(&key);
         }
         s.channels.retain(|_, c| c.keep_alive());
-        s.events
-            .push_back(Hook::Part(tuid, key, "kicked".to_string()));
         let by = oper_nick(s, uid);
         let m = s.trf("{0} used SAKICK on {1} in {2}", &[by.as_str(), victim.as_str(), chan.as_str()]);
         s.snotice_c('v', &m);

@@ -2,7 +2,6 @@
 
 use crate::channels::{normalize_ban_mask, valid_chan, Ban, Topic, RANK_HALFOP, RANK_OP};
 use crate::command::{CmdResult, Command};
-use crate::module::Hook;
 use crate::numeric::*;
 use crate::server::{now, Server};
 use crate::xline::parse_duration;
@@ -677,11 +676,11 @@ impl Command for Kick {
         let kicker = s.users[&uid].nick.clone();
         let reason = params.get(2).cloned().unwrap_or(kicker);
         let prefix = s.users[&uid].prefix();
-        s.to_channel(
-            &key,
-            &format!(":{prefix} KICK {chan} {victim} :{reason}"),
-            None,
-        );
+        let kickline = format!(":{prefix} KICK {chan} {victim} :{reason}");
+        // record the KICK to history directly — event-playback has no kick hook, and a
+        // Hook::Part would mis-record it as a voluntary PART (the remote path does this)
+        crate::modules::chathistory::record_event(s, &key, &kickline);
+        s.to_channel(&key, &kickline, None);
         s.propagate_kick(uid, chan, victim, &reason); // tell links
         if let Some(ch) = s.channels.get_mut(&key) {
             ch.members.remove(&tuid);
@@ -693,8 +692,6 @@ impl Command for Kick {
             u.channels.remove(&key);
         }
         s.channels.retain(|_, c| c.keep_alive());
-        s.events
-            .push_back(Hook::Part(tuid, key, "kicked".to_string()));
         CmdResult::Ok
     }
 }
