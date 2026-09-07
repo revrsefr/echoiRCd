@@ -87,7 +87,7 @@ pub fn on_connect(s: &mut Server, ip: IpAddr) {
     }
     // never connect-ban loopback (local services, bridges, admin tooling all dial in
     // over 127.0.0.1 / ::1) or an admin-configured exempt range
-    if ip.is_loopback() || connectban_exempt(s, ip) {
+    if crate::server::is_local_ip(ip) || connectban_exempt(s, ip) {
         return;
     }
     let threshold = s.conf_num("connectban_threshold", 10u32).max(2);

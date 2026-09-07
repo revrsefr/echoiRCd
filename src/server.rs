@@ -48,6 +48,19 @@ pub const PING_AFTER: u64 = 90;
 pub const PING_TIMEOUT: u64 = 60;
 pub const REG_TIMEOUT: u64 = 60;
 
+/// True for loopback, including the v4-mapped IPv6 form `::ffff:127.0.0.1` that
+/// `IpAddr::is_loopback()` misses — dual-stack `[::]` binds see local services,
+/// bridges and tests arrive that way, and they must stay exempt from auto-throttling
+/// and auto-bans (else the server can throttle or ban its own localhost peers).
+pub(crate) fn is_local_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => v4.is_loopback(),
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback() || v6.to_ipv4_mapped().is_some_and(|m| m.is_loopback())
+        }
+    }
+}
+
 pub fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -536,7 +549,7 @@ impl Server {
         // global unregistered-connection cap — refuse once the held/pending pool is
         // full, so a bot flood behind the human-verification gate can't fill the
         // class limit and lock real users out. Loopback (web/services/tests) exempt.
-        if crate::connguard::over_cap(self) && !ip.is_loopback() {
+        if crate::connguard::over_cap(self) && !is_local_ip(ip) {
             let m = self.trf(
                 "Closing link: (Server is busy — please try again shortly)",
                 &[],

@@ -24,8 +24,9 @@ fn cfg(s: &Server) -> Option<(u32, u64)> {
 /// Record a connection from `ip`; returns true when it exceeds the limit (the
 /// caller should refuse it). No-op → false when connflood is unconfigured.
 pub fn over_limit(s: &mut Server, ip: IpAddr) -> bool {
-    // loopback (local services / bridges / admin) is never connection-throttled
-    if ip.is_loopback() {
+    // loopback (local services / bridges / admin) is never connection-throttled;
+    // is_local_ip also covers the v4-mapped ::ffff:127.0.0.1 form on dual-stack binds
+    if crate::server::is_local_ip(ip) {
         return false;
     }
     let Some((max, secs)) = cfg(s) else {
