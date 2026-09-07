@@ -335,6 +335,7 @@ impl Server {
         self.burst_users(uid);
         self.burst_channels(uid);
         self.burst_xlines(uid);
+        self.burst_filters(uid);
         self.link_out(uid, "ENDBURST".to_string());
         eprintln!("[link] linked {name} ({sid}) — {desc}");
     }
@@ -955,6 +956,14 @@ impl Server {
             msg.params[1].clone(),
             msg.params[2].clone(),
         );
+        // Server-level (target "*") metadata: the spam-filter ruleset syncs this way,
+        // both on netburst and on live changes from a linked server.
+        if target == "*" {
+            if key == "filter" {
+                crate::modules::filter::apply_metadata(self, &value);
+            }
+            return;
+        }
         let Some(tuid) = self.link_local_target(&target) else {
             self.forward_to_target(&target, msg, from);
             return;
@@ -1559,6 +1568,23 @@ impl Server {
                     x.reason
                 ),
             );
+        }
+    }
+
+    /// Burst our spam-filter ruleset to a freshly-linked peer as `filter` metadata,
+    /// so the network converges on the same rules (matches the peer's netburst).
+    fn burst_filters(&self, link_uid: Uid) {
+        if let Some(f) = self.ext.get::<crate::modules::filter::Filters>() {
+            for r in &f.0 {
+                self.link_out(
+                    link_uid,
+                    format!(
+                        ":{} METADATA * filter :{}",
+                        self.sid,
+                        crate::modules::filter::encode_filter(r)
+                    ),
+                );
+            }
         }
     }
 

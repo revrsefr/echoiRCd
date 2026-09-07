@@ -207,9 +207,104 @@ impl Command for FilterCmd {
     }
 }
 
+/// Map a wire (m_filter-compatible) action name onto echoIRCd's action set.
+/// echoIRCd has no non-blocking action, so `warn`/`none`/`shun` (and anything
+/// unknown) enforce as `block` — a services-synced filter is meant to act.
+fn action_from_wire(a: &str) -> &'static str {
+    match a.to_ascii_lowercase().as_str() {
+        "gline" => "gline",
+        "zline" => "zline",
+        "silent" => "silent",
+        "kill" => "kill",
+        _ => "block", // block | warn | none | shun | unknown
+    }
+}
+
+/// Map an echoIRCd action to its closest wire name (`kline` has no wire form → `gline`).
+fn action_to_wire(a: &str) -> &'static str {
+    match a {
+        "gline" | "kline" => "gline",
+        "zline" => "zline",
+        "silent" => "silent",
+        "kill" => "kill",
+        _ => "block",
+    }
+}
+
+/// Parse a `filter` metadata value synced by a linked server. The wire form is
+/// `<freeform> <action> <flags> <duration> :<reason>`, spaces inside the pattern
+/// escaped as `\x07`. `<flags>` (which message types a peer applies it to) isn't
+/// modelled here — the rule applies to all messages — so it's accepted + ignored.
+/// `engine` compiles the pattern (glob by default).
+pub fn decode_filter(value: &str, engine: &str) -> Result<SpamFilter, String> {
+    let mut it = value.splitn(5, ' ');
+    let freeform = it.next().ok_or("empty filter")?;
+    let action = it.next().ok_or("missing action")?;
+    let _flags = it.next().ok_or("missing flags")?;
+    let duration: u64 = it.next().ok_or("missing duration")?.parse().unwrap_or(0);
+    let reason = it
+        .next()
+        .map(|r| r.strip_prefix(':').unwrap_or(r))
+        .unwrap_or("Filtered")
+        .to_string();
+    SpamFilter::new(
+        freeform.replace('\u{7}', " "),
+        engine.to_string(),
+        action_from_wire(action).to_string(),
+        duration,
+        reason,
+    )
+}
+
+/// Serialise a rule as a wire-compatible `filter` metadata value. echoIRCd applies
+/// to every message type, so it advertises `pn` (privmsg+notice) flags for a peer
+/// that gates on message type.
+pub fn encode_filter(f: &SpamFilter) -> String {
+    format!(
+        "{} {} pn {} :{}",
+        f.pattern.replace(' ', "\u{7}"),
+        action_to_wire(&f.action),
+        f.duration,
+        f.reason
+    )
+}
+
+/// Apply a `filter` value received over S2S metadata: replace-or-add the rule
+/// (matched by pattern). Malformed values are ignored rather than dropping the link.
+pub fn apply_metadata(s: &mut Server, value: &str) {
+    let engine = s.conf("filter_engine").unwrap_or("glob").to_string();
+    if let Ok(f) = decode_filter(value, &engine) {
+        let pat = f.pattern.clone();
+        let filters = s.ext.get_or_insert_with::<Filters>(Filters::default);
+        filters.0.retain(|r| r.pattern != pat);
+        filters.0.push(f);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filter_metadata_round_trips() {
+        let f = SpamFilter::new(
+            "bad *word".into(),
+            "glob".into(),
+            "block".into(),
+            0,
+            "spam".into(),
+        )
+        .unwrap();
+        let wire = encode_filter(&f);
+        assert!(wire.starts_with("bad\u{7}*word block "), "{wire}");
+        let back = decode_filter(&wire, "glob").unwrap();
+        assert_eq!(back.pattern, "bad *word"); // \x07 decoded back to a space
+        assert_eq!((back.action.as_str(), back.reason.as_str()), ("block", "spam"));
+        // an m_filter gline action + duration parse, and an unmappable `warn` → block
+        let g = decode_filter("evil gline pn 3600 :net ban", "glob").unwrap();
+        assert_eq!((g.action.as_str(), g.duration), ("gline", 3600));
+        assert_eq!(decode_filter("x warn pn 0 :w", "glob").unwrap().action, "block");
+    }
 
     #[test]
     fn filter_matches_by_engine() {
