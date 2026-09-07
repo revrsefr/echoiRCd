@@ -290,7 +290,9 @@ impl Server {
             self.reject_link(uid, "No link block for that server name");
             return;
         };
-        if block.password != pass {
+        // constant-time compare — the link secret is attacker-guessable over the S2S
+        // port (which has no source-IP check), so a byte-by-byte `!=` leaks it via timing
+        if !crate::modules::password_hash::ct_eq(block.password.as_bytes(), pass.as_bytes()) {
             self.reject_link(uid, "Invalid link password");
             return;
         }
