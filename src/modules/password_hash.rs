@@ -42,7 +42,9 @@ fn hex(bytes: &[u8]) -> String {
 /// Decode a lowercase/uppercase hex string to bytes (None on bad input).
 #[allow(clippy::manual_is_multiple_of)] // is_multiple_of is unstable on our MSRV
 fn unhex(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    // hex is ASCII; reject non-ASCII up front so the byte-offset slice below can't land
+    // mid-char and panic (e.g. a stray non-ASCII byte in a hashed-password config value)
+    if !s.is_ascii() || s.len() % 2 != 0 {
         return None;
     }
     (0..s.len())
@@ -199,7 +201,10 @@ impl Command for MkPasswd {
         }
         match make(&algo, &pass) {
             Some(hashed) => {
-                let m = s.trf("{0} hashed password: {1}", &[algo.as_str(), hashed.as_str()]);
+                let m = s.trf(
+                    "{0} hashed password: {1}",
+                    &[algo.as_str(), hashed.as_str()],
+                );
                 s.send(uid, format!(":{} NOTICE {nick} :{m}", s.name));
                 CmdResult::Ok
             }
