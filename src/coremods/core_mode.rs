@@ -395,6 +395,9 @@ fn apply_user_modes(s: &mut Server, uid: Uid, target: &str, params: &[String]) -
     }
     if !applied.is_empty() {
         s.send(uid, format!(":{me} MODE {me} :{applied}"));
+        // propagate to peers so remote WHOIS + services track the user's modes
+        let uuid = s.users.get(&uid).map(|u| u.uuid.clone()).unwrap_or_default();
+        s.propagate_from_user(uid, &format!("MODE {uuid} {applied}"));
     }
     CmdResult::Ok
 }
