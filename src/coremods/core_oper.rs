@@ -1530,7 +1530,7 @@ impl Command for Check {
                     format!(
                         "*** signon {} idle {}s",
                         iso_time(u.signon),
-                        now().saturating_sub(u.last_active)
+                        now().saturating_sub(u.last_msg)
                     ),
                     format!(
                         "*** channels: {}",
@@ -1602,7 +1602,7 @@ impl Command for SetIdle {
         }
         let secs: u64 = params[0].parse().unwrap_or(0);
         if let Some(u) = s.users.get_mut(&uid) {
-            u.last_active = now().saturating_sub(secs);
+            u.last_msg = now().saturating_sub(secs);
         }
         onotice(s, uid, &format!("*** SETIDLE: idle time set to {secs}s"));
         CmdResult::Ok

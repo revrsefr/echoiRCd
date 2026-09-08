@@ -202,7 +202,11 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
         return CmdResult::Fail;
     }
     let (target, text) = (&params[0], &params[1]);
-    let Some(prefix) = s.users.get(&uid).map(|u| u.prefix()) else {
+    // a PRIVMSG/NOTICE is real user activity — this is what resets the WHOIS idle clock
+    let Some(prefix) = s.users.get_mut(&uid).map(|u| {
+        u.last_msg = crate::server::now();
+        u.prefix()
+    }) else {
         return CmdResult::Fail;
     };
     if target.starts_with('#') {

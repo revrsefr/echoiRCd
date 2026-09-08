@@ -262,7 +262,8 @@ pub struct User {
     pub accept: Vec<String>,   // ACCEPT list — lowercased nicks (callerid +g)
     pub quitting: Option<String>, // set by QUIT; drained by the core
     pub flags: UserFlags,
-    pub last_active: u64, // unix secs of the last line received
+    pub last_active: u64, // unix secs of the last line received (liveness / ping sweep)
+    pub last_msg: u64,    // unix secs of the last PRIVMSG/NOTICE sent (WHOIS 317 idle clock)
     pub ping_sent: bool,  // a server PING is outstanding
     pub ext: Extensible,  // typed, module-owned per-user metadata
     pub out: OutSink,

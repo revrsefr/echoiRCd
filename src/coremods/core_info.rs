@@ -203,7 +203,7 @@ impl Command for Whois {
             hideoper: bool,
             hidechans: bool,
             account: Option<String>,
-            last_active: u64,
+            last_msg: u64,
             signon: u64,
             certfp: Option<String>,
             tls_info: Option<String>,
@@ -223,7 +223,7 @@ impl Command for Whois {
             hideoper,
             hidechans,
             account,
-            last_active,
+            last_msg,
             signon,
             certfp,
             tls_info,
@@ -244,7 +244,7 @@ impl Command for Whois {
                 hideoper: u.flags.hideoper,
                 hidechans: u.flags.hidechans,
                 account: u.account.clone(),
-                last_active: u.last_active,
+                last_msg: u.last_msg,
                 signon: u.signon,
                 certfp: u.certfp.clone(),
                 tls_info: u.tls_info.clone(),
@@ -435,7 +435,7 @@ impl Command for Whois {
         }
         // 317: idle time + signon time (hidewhois may suppress it)
         if !(hide && crate::modules::hidewhois::hide_idle(s)) {
-            let idle = crate::server::now().saturating_sub(last_active);
+            let idle = crate::server::now().saturating_sub(last_msg);
             s.numeric(
                 uid,
                 RPL_WHOISIDLE,
@@ -647,7 +647,7 @@ fn whox_row(
         parts.push("0".to_string()); // hopcount (local users)
     }
     if has('l') {
-        parts.push(now.saturating_sub(u.last_active).to_string()); // idle seconds
+        parts.push(now.saturating_sub(u.last_msg).to_string()); // idle seconds
     }
     if has('a') {
         parts.push(u.account.clone().unwrap_or_else(|| "0".to_string()));

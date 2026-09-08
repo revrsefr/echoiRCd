@@ -105,6 +105,7 @@ impl Node {
                 quitting: None,
                 flags: UserFlags::default(),
                 last_active: 0,
+                last_msg: 0,
                 ping_sent: false,
                 ext: Extensible::default(),
                 out: OutSink::Thread(tx),

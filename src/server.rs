@@ -538,6 +538,7 @@ impl Server {
                 quitting: None,
                 flags: UserFlags::default(),
                 last_active: now(),
+                last_msg: now(),
                 ping_sent: false,
                 ext: Extensible::default(),
                 out,
@@ -1810,6 +1811,7 @@ mod tests {
                 quitting: None,
                 flags: UserFlags::default(),
                 last_active: 0,
+                last_msg: 0,
                 ping_sent: false,
                 ext: Extensible::default(),
                 out: OutSink::Thread(tx),
@@ -2480,5 +2482,35 @@ mod tests {
         s.users.get_mut(&1).unwrap().last_active = 0;
         let (_, quit) = s.idle_check(now);
         assert_eq!(quit, vec![1]); // unregistered + idle -> registration timeout
+    }
+
+    #[test]
+    fn idle_clock_tracks_messages_not_background_traffic() {
+        let mut s = srv();
+        let _rxa = add_user(&mut s, 1, "alice");
+        let _rxb = add_user(&mut s, 2, "bob");
+        // alice has been silent; a background line (PONG/WHO/MODE/…) bumps only the
+        // liveness clock and must leave the WHOIS idle clock untouched.
+        {
+            let a = s.users.get_mut(&1).unwrap();
+            a.last_active = now();
+            a.last_msg = 0;
+        }
+        assert_eq!(
+            s.users[&1].last_msg, 0,
+            "non-message traffic must not reset the WHOIS idle clock"
+        );
+        // a real PRIVMSG is user activity -> the idle clock resets to ~now.
+        let before = now();
+        let _ = crate::coremods::core_message::deliver(
+            &mut s,
+            1,
+            &["bob".to_string(), "hello".to_string()],
+            false,
+        );
+        assert!(
+            s.users[&1].last_msg >= before,
+            "PRIVMSG must reset the WHOIS idle clock"
+        );
     }
 }
