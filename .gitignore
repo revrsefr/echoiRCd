@@ -26,3 +26,4 @@ echoircd.conf.*
 # runtime pidfile
 *.pid
 echoircd.live
+echoircd.conf.permchannels
