@@ -115,6 +115,9 @@ pub enum OutSink {
         tx: Sender<Out>,
         waker: Arc<Waker>,
     },
+    /// A socket-less sink for virtual users (bridge puppets): output is discarded —
+    /// the real recipient sees the traffic on the other network, not over IRC.
+    Null,
 }
 
 impl OutSink {
@@ -130,6 +133,7 @@ impl OutSink {
                     let _ = waker.wake(); // wakes coalesce: many sends → one epoll wakeup
                 }
             }
+            OutSink::Null => {} // virtual user: discard
         }
     }
 
@@ -238,13 +242,13 @@ struct Conn {
     wpos: usize,      // how far into wbuf we've written
     want_read: bool,
     want_write: bool,
-    closing: bool,     // flush wbuf, then close
-    paused: bool,      // reads paused (softsendq backpressure); ⟺ pending > softsendq
-    recvq: usize,      // max buffered unterminated-line bytes before dropping
-    hardsendq: usize,  // max queued output bytes before dropping + closing
-    softsendq: usize,  // queued output above this pauses reads until it drains
-    handshaking: bool, // TLS: still negotiating; hold reads + the Connect until done
-    proxy_pending: bool, // hold the Connect event until a PROXY header is consumed
+    closing: bool,                // flush wbuf, then close
+    paused: bool,                 // reads paused (softsendq backpressure); ⟺ pending > softsendq
+    recvq: usize,                 // max buffered unterminated-line bytes before dropping
+    hardsendq: usize,             // max queued output bytes before dropping + closing
+    softsendq: usize,             // queued output above this pauses reads until it drains
+    handshaking: bool,            // TLS: still negotiating; hold reads + the Connect until done
+    proxy_pending: bool,          // hold the Connect event until a PROXY header is consumed
     pending_out: Option<OutSink>, // the OutSink held for that deferred Connect
 }
 
@@ -274,7 +278,9 @@ fn set_interest(poll: &mut Poll, c: &mut Conn, t: usize) {
         // never both-false (paused ⟹ backlog ⟹ want_write); READABLE is a safe floor
         _ => Interest::READABLE,
     };
-    let _ = poll.registry().reregister(c.sock.source(), Token(t), interest);
+    let _ = poll
+        .registry()
+        .reregister(c.sock.source(), Token(t), interest);
 }
 
 /// Largest PROXY header we'll buffer before giving up (v1 ≤ 107, v2 header ≤ ~232).
@@ -775,7 +781,9 @@ fn reactor_loop(
                     Ok(true) => pending_reads.push(t),
                     Ok(false) => {}
                     Err(_) => {
-                        eprintln!("[reactor] recovered from a panic re-reading a socket; dropping it");
+                        eprintln!(
+                            "[reactor] recovered from a panic re-reading a socket; dropping it"
+                        );
                         close_conn(&mut poll, &mut conns, t, &core);
                     }
                 }
@@ -860,7 +868,12 @@ const MAX_READ_PER_TURN: usize = 64 * 1024;
 
 /// Drain readable bytes from `t` (edge-triggered: read until WouldBlock), frame
 /// complete lines and forward them to the core; close on EOF/error.
-fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: &SyncSender<Event>) -> bool {
+fn read_conn(
+    poll: &mut Poll,
+    conns: &mut HashMap<usize, Conn>,
+    t: usize,
+    core: &SyncSender<Event>,
+) -> bool {
     // a TLS conn must finish negotiating before any application bytes flow
     if !try_handshake(poll, conns, t, core) {
         return false;
@@ -919,9 +932,10 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
                             }
                         }
                         if !c.proxy_pending {
-                            connect = c.pending_out.take().map(|out| {
-                                (c.uid, c.addr, c.local_port, psecure, pcertfp, out)
-                            });
+                            connect = c
+                                .pending_out
+                                .take()
+                                .map(|out| (c.uid, c.addr, c.local_port, psecure, pcertfp, out));
                         }
                     }
                     if !c.proxy_pending {
@@ -992,7 +1006,12 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
 /// interest, and close once a `closing` connection's buffer is drained. If the
 /// backlog dropped back under softsendq, un-pause reads and catch up (edge-triggered:
 /// data that arrived while paused won't re-fire, so read it here).
-fn flush_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: &SyncSender<Event>) {
+fn flush_conn(
+    poll: &mut Poll,
+    conns: &mut HashMap<usize, Conn>,
+    t: usize,
+    core: &SyncSender<Event>,
+) {
     // a writable event during a TLS handshake advances it, not the (empty) write queue
     if !try_handshake(poll, conns, t, core) {
         return;
@@ -1041,7 +1060,12 @@ fn flush_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core:
 }
 
 /// Deregister + drop `t`'s socket and tell the core the connection is gone.
-fn close_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: &SyncSender<Event>) {
+fn close_conn(
+    poll: &mut Poll,
+    conns: &mut HashMap<usize, Conn>,
+    t: usize,
+    core: &SyncSender<Event>,
+) {
     if let Some(mut c) = conns.remove(&t) {
         let _ = poll.registry().deregister(c.sock.source());
         // send a TLS close_notify for an established session (not a half-done handshake)

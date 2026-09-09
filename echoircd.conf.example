@@ -589,9 +589,17 @@ modules {
     # relaymsg_host       "relay.example.com";   # default: the server name
     # --- bridge: in-core channel bridge to another chat network (no external appservice).
     #     One line per bridged channel; the token is read from a FILE so it never lives
-    #     inline. A remote sender shows as `name/tg` (relaymsg style). Manage live with the
-    #     `/BRIDGE` oper command (list) and `/BRIDGE RELOAD` (re-read without a restart). ---
+    #     inline. Manage live with the `/BRIDGE` oper command (list) and `/BRIDGE RELOAD`
+    #     (re-read without a restart).
+    #     Two delivery modes:
+    #       relay  (default) — a remote sender shows as `name/tg` via draft/relaymsg.
+    #       mode=puppet      — each remote sender becomes a REAL virtual member (nick
+    #                          `name[tg]`, +B bot): visible in WHO/NAMES and tab-complete,
+    #                          idle-parted after `bridge_puppet_idle` seconds (default 3600),
+    #                          re-joining on their next message. ---
     # bridge  telegram #argentina /home/irc/secrets/tg_argentina -1001234567890;
+    # bridge  telegram #argentina /home/irc/secrets/tg_argentina -1001234567890 mode=puppet;
+    # bridge_puppet_idle  3600;   # seconds a puppet may sit idle before it is parted
     # --- extjwt: /EXTJWT issues a signed token proving IRC identity to a service ---
     # extjwt_secret   "CHANGE_THIS_HS256_SECRET";   # required to enable
     # extjwt_duration 30;     # token lifetime, seconds

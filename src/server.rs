@@ -236,7 +236,7 @@ pub struct Server {
     pub label_capture: RefCell<Option<(Uid, Vec<String>)>>,
     /// Rolling in-memory server log (fed by `snotice`), read by the RPC log methods.
     pub log: RefCell<LogState>,
-    pub event_tx: SyncSender<Event>,      // self-inject events (DNS results)
+    pub event_tx: SyncSender<Event>, // self-inject events (DNS results)
     pub conn_counter: Arc<AtomicU64>, // mints connection uids (for CONNECT dials)
     /// Module-owned server state, keyed by type. Each `modules/*.rs` stores its
     /// own struct here so features live in their own file instead of this one.
@@ -884,6 +884,121 @@ impl Server {
                 }
             }
         }
+    }
+
+    /// Mint a socket-less virtual "puppet" user (a sender from a bridged network),
+    /// introduce it to links, and return its uid. The nick MUST already be free.
+    /// Marked `+B` (bot) so services treat it as a bot, not a manageable client.
+    pub fn mint_puppet(&mut self, nick: &str, ident: &str, host: &str, realname: &str) -> Uid {
+        let uid = self
+            .conn_counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let uuid = self.next_uuid();
+        self.uuid_local.insert(uuid.clone(), uid);
+        let flags = crate::users::UserFlags {
+            bot: true,
+            ..Default::default()
+        };
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        self.users.insert(
+            uid,
+            User {
+                uid,
+                uuid,
+                nick: nick.to_string(),
+                ident: ident.to_string(),
+                realname: realname.to_string(),
+                host: host.to_string(),
+                cloak: String::new(),
+                vhost: None,
+                secure: false,
+                certfp: None,
+                tls_info: None,
+                sni: None,
+                brand_server: None,
+                brand_network: None,
+                account: None,
+                signon: now(),
+                nick_ts: now(),
+                addr,
+                port: 0,
+                registered: true,
+                dns_pending: false,
+                ident_pending: false,
+                auth_pending: false,
+                waitpong: None,
+                class: None,
+                pass: None,
+                deferred: Vec::new(),
+                cap: false,
+                cap_302: false,
+                caps: Caps::default(),
+                sasl_mech: None,
+                channels: HashSet::default(),
+                invited: HashSet::default(),
+                watch: Vec::new(),
+                monitor: Vec::new(),
+                silence: Vec::new(),
+                signore: Vec::new(),
+                accept: Vec::new(),
+                quitting: None,
+                flags,
+                last_active: now(),
+                last_msg: now(),
+                ping_sent: false,
+                ext: Extensible::default(),
+                out: OutSink::Null,
+                sock: None,
+            },
+        );
+        self.nick_index.insert(nick.to_ascii_lowercase(), uid);
+        self.introduce_to_links(uid);
+        uid
+    }
+
+    /// Join a puppet to an existing channel: add membership, tell local members, and
+    /// propagate the join to links. No-op if the channel is unknown or already joined.
+    pub fn puppet_join(&mut self, uid: Uid, chan_disp: &str) {
+        let key = chan_disp.to_ascii_lowercase();
+        if !self.channels.contains_key(&key) {
+            return;
+        }
+        let prefix = match self.users.get(&uid) {
+            Some(u) => u.prefix(),
+            None => return,
+        };
+        if let Some(c) = self.channels.get_mut(&key) {
+            if c.members.contains_key(&uid) {
+                return;
+            }
+            c.members.insert(uid, crate::channels::Member::default());
+        }
+        if let Some(u) = self.users.get_mut(&uid) {
+            u.channels.insert(key.clone());
+        }
+        self.to_channel(&key, &format!(":{prefix} JOIN {chan_disp}"), None);
+        self.propagate_join(uid, chan_disp, false);
+    }
+
+    /// Deliver a message FROM a puppet TO its channel — to local members (tagged) and
+    /// on to links. Bypasses the command path, so it never re-enters `on_pre_message`.
+    pub fn puppet_speak(&mut self, uid: Uid, chan_disp: &str, text: &str) {
+        let key = chan_disp.to_ascii_lowercase();
+        let (prefix, uuid) = match self.users.get(&uid) {
+            Some(u) => (u.prefix(), u.uuid.clone()),
+            None => return,
+        };
+        let body = format!(":{prefix} PRIVMSG {chan_disp} :{text}");
+        let msgid = self.next_msgid();
+        let members: Vec<Uid> = self
+            .channels
+            .get(&key)
+            .map(|c| c.members.keys().copied().collect())
+            .unwrap_or_default();
+        for m in members {
+            self.send_tagged(m, uid, "", &msgid, &body);
+        }
+        self.propagate(&format!(":{uuid} PRIVMSG {chan_disp} :{text}"), None);
     }
 
     pub fn remove_user(&mut self, uid: Uid, reason: &str) {
