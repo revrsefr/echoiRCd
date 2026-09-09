@@ -383,9 +383,9 @@ fn run_worker(cfg: PgConfig, queue: Queue, core_tx: Sender<Event>) {
 fn execute_request(conn: &mut Option<PgConn>, cfg: &PgConfig, req: &SqlRequest) -> SqlResult {
     for attempt in 0..2 {
         if conn.is_none() {
-            match PgConn::connect(cfg) {
-                Ok(c) => *conn = Some(c),
-                Err(e) => return Err(e),
+            {
+                let c = PgConn::connect(cfg)?;
+                *conn = Some(c)
             }
         }
         let c = conn.as_mut().unwrap();
@@ -749,7 +749,7 @@ pub fn store_load_or_seed(srv: &Server, name: &str, fallback: Option<String>) ->
         let sel = c
             .query(
                 "SELECT content FROM echoircd_store WHERE name = $1",
-                &[key.clone()],
+                std::slice::from_ref(&key),
             )
             .map_err(|e| e.into_message())?;
         let existing = sel

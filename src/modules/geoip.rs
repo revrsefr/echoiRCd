@@ -282,7 +282,7 @@ impl Mmdb {
         match ip {
             IpAddr::V4(a) => {
                 if self.ip_version == 6 {
-                    bits.extend(std::iter::repeat(false).take(96));
+                    bits.extend(std::iter::repeat_n(false, 96));
                 }
                 for byte in a.octets() {
                     for i in (0..8).rev() {

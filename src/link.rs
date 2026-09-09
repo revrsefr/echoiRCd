@@ -2242,14 +2242,13 @@ impl Server {
                         pi += 1;
                     }
                 }
-                'l' => {
-                    if sign == '+' {
+                'l'
+                    if sign == '+' => {
                         if let Some(p) = params.get(pi) {
                             out.push(p.clone());
                             pi += 1;
                         }
                     }
-                }
                 _ => {}
             }
         }

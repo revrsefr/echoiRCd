@@ -24,7 +24,7 @@ pub fn hidden_rank(s: &Server, modechar: char) -> Option<u8> {
     for line in s.conf_all("hidemode") {
         let mut it = line.split_whitespace();
         if let (Some(mc), Some(rank)) = (it.next(), it.next()) {
-            if mc.chars().next() == Some(modechar) {
+            if mc.starts_with(modechar) {
                 return Some(rank_value(rank));
             }
         }

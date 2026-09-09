@@ -147,7 +147,7 @@ fn build(s: &Server, name: &str) -> Option<ConnClass> {
     let hash_algo = toks
         .iter()
         .filter_map(|t| t.strip_prefix("hash="))
-        .last()
+        .next_back()
         .map(str::to_string);
     for tok in &toks {
         if let Some((k, v)) = tok.split_once('=') {

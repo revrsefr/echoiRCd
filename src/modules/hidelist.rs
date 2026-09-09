@@ -28,7 +28,7 @@ pub fn denied(s: &Server, uid: Uid, key: &str, modechar: char) -> bool {
     for line in s.conf_all("hidelist") {
         let mut it = line.split_whitespace();
         if let (Some(mc), Some(rank)) = (it.next(), it.next()) {
-            if mc.chars().next() == Some(modechar) {
+            if mc.starts_with(modechar) {
                 req = Some(rank_value(rank));
             }
         }
