@@ -766,7 +766,25 @@ impl Command for Jupe {
         1
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
-        do_xline(s, uid, params, XKind::Jupe)
+        let r = do_xline(s, uid, params, XKind::Jupe);
+        // adding a jupe (mask + reason) also cuts any already-linked server it now
+        // forbids — otherwise the jupe only blocks future handshakes and a live
+        // rogue/compromised link stays up until it drops on its own.
+        if matches!(r, CmdResult::Ok) && params.len() >= 2 {
+            let linked: Vec<(Uid, String)> = s
+                .servers
+                .values()
+                .map(|sv| (sv.via, sv.name.clone()))
+                .collect();
+            for (via, name) in linked {
+                if s.matched_jupe(&name).is_some() {
+                    let m = s.trf("juped server {0} — closing link", &[name.as_str()]);
+                    s.snotice_c('l', &m);
+                    s.close_link(via, "Juped");
+                }
+            }
+        }
+        r
     }
 }
 
