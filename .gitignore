@@ -26,4 +26,9 @@ echoircd.conf.*
 # runtime pidfile
 *.pid
 echoircd.live
+echoircd.live.*
 echoircd.conf.permchannels
+# stray VAPID keypair dumps from an accidental `version` invocation — private keys
+*.webpush-vapid
+# nested helper-crate build dir
+fdinherit/target/
