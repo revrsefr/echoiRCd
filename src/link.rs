@@ -2185,6 +2185,65 @@ impl Server {
         };
         let line = format!(":{old_prefix} CHGHOST {ident} {host}");
         self.notify_common_local_if(&uuid, &line, |c| c.chghost);
+        // hostcycle for local members WITHOUT chghost: they only learn a remote user's
+        // new host via a PART+JOIN. Cycle them through each shared channel, re-sending
+        // the remote user's status so they don't appear de-statused (cap members got the
+        // CHGHOST above). Mirrors change_host_ident's local hostcycle.
+        let (nick, new_prefix, acct, realname) = match self.remote_users.get(&uuid) {
+            Some(r) => (
+                r.nick.clone(),
+                r.prefix(),
+                r.account.clone().unwrap_or_else(|| "*".to_string()),
+                r.realname.clone(),
+            ),
+            None => return,
+        };
+        let mut work: Vec<(String, String, Vec<(Uid, bool)>)> = Vec::new();
+        for c in self.channels.values() {
+            let Some(mem) = c.rmembers.get(&uuid) else {
+                continue;
+            };
+            let modes: String = [
+                (mem.owner(), 'q'),
+                (mem.admin(), 'a'),
+                (mem.op(), 'o'),
+                (mem.halfop(), 'h'),
+                (mem.voice(), 'v'),
+            ]
+            .iter()
+            .filter(|(on, _)| *on)
+            .map(|(_, ch)| *ch)
+            .collect();
+            let recips: Vec<(Uid, bool)> = c
+                .members
+                .keys()
+                .copied()
+                .filter_map(|m| {
+                    self.users
+                        .get(&m)
+                        .filter(|u| !u.caps.chghost)
+                        .map(|u| (m, u.caps.extended_join))
+                })
+                .collect();
+            if !recips.is_empty() {
+                work.push((c.name.clone(), modes, recips));
+            }
+        }
+        for (name, modes, recips) in work {
+            for (m, extjoin) in recips {
+                self.send(m, format!(":{old_prefix} PART {name} :Changing host"));
+                let joinline = if extjoin {
+                    format!(":{new_prefix} JOIN {name} {acct} :{realname}")
+                } else {
+                    format!(":{new_prefix} JOIN {name}")
+                };
+                self.send(m, joinline);
+                if !modes.is_empty() {
+                    let args = vec![nick.clone(); modes.len()].join(" ");
+                    self.send(m, format!(":{} MODE {name} +{modes} {args}", self.name));
+                }
+            }
+        }
     }
 
     /// Relay `:<sender-uuid> <rest>` to every link (MODE/TOPIC/KICK propagation).
