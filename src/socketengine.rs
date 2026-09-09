@@ -1224,7 +1224,10 @@ fn reader_loop(stream: TcpStream, uid: Uid, core: Sender<Event>, max_line: usize
     let mut line = String::new();
     loop {
         line.clear();
-        match buf.read_line(&mut line) {
+        // bound the read: a bare read_line is unbounded, so a peer streaming bytes
+        // with no newline would grow this String until OOM. Cap it at max_line+1;
+        // an overlong partial then trips the length check below and is dropped.
+        match buf.by_ref().take(max_line as u64 + 1).read_line(&mut line) {
             Ok(0) => break, // EOF
             Ok(_) => {
                 if line.len() > max_line {
