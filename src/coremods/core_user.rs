@@ -61,10 +61,7 @@ impl Command for Vhost {
             Some(h) => {
                 s.change_host_ident(uid, None, Some(&h));
                 let m = s.trf("Your vhost is now {0}", &[h.as_str()]);
-                s.send(
-                    uid,
-                    format!(":{} NOTICE {nick} :{m}", s.name),
-                );
+                s.send(uid, format!(":{} NOTICE {nick} :{m}", s.name));
             }
             None => {
                 s.send(
@@ -530,7 +527,11 @@ impl Command for Nick {
             return CmdResult::Fail;
         }
         // +N — can't change nick while on a no-nick-change channel (channels/ignore-nonicks bypasses)
-        if !crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::CHANNELS_IGNORE_NONICKS) {
+        if !crate::modules::opertypes::has_priv(
+            s,
+            uid,
+            crate::modules::opertypes::privs::CHANNELS_IGNORE_NONICKS,
+        ) {
             let blocked = s
                 .users
                 .get(&uid)

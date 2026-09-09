@@ -20,7 +20,8 @@ pub const HISTORY_CAP: usize = 256;
 
 /// The configured per-conversation history size (overridable via `chathistory_limit`).
 pub fn limit(s: &Server) -> usize {
-    s.conf_num("chathistory_limit", HISTORY_CAP).clamp(1, 100_000)
+    s.conf_num("chathistory_limit", HISTORY_CAP)
+        .clamp(1, 100_000)
 }
 
 /// One stored message, replayed by CHATHISTORY / the `+H` backlog.
@@ -362,7 +363,11 @@ impl Command for ChatHistory {
                     lines.push(match &m.raw {
                         // an event replays as its exact wire line + history tags
                         Some(raw) => {
-                            format!("@time={};msgid={};batch={bref} {raw}", iso_time(m.ts), m.msgid)
+                            format!(
+                                "@time={};msgid={};batch={bref} {raw}",
+                                iso_time(m.ts),
+                                m.msgid
+                            )
                         }
                         None => format!(
                             "@time={};msgid={};batch={bref} :{} {} {} :{}",
@@ -504,7 +509,10 @@ mod tests {
         {
             let h = s.ext.get_or_insert_with::<History>(History::default);
             h.0.insert("#fresh".into(), VecDeque::from([msg(n)]));
-            h.0.insert("#stale".into(), VecDeque::from([msg(n.saturating_sub(700_000))]));
+            h.0.insert(
+                "#stale".into(),
+                VecDeque::from([msg(n.saturating_sub(700_000))]),
+            );
         }
         ChatHistoryGc.on_tick(&mut s);
         let h = s.ext.get::<History>().unwrap();

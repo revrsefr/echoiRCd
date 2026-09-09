@@ -67,11 +67,11 @@ pub struct WsConfig {
     handshake_timeout: Duration,
     ping_interval: Duration,
     idle_timeout: Duration,
-    trust_proxy: bool,             // legacy: trust proxy headers from any peer
-    proxyranges: Vec<String>,      // glob/CIDR of proxies whose headers we trust
-    default_mode: DefaultMode,     // frame mode when no subprotocol is negotiated
-    allow_missing_origin: bool,    // accept clients that send no Origin header
-    native_ping: bool,             // ping via WebSocket frames (else rely on IRC PING)
+    trust_proxy: bool,          // legacy: trust proxy headers from any peer
+    proxyranges: Vec<String>,   // glob/CIDR of proxies whose headers we trust
+    default_mode: DefaultMode,  // frame mode when no subprotocol is negotiated
+    allow_missing_origin: bool, // accept clients that send no Origin header
+    native_ping: bool,          // ping via WebSocket frames (else rely on IRC PING)
 }
 
 /// A stream the WS session can drive — implemented for a plaintext `TcpStream`
@@ -146,7 +146,10 @@ pub fn maybe_start(
             .map(Duration::from_secs)
             .unwrap_or(Duration::from_secs(d))
     };
-    let default_mode = match get("ws_defaultmode").map(|s| s.to_ascii_lowercase()).as_deref() {
+    let default_mode = match get("ws_defaultmode")
+        .map(|s| s.to_ascii_lowercase())
+        .as_deref()
+    {
         Some("binary") => DefaultMode::Binary,
         Some("reject") => DefaultMode::Reject,
         _ => DefaultMode::Text,
@@ -164,7 +167,9 @@ pub fn maybe_start(
         allow_missing_origin: get("ws_allowmissingorigin")
             .map(crate::config::yesish)
             .unwrap_or(true),
-        native_ping: get("ws_nativeping").map(crate::config::yesish).unwrap_or(true),
+        native_ping: get("ws_nativeping")
+            .map(crate::config::yesish)
+            .unwrap_or(true),
     };
 
     if let Some(bind) = get("bind_ws") {
@@ -575,7 +580,11 @@ fn encode(opcode: u8, payload: &[u8]) -> Vec<u8> {
 /// Read and validate the HTTP Upgrade request, then write the 101 response. `peer`
 /// is the socket's remote IP, matched against `proxyranges` to decide whether the
 /// X-Real-IP / X-Forwarded-* headers may be trusted.
-fn do_handshake<S: WsStream>(stream: &mut S, cfg: &WsConfig, peer: IpAddr) -> io::Result<Handshake> {
+fn do_handshake<S: WsStream>(
+    stream: &mut S,
+    cfg: &WsConfig,
+    peer: IpAddr,
+) -> io::Result<Handshake> {
     // read headers (bounded)
     let mut buf = Vec::new();
     let mut chunk = [0u8; 2048];
@@ -796,7 +805,10 @@ mod tests {
                    Sec-WebSocket-Version: 13\r\nOrigin: https://orbit.devtronic.pro\r\n\
                    Sec-WebSocket-Protocol: text.ircv3.net\r\n\
                    X-Real-IP: 203.0.113.77\r\nX-Forwarded-Proto: https\r\n\r\n";
-        let mut s = MockStream { data: req.as_bytes().to_vec(), pos: 0 };
+        let mut s = MockStream {
+            data: req.as_bytes().to_vec(),
+            pos: 0,
+        };
         let cfg = WsConfig {
             origins: vec!["https://orbit.devtronic.pro".into()],
             handshake_timeout: Duration::from_secs(10),
@@ -814,6 +826,9 @@ mod tests {
             Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 77))),
             "trusted loopback proxy -> real client IP, not the proxy's loopback"
         );
-        assert!(hs.secure, "x-forwarded-proto https marks the session secure");
+        assert!(
+            hs.secure,
+            "x-forwarded-proto https marks the session secure"
+        );
     }
 }

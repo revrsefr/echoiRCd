@@ -67,19 +67,52 @@ pub struct OperType {
     pub privs: HashSet<String>,
     pub deny_commands: HashSet<String>, // `-CMD` removals even when all_commands
     pub deny_privs: HashSet<String>,    // `-priv` removals even when all_privs
-    pub usermodes: ModeAllow, // oper-only user modes this type may set
-    pub chanmodes: ModeAllow, // oper-only channel modes this type may set
+    pub usermodes: ModeAllow,           // oper-only user modes this type may set
+    pub chanmodes: ModeAllow,           // oper-only channel modes this type may set
 }
 
 /// Commands an oper type gates. Anything outside this set (OPERMOTD, MKPASSWD,
 /// ALLTIME, WHOIS, …) is open to every oper.
 const GATED: &[&str] = &[
-    "KILL", "KLINE", "GLINE", "ZLINE", "QLINE", "ELINE", "RLINE", "SHUN", "CBAN",
-    "CHECK", "NICKLOCK", "NICKUNLOCK", "SAJOIN", "SAPART", "SANICK", "SAKICK",
-    "SAMODE", "SATOPIC", "SAQUIT", "CLEARCHAN", "SVSNICK", "SVSJOIN", "SVSPART",
-    "SVSMODE", "SVSLOGIN", "SVSLOGOUT", "CHGHOST", "CHGIDENT", "CHGNAME", "SETHOST",
-    "SETIDENT", "SETIDLE", "SWHOIS", "WALLOPS", "GLOBOPS", "CONNECT", "SQUIT",
-    "DIE", "RESTART",
+    "KILL",
+    "KLINE",
+    "GLINE",
+    "ZLINE",
+    "QLINE",
+    "ELINE",
+    "RLINE",
+    "SHUN",
+    "CBAN",
+    "CHECK",
+    "NICKLOCK",
+    "NICKUNLOCK",
+    "SAJOIN",
+    "SAPART",
+    "SANICK",
+    "SAKICK",
+    "SAMODE",
+    "SATOPIC",
+    "SAQUIT",
+    "CLEARCHAN",
+    "SVSNICK",
+    "SVSJOIN",
+    "SVSPART",
+    "SVSMODE",
+    "SVSLOGIN",
+    "SVSLOGOUT",
+    "CHGHOST",
+    "CHGIDENT",
+    "CHGNAME",
+    "SETHOST",
+    "SETIDENT",
+    "SETIDLE",
+    "SWHOIS",
+    "WALLOPS",
+    "GLOBOPS",
+    "CONNECT",
+    "SQUIT",
+    "DIE",
+    "RESTART",
 ];
 
 fn gated(cmd: &str) -> bool {
@@ -92,7 +125,13 @@ impl Module for OperTypes {
     fn name(&self) -> &'static str {
         "opertypes"
     }
-    fn on_pre_command(&mut self, srv: &mut Server, uid: Uid, cmd: &str, _params: &[String]) -> ModResult {
+    fn on_pre_command(
+        &mut self,
+        srv: &mut Server,
+        uid: Uid,
+        cmd: &str,
+        _params: &[String],
+    ) -> ModResult {
         if !srv.is_oper(uid) || !gated(cmd) {
             return ModResult::Passthru;
         }
@@ -121,7 +160,12 @@ impl Module for OperTypes {
 /// emits it on its own 320 line.
 pub fn whois_line(s: &Server, uid: Uid) -> Option<String> {
     let t = s.users.get(&uid).and_then(|u| u.ext.get::<OperType>())?;
-    let article = if t.title.chars().next().is_some_and(|c| "aeiouAEIOU".contains(c)) {
+    let article = if t
+        .title
+        .chars()
+        .next()
+        .is_some_and(|c| "aeiouAEIOU".contains(c))
+    {
         "an"
     } else {
         "a"
@@ -217,7 +261,10 @@ pub fn apply(s: &mut Server, uid: Uid, type_id: Option<&str>) {
         return;
     };
     let Some(r) = with_resolved(s, |m| m.get(&id).cloned()) else {
-        let m = s.trf("oper type '{0}' is not defined — granting full access", &[id.as_str()]);
+        let m = s.trf(
+            "oper type '{0}' is not defined — granting full access",
+            &[id.as_str()],
+        );
         s.snotice_c('o', &m);
         return;
     };
@@ -252,7 +299,10 @@ pub fn apply(s: &mut Server, uid: Uid, type_id: Option<&str>) {
 }
 
 fn set_snomask(s: &mut Server, uid: Uid, letters: &str) {
-    let cats: String = letters.chars().filter(|c| DEFAULT_SNOMASK.contains(*c)).collect();
+    let cats: String = letters
+        .chars()
+        .filter(|c| DEFAULT_SNOMASK.contains(*c))
+        .collect();
     if let Some(u) = s.users.get_mut(&uid) {
         u.flags.snomask = !cats.is_empty();
         u.flags.snomask_cats = cats;
@@ -340,7 +390,16 @@ fn cdef(commands: &[&str], privs: &[&str], sno: &str) -> ClassDef {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn tdef(title: &str, classes: &[&str], all_classes: bool, modes: &str, sno: &str, all_sno: bool, level: u32, color: Option<u8>) -> TypeDef {
+fn tdef(
+    title: &str,
+    classes: &[&str],
+    all_classes: bool,
+    modes: &str,
+    sno: &str,
+    all_sno: bool,
+    level: u32,
+    color: Option<u8>,
+) -> TypeDef {
     TypeDef {
         title: title.to_string(),
         all_classes,
@@ -358,24 +417,163 @@ fn tdef(title: &str, classes: &[&str], all_classes: bool, modes: &str, sno: &str
 fn builtin() -> (HashMap<String, ClassDef>, HashMap<String, TypeDef>) {
     let mut classes: HashMap<String, ClassDef> = HashMap::default();
     classes.insert("announce".into(), cdef(&["WALLOPS", "GLOBOPS"], &[], "ag"));
-    classes.insert("ban".into(), cdef(&["KILL", "KLINE", "GLINE", "ZLINE", "QLINE", "ELINE", "RLINE", "SHUN", "CBAN", "CHECK", "NICKLOCK", "NICKUNLOCK"], &[], "kx"));
-    classes.insert("override".into(), cdef(&["SAJOIN", "SAPART", "SANICK", "SAKICK", "SAMODE", "SATOPIC", "SAQUIT", "CLEARCHAN"], &["channels/override", "users/flood", "channels/restricted-create", "channels/ignore-nonicks", "users/ignore-restrictmsg", "servers/ignore-securelist", "servers/ignore-blockamsg"], "v"));
-    classes.insert("host".into(), cdef(&["CHGHOST", "CHGIDENT", "CHGNAME", "SETHOST", "SETIDENT", "SETIDLE", "SWHOIS"], &[], ""));
-    classes.insert("services".into(), cdef(&["SVSNICK", "SVSJOIN", "SVSPART", "SVSMODE", "SVSLOGIN", "SVSLOGOUT"], &[], ""));
-    classes.insert("server".into(), cdef(&["CONNECT", "SQUIT", "DIE", "RESTART"], &["servers/use-disabled-commands"], "lr"));
+    classes.insert(
+        "ban".into(),
+        cdef(
+            &[
+                "KILL",
+                "KLINE",
+                "GLINE",
+                "ZLINE",
+                "QLINE",
+                "ELINE",
+                "RLINE",
+                "SHUN",
+                "CBAN",
+                "CHECK",
+                "NICKLOCK",
+                "NICKUNLOCK",
+            ],
+            &[],
+            "kx",
+        ),
+    );
+    classes.insert(
+        "override".into(),
+        cdef(
+            &[
+                "SAJOIN",
+                "SAPART",
+                "SANICK",
+                "SAKICK",
+                "SAMODE",
+                "SATOPIC",
+                "SAQUIT",
+                "CLEARCHAN",
+            ],
+            &[
+                "channels/override",
+                "users/flood",
+                "channels/restricted-create",
+                "channels/ignore-nonicks",
+                "users/ignore-restrictmsg",
+                "servers/ignore-securelist",
+                "servers/ignore-blockamsg",
+            ],
+            "v",
+        ),
+    );
+    classes.insert(
+        "host".into(),
+        cdef(
+            &[
+                "CHGHOST", "CHGIDENT", "CHGNAME", "SETHOST", "SETIDENT", "SETIDLE", "SWHOIS",
+            ],
+            &[],
+            "",
+        ),
+    );
+    classes.insert(
+        "services".into(),
+        cdef(
+            &[
+                "SVSNICK",
+                "SVSJOIN",
+                "SVSPART",
+                "SVSMODE",
+                "SVSLOGIN",
+                "SVSLOGOUT",
+            ],
+            &[],
+            "",
+        ),
+    );
+    classes.insert(
+        "server".into(),
+        cdef(
+            &["CONNECT", "SQUIT", "DIE", "RESTART"],
+            &["servers/use-disabled-commands"],
+            "lr",
+        ),
+    );
     // auspex: see through user/channel privacy (real host+IP, geo, secret channels)
-    classes.insert("auspex".into(), cdef(&[], &["users/auspex", "channels/auspex", "servers/auspex", "users/secret-whois", "users/ignore-callerid", "users/ignore-privdeaf"], ""));
+    classes.insert(
+        "auspex".into(),
+        cdef(
+            &[],
+            &[
+                "users/auspex",
+                "channels/auspex",
+                "servers/auspex",
+                "users/secret-whois",
+                "users/ignore-callerid",
+                "users/ignore-privdeaf",
+            ],
+            "",
+        ),
+    );
 
     let mut types: HashMap<String, TypeDef> = HashMap::default();
     // The WHOIS title line is bold + colour 4 (red) by default; override per type
     // with `color=<name|0-15|none>`.
     let red = Some(4);
     //                     title                       classes                                           all    modes   sno      all*   level color
-    types.insert("helpop".into(), tdef("Help Operator", &[], false, "+ih", "o", false, 10, red));
-    types.insert("globop".into(), tdef("GlobOp", &["announce"], false, "+iw", "acgoq", false, 20, red));
-    types.insert("admin".into(), tdef("Administrator", &["announce", "ban", "override", "host"], false, "+iw", "", true, 50, red));
-    types.insert("servadmin".into(), tdef("Services Administrator", &["announce", "ban", "override", "host", "services"], false, "+iw", "", true, 70, red));
-    types.insert("netadmin".into(), tdef("Network Administrator", &[], true, "+iw", "", true, 100, red));
+    types.insert(
+        "helpop".into(),
+        tdef("Help Operator", &[], false, "+ih", "o", false, 10, red),
+    );
+    types.insert(
+        "globop".into(),
+        tdef(
+            "GlobOp",
+            &["announce"],
+            false,
+            "+iw",
+            "acgoq",
+            false,
+            20,
+            red,
+        ),
+    );
+    types.insert(
+        "admin".into(),
+        tdef(
+            "Administrator",
+            &["announce", "ban", "override", "host"],
+            false,
+            "+iw",
+            "",
+            true,
+            50,
+            red,
+        ),
+    );
+    types.insert(
+        "servadmin".into(),
+        tdef(
+            "Services Administrator",
+            &["announce", "ban", "override", "host", "services"],
+            false,
+            "+iw",
+            "",
+            true,
+            70,
+            red,
+        ),
+    );
+    types.insert(
+        "netadmin".into(),
+        tdef(
+            "Network Administrator",
+            &[],
+            true,
+            "+iw",
+            "",
+            true,
+            100,
+            red,
+        ),
+    );
     (classes, types)
 }
 
@@ -406,7 +604,10 @@ fn build_types(s: &Server) -> HashMap<String, Resolved> {
         }
         types.insert(id.to_string(), td);
     }
-    types.iter().map(|(id, td)| (id.clone(), resolve(td, &classes))).collect()
+    types
+        .iter()
+        .map(|(id, td)| (id.clone(), resolve(td, &classes)))
+        .collect()
 }
 
 /// Fold a comma list of command/priv tokens: `*` sets `all`, `-X` denies X, a bare
@@ -431,12 +632,20 @@ fn fold_tokens(
 
 fn apply_class_kv(cd: &mut ClassDef, k: &str, v: &str) {
     match k {
-        "commands" | "cmds" => {
-            fold_tokens(v, &mut cd.all_commands, &mut cd.commands, &mut cd.deny_commands, str::to_ascii_uppercase)
-        }
-        "privs" => {
-            fold_tokens(v, &mut cd.all_privs, &mut cd.privs, &mut cd.deny_privs, str::to_ascii_lowercase)
-        }
+        "commands" | "cmds" => fold_tokens(
+            v,
+            &mut cd.all_commands,
+            &mut cd.commands,
+            &mut cd.deny_commands,
+            str::to_ascii_uppercase,
+        ),
+        "privs" => fold_tokens(
+            v,
+            &mut cd.all_privs,
+            &mut cd.privs,
+            &mut cd.deny_privs,
+            str::to_ascii_lowercase,
+        ),
         "snomasks" | "snomask" => {
             if v.contains('*') {
                 cd.all_snomasks = true;
@@ -456,15 +665,27 @@ fn apply_type_kv(td: &mut TypeDef, k: &str, v: &str) {
             if v == "*" {
                 td.all_classes = true;
             } else {
-                td.classes.extend(v.split(',').filter(|x| !x.is_empty()).map(|x| x.to_string()));
+                td.classes.extend(
+                    v.split(',')
+                        .filter(|x| !x.is_empty())
+                        .map(|x| x.to_string()),
+                );
             }
         }
-        "commands" | "cmds" => {
-            fold_tokens(v, &mut td.all_commands, &mut td.commands, &mut td.deny_commands, str::to_ascii_uppercase)
-        }
-        "privs" => {
-            fold_tokens(v, &mut td.all_privs, &mut td.privs, &mut td.deny_privs, str::to_ascii_lowercase)
-        }
+        "commands" | "cmds" => fold_tokens(
+            v,
+            &mut td.all_commands,
+            &mut td.commands,
+            &mut td.deny_commands,
+            str::to_ascii_uppercase,
+        ),
+        "privs" => fold_tokens(
+            v,
+            &mut td.all_privs,
+            &mut td.privs,
+            &mut td.deny_privs,
+            str::to_ascii_lowercase,
+        ),
         "modes" => td.modes = v.to_string(),
         "usermodes" => td.usermodes = Some(parse_modeallow(v)),
         "chanmodes" => td.chanmodes = Some(parse_modeallow(v)),
@@ -595,10 +816,17 @@ mod tests {
         assert!(!globop.commands.contains("KILL"), "globop can't KILL");
 
         let admin = resolved("admin");
-        assert!(admin.commands.contains("KILL") && admin.commands.contains("SAJOIN") && admin.commands.contains("CHGHOST"));
+        assert!(
+            admin.commands.contains("KILL")
+                && admin.commands.contains("SAJOIN")
+                && admin.commands.contains("CHGHOST")
+        );
         assert!(admin.privs.contains("channels/override") && admin.privs.contains("users/flood"));
         assert!(!admin.commands.contains("DIE"), "admin can't DIE");
-        assert!(!admin.commands.contains("SVSNICK"), "admin isn't a services admin");
+        assert!(
+            !admin.commands.contains("SVSNICK"),
+            "admin isn't a services admin"
+        );
         assert!(admin.all_snomasks);
 
         let servadmin = resolved("servadmin");
@@ -623,8 +851,14 @@ mod tests {
         // no lower built-in type sees through privacy until granted the auspex class
         for id in ["helpop", "globop", "admin", "servadmin"] {
             let r = resolved(id);
-            assert!(!has(&r, "users/auspex"), "{id} must not hold users/auspex by default");
-            assert!(!has(&r, "channels/auspex"), "{id} must not hold channels/auspex by default");
+            assert!(
+                !has(&r, "users/auspex"),
+                "{id} must not hold users/auspex by default"
+            );
+            assert!(
+                !has(&r, "channels/auspex"),
+                "{id} must not hold channels/auspex by default"
+            );
         }
 
         // the auspex class exists so an admin can opt a type in
@@ -642,15 +876,24 @@ mod tests {
         // built-ins never restrict modes → every oper-only letter is allowed
         for id in ["helpop", "globop", "admin", "servadmin", "netadmin"] {
             let r = resolved(id);
-            assert!(r.usermodes.allows('H') && r.chanmodes.allows('O'), "{id} unrestricted");
+            assert!(
+                r.usermodes.allows('H') && r.chanmodes.allows('O'),
+                "{id} unrestricted"
+            );
         }
         // an explicit list restricts to those letters; the unset axis stays permissive
         let mut td = TypeDef::default();
         apply_type_kv(&mut td, "usermodes", "iw");
         let r = resolve(&td, &no_classes);
         assert!(r.usermodes.allows('i') && r.usermodes.allows('w'));
-        assert!(!r.usermodes.allows('H'), "H is not in the usermodes allowlist");
-        assert!(r.chanmodes.allows('O'), "unspecified chanmodes stay permissive");
+        assert!(
+            !r.usermodes.allows('H'),
+            "H is not in the usermodes allowlist"
+        );
+        assert!(
+            r.chanmodes.allows('O'),
+            "unspecified chanmodes stay permissive"
+        );
         // "*" grants all
         let mut td2 = TypeDef::default();
         apply_type_kv(&mut td2, "usermodes", "*");
@@ -671,16 +914,24 @@ mod tests {
         let mut td2 = TypeDef::default();
         apply_type_kv(&mut td2, "commands", "KILL,-GLINE");
         let r2 = resolve(&td2, &no_classes);
-        assert!(!r2.all_commands && r2.commands.contains("KILL") && r2.deny_commands.contains("GLINE"));
+        assert!(
+            !r2.all_commands && r2.commands.contains("KILL") && r2.deny_commands.contains("GLINE")
+        );
     }
 
     #[test]
     fn builtin_classes_grant_the_new_privileges() {
         let (classes, _) = builtin();
         let has = |c: &str, p: &str| classes.get(c).unwrap().privs.contains(&p.to_string());
-        assert!(has("override", "channels/restricted-create") && has("override", "channels/ignore-nonicks"));
+        assert!(
+            has("override", "channels/restricted-create")
+                && has("override", "channels/ignore-nonicks")
+        );
         assert!(has("override", "users/ignore-restrictmsg"));
-        assert!(has("override", "servers/ignore-securelist") && has("override", "servers/ignore-blockamsg"));
+        assert!(
+            has("override", "servers/ignore-securelist")
+                && has("override", "servers/ignore-blockamsg")
+        );
         assert!(has("auspex", "users/secret-whois") && has("auspex", "users/ignore-callerid"));
         assert!(has("auspex", "users/ignore-privdeaf"));
         assert!(has("server", "servers/use-disabled-commands"));
@@ -700,7 +951,9 @@ mod tests {
         let mut cd = ClassDef::default();
         apply_class_kv(&mut cd, "commands", "kill,gline");
         apply_class_kv(&mut cd, "snomasks", "kx");
-        assert!(cd.commands.contains(&"KILL".to_string()) && cd.commands.contains(&"GLINE".to_string()));
+        assert!(
+            cd.commands.contains(&"KILL".to_string()) && cd.commands.contains(&"GLINE".to_string())
+        );
         assert_eq!(cd.snomasks, "kx");
 
         let mut td = TypeDef::default();

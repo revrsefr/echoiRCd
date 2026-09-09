@@ -151,7 +151,8 @@ fn build_acceptor(primary: &CertPaths, sni: &[(String, CertPaths)]) -> io::Resul
         b.set_servername_callback(move |ssl, _alert| {
             if let Some(name) = ssl.servername(NameType::HOST_NAME) {
                 if let Some(ctx) = map.get(&name.to_ascii_lowercase()) {
-                    ssl.set_ssl_context(ctx).map_err(|_| SniError::ALERT_FATAL)?;
+                    ssl.set_ssl_context(ctx)
+                        .map_err(|_| SniError::ALERT_FATAL)?;
                 }
             }
             Ok(())
@@ -163,7 +164,11 @@ fn build_acceptor(primary: &CertPaths, sni: &[(String, CertPaths)]) -> io::Resul
 impl OpensslBackend {
     /// Build an acceptor from a PEM certificate chain + private key, with optional
     /// per-hostname SNI certs `(hostname, cert, key)`.
-    pub fn new(cert: &str, key: &str, sni: Vec<(String, String, String)>) -> io::Result<OpensslBackend> {
+    pub fn new(
+        cert: &str,
+        key: &str,
+        sni: Vec<(String, String, String)>,
+    ) -> io::Result<OpensslBackend> {
         let primary = CertPaths {
             cert: cert.to_string(),
             key: key.to_string(),
@@ -267,7 +272,10 @@ impl TlsSession for OpensslSession {
         openssl_tls_info(self.0.ssl())
     }
     fn sni(&self) -> Option<String> {
-        self.0.ssl().servername(NameType::HOST_NAME).map(String::from)
+        self.0
+            .ssl()
+            .servername(NameType::HOST_NAME)
+            .map(String::from)
     }
     fn shutdown(&mut self) {
         // best-effort TLS close_notify, then close the socket. Non-blocking, so a
@@ -304,6 +312,9 @@ impl TlsConn for OpensslConn {
         openssl_tls_info(self.0.ssl())
     }
     fn sni(&self) -> Option<String> {
-        self.0.ssl().servername(NameType::HOST_NAME).map(String::from)
+        self.0
+            .ssl()
+            .servername(NameType::HOST_NAME)
+            .map(String::from)
     }
 }

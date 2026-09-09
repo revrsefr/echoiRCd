@@ -123,11 +123,16 @@ pub fn load(s: &mut Server) {
                 load_text(s); // migrate the legacy blob/file …
                 save(s); // … and seed the table
             } else {
-                let store = s.ext.get_or_insert_with::<ReadMarkers>(ReadMarkers::default);
+                let store = s
+                    .ext
+                    .get_or_insert_with::<ReadMarkers>(ReadMarkers::default);
                 for r in &rows {
                     let id = r.first().and_then(|v| v.as_deref());
                     let t = r.get(1).and_then(|v| v.as_deref());
-                    let ts = r.get(2).and_then(|v| v.as_deref()).and_then(|v| v.parse().ok());
+                    let ts = r
+                        .get(2)
+                        .and_then(|v| v.as_deref())
+                        .and_then(|v| v.parse().ok());
                     if let (Some(id), Some(t), Some(ts)) = (id, t, ts) {
                         store
                             .0

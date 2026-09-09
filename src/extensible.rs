@@ -3,8 +3,8 @@
 //! it hangs off, so it's dropped automatically when that object is — no registry,
 //! no manual free, no dangling data.
 
-use std::any::{Any, TypeId};
 use crate::map::HashMap;
+use std::any::{Any, TypeId};
 
 #[derive(Default)]
 pub struct Extensible {

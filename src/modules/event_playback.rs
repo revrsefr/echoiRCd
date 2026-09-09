@@ -9,8 +9,8 @@
 //! KICK have no hook, so they call `record_event` directly from their command paths.
 //! The whole feature is gated by `event_playback` (default on) inside `record_event`.
 
-use crate::modules::chathistory::record_event;
 use crate::module::Module;
+use crate::modules::chathistory::record_event;
 use crate::server::Server;
 use crate::Uid;
 

@@ -23,12 +23,19 @@ pub fn maybe_show(s: &mut Server, uid: Uid, cmd: &str) -> bool {
     let Some(path) = path else {
         return false;
     };
-    let nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
+    let nick = s
+        .users
+        .get(&uid)
+        .map(|u| u.nick.clone())
+        .unwrap_or_default();
     // cap the blocking read so a huge (mis)configured file can't stall the core loop
     let body = std::fs::File::open(&path).ok().and_then(|f| {
         use std::io::Read;
         let mut buf = String::new();
-        f.take(256 * 1024).read_to_string(&mut buf).ok().map(|_| buf)
+        f.take(256 * 1024)
+            .read_to_string(&mut buf)
+            .ok()
+            .map(|_| buf)
     });
     match body {
         Some(body) => {

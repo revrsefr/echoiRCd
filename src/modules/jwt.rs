@@ -137,8 +137,14 @@ mod tests {
         assert_eq!(claim_num(c, "iat"), Some(1729998200));
         assert_eq!(claim_num(c, "nope"), None);
         // a nested object's key must not be read as the top-level claim
-        assert_eq!(claim_num(r#"{"data":{"exp":999},"exp":42}"#, "exp"), Some(42));
+        assert_eq!(
+            claim_num(r#"{"data":{"exp":999},"exp":42}"#, "exp"),
+            Some(42)
+        );
         // a string value containing `"exp":` must not spoof it
-        assert_eq!(claim_num("{\"note\":\"\\\"exp\\\":13\",\"exp\":7}", "exp"), Some(7));
+        assert_eq!(
+            claim_num("{\"note\":\"\\\"exp\\\":13\",\"exp\":7}", "exp"),
+            Some(7)
+        );
     }
 }

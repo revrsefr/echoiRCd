@@ -84,7 +84,11 @@ impl Command for Prop {
         let target = params[0].clone();
         let key = target.to_ascii_lowercase();
         if !target.starts_with('#') || !s.channels.contains_key(&key) {
-            s.numeric(uid, ERR_NOSUCHCHANNEL, &format!("{target} :No such channel"));
+            s.numeric(
+                uid,
+                ERR_NOSUCHCHANNEL,
+                &format!("{target} :No such channel"),
+            );
             return CmdResult::Fail;
         }
         // no changes → list the modes currently set, by name

@@ -17,7 +17,9 @@ pub struct HelpBook {
 impl HelpBook {
     /// Body lines for a topic (case-insensitive), or `None` if unknown.
     pub fn get(&self, topic: &str) -> Option<&[String]> {
-        self.topics.get(&topic.to_ascii_uppercase()).map(Vec::as_slice)
+        self.topics
+            .get(&topic.to_ascii_uppercase())
+            .map(Vec::as_slice)
     }
 
     /// Embedded English → disk `<dir>/en.conf` → disk `<dir>/<locale>.conf`, each
@@ -51,7 +53,9 @@ fn overlay(
             }
         }
         Err(e) if warn_missing => {
-            warnings.push(format!("help {code}: cannot read {path}: {e} (using English)"));
+            warnings.push(format!(
+                "help {code}: cannot read {path}: {e} (using English)"
+            ));
         }
         Err(_) => {}
     }
@@ -91,7 +95,10 @@ mod tests {
         let (book, warn) = HelpBook::load("help", "en");
         assert!(warn.is_empty(), "unexpected warnings: {warn:?}");
         for t in ["INDEX", "CHANNELS", "CHMODES", "SERVICES", "OPER"] {
-            assert!(book.get(t).is_some_and(|l| !l.is_empty()), "missing topic {t}");
+            assert!(
+                book.get(t).is_some_and(|l| !l.is_empty()),
+                "missing topic {t}"
+            );
         }
         // case-insensitive lookup
         assert_eq!(book.get("chmodes").is_some(), true);

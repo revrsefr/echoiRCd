@@ -120,28 +120,28 @@ impl Default for AntiMixedCfg {
 pub struct Config {
     pub servername: String,
     pub network: String,
-    pub bind: Vec<String>,      // plaintext client listeners (repeatable; e.g. [::]:6667)
-    pub bind_tls: Vec<String>,  // TLS client listeners (repeatable; e.g. [::]:6697)
+    pub bind: Vec<String>, // plaintext client listeners (repeatable; e.g. [::]:6667)
+    pub bind_tls: Vec<String>, // TLS client listeners (repeatable; e.g. [::]:6697)
     pub tls_cert: Option<String>, // PEM certificate chain
-    pub tls_key: Option<String>,  // PEM private key
+    pub tls_key: Option<String>, // PEM private key
     pub motd: Vec<String>,
-    pub opers: Vec<OperBlock>,                 // oper logins (see OperBlock)
-    pub brands: Vec<BrandBlock>,               // per-SNI server/network branding
-    pub cloak_key: Option<String>,             // secret key for host cloaking (+x); None = off
-    pub sid: String,                           // this server's 3-char server id (S2S)
-    pub serverdesc: String,                    // this server's description
-    pub bind_server: Vec<String>,              // server-to-server link listeners (repeatable)
-    pub links: Vec<LinkBlock>,                 // peers we accept / dial
-    pub conf_path: String,                     // where this was loaded from (for REHASH)
-    pub censor: Vec<CensorRule>,       // +G bad words (empty replace = block)
-    pub amu: AntiMixedCfg,             // antimixedutf8 module config
-    pub resolve_hosts: bool,           // reverse-DNS clients on connect (default on)
-    pub use_resolved_host: bool,       // put the resolved hostname in the hostmask (default on)
+    pub opers: Vec<OperBlock>,     // oper logins (see OperBlock)
+    pub brands: Vec<BrandBlock>,   // per-SNI server/network branding
+    pub cloak_key: Option<String>, // secret key for host cloaking (+x); None = off
+    pub sid: String,               // this server's 3-char server id (S2S)
+    pub serverdesc: String,        // this server's description
+    pub bind_server: Vec<String>,  // server-to-server link listeners (repeatable)
+    pub links: Vec<LinkBlock>,     // peers we accept / dial
+    pub conf_path: String,         // where this was loaded from (for REHASH)
+    pub censor: Vec<CensorRule>,   // +G bad words (empty replace = block)
+    pub amu: AntiMixedCfg,         // antimixedutf8 module config
+    pub resolve_hosts: bool,       // reverse-DNS clients on connect (default on)
+    pub use_resolved_host: bool,   // put the resolved hostname in the hostmask (default on)
     pub dnsbl_zones: Vec<crate::modules::dnsbl::DnsblZone>, // DNS blocklists to check on connect
-    pub dnsbl_action: String,          // mark | kline | gline | zline (on a hit)
-    pub dnsbl_reason: String,          // ban reason for a DNSBL hit
-    pub sasl_server: String,           // linked services server that handles SASL ("" = none)
-    pub webirc: Vec<WebircGateway>,            // trusted web gateways
+    pub dnsbl_action: String,      // mark | kline | gline | zline (on a hit)
+    pub dnsbl_reason: String,      // ban reason for a DNSBL hit
+    pub sasl_server: String,       // linked services server that handles SASL ("" = none)
+    pub webirc: Vec<WebircGateway>, // trusted web gateways
     /// Every `key = value` line, captured raw so modules read their own settings
     /// via `Server::conf*` — no per-module field bloats this struct or `Server`.
     pub raw: HashMap<String, Vec<String>>,
@@ -317,8 +317,9 @@ impl Config {
                         for tok in it {
                             if let Some(pw) = tok.strip_prefix("password=") {
                                 b.password = pw.to_string();
-                            } else if let Some(fp) =
-                                tok.strip_prefix("fp=").or_else(|| tok.strip_prefix("certfp="))
+                            } else if let Some(fp) = tok
+                                .strip_prefix("fp=")
+                                .or_else(|| tok.strip_prefix("certfp="))
                             {
                                 b.fingerprint = Some(fp.to_ascii_lowercase());
                             } else if let Some(t) = tok.strip_prefix("type=") {
@@ -340,7 +341,10 @@ impl Config {
                     let mut it = v.splitn(2, char::is_whitespace);
                     if let Some(find) = it.next().filter(|f| !f.is_empty()) {
                         let replace = it.next().unwrap_or("").trim().to_string();
-                        c.censor.push(CensorRule { find: find.to_string(), replace });
+                        c.censor.push(CensorRule {
+                            find: find.to_string(),
+                            replace,
+                        });
                     }
                 }
                 "antimixedutf8" | "amu" => {
@@ -900,12 +904,18 @@ mod tests {
             link { name "svc.example.org"; ip 127.0.0.1; port 7700; password "p"; services yes; }
         "#);
         assert_eq!(c.cloak_key.as_deref(), Some("s3cret"));
-        assert_eq!(c.raw.get("cloak_method").map(|v| v[0].as_str()), Some("sha256"));
+        assert_eq!(
+            c.raw.get("cloak_method").map(|v| v[0].as_str()),
+            Some("sha256")
+        );
         assert_eq!(
             c.raw.get("cloak_static_host").map(|v| v[0].as_str()),
             Some("user.example.org")
         );
-        assert_eq!(c.raw.get("uline").map(|v| v[0].as_str()), Some("svc.example.org"));
+        assert_eq!(
+            c.raw.get("uline").map(|v| v[0].as_str()),
+            Some("svc.example.org")
+        );
     }
 
     #[test]

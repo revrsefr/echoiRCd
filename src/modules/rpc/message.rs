@@ -13,7 +13,8 @@ pub fn handle(s: &mut Server, action: &str, params: &str) -> Result<String, RpcE
             let text = json::get_str(params, "message")
                 .ok_or_else(|| RpcError::invalid_params("missing 'message'"))?;
             // strip CR/LF so a crafted message/target can't inject extra IRC lines
-            let strip = |v: String| -> String { v.chars().filter(|c| *c != '\r' && *c != '\n').collect() };
+            let strip =
+                |v: String| -> String { v.chars().filter(|c| *c != '\r' && *c != '\n').collect() };
             let (target, text) = (strip(target), strip(text));
             let src = s.name.clone();
             if target == "*" || target == "$*" {

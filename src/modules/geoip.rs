@@ -171,8 +171,8 @@ impl<'a> Decoder<'a> {
                 }
                 cur - off
             }
-            14 => header,          // bool: value is in the size field, no payload
-            _ => header + size,    // string/bytes/ints/float/double
+            14 => header,       // bool: value is in the size field, no payload
+            _ => header + size, // string/bytes/ints/float/double
         }
     }
 
@@ -232,7 +232,10 @@ impl Mmdb {
         let data = std::fs::read(path).ok()?;
         let marker = data.windows(MARKER.len()).rposition(|w| w == MARKER)?;
         let meta = marker + MARKER.len();
-        let d = Decoder { data: &data, base: meta };
+        let d = Decoder {
+            data: &data,
+            base: meta,
+        };
         let node_count = d.uint(d.map_get(meta, "node_count")?)? as usize;
         let record_size = d.uint(d.map_get(meta, "record_size")?)? as u32;
         let ip_version = d.uint(d.map_get(meta, "ip_version")?)? as u16;
@@ -262,7 +265,10 @@ impl Mmdb {
             28 => {
                 let mid = *self.data.get(base + 3)?;
                 if bit {
-                    Some(((mid as usize & 0x0f) << 24) | be(self.data.get(base + 4..base + 7)?) as usize)
+                    Some(
+                        ((mid as usize & 0x0f) << 24)
+                            | be(self.data.get(base + 4..base + 7)?) as usize,
+                    )
                 } else {
                     Some(((mid as usize >> 4) << 24) | be(self.data.get(base..base + 3)?) as usize)
                 }
@@ -317,7 +323,10 @@ impl Mmdb {
     }
 
     fn decoder(&self) -> Decoder<'_> {
-        Decoder { data: &self.data, base: self.data_start }
+        Decoder {
+            data: &self.data,
+            base: self.data_start,
+        }
     }
 
     /// The country for `ip` — ISO code plus English name — if the database has one.
@@ -353,7 +362,11 @@ impl Mmdb {
             .and_then(|city| d.map_get(city, "names"))
             .and_then(|names| d.map_get(names, "en"))
             .and_then(|en| d.string(en));
-        Some(Geo { country_iso: iso, country_name: name, city })
+        Some(Geo {
+            country_iso: iso,
+            country_name: name,
+            city,
+        })
     }
 
     /// The autonomous system (number + organisation) for `ip`, from a GeoLite2-ASN
@@ -361,12 +374,17 @@ impl Mmdb {
     pub fn asn(&self, ip: IpAddr) -> Option<Asn> {
         let abs = self.find(ip)?;
         let d = self.decoder();
-        let number = d.map_get(abs, "autonomous_system_number").and_then(|o| d.uint(o))?;
+        let number = d
+            .map_get(abs, "autonomous_system_number")
+            .and_then(|o| d.uint(o))?;
         let org = d
             .map_get(abs, "autonomous_system_organization")
             .and_then(|o| d.string(o))
             .unwrap_or_default();
-        Some(Asn { number: number as u32, org })
+        Some(Asn {
+            number: number as u32,
+            org,
+        })
     }
 }
 
@@ -395,10 +413,13 @@ pub fn init(s: &mut Server) {
 
 /// The country of `ip` per the loaded database (ISO code uppercased).
 pub fn lookup(s: &Server, ip: IpAddr) -> Option<Country> {
-    s.ext.get::<GeoDb>().and_then(|db| db.0.country(ip)).map(|c| Country {
-        iso: c.iso.to_ascii_uppercase(),
-        name: c.name,
-    })
+    s.ext
+        .get::<GeoDb>()
+        .and_then(|db| db.0.country(ip))
+        .map(|c| Country {
+            iso: c.iso.to_ascii_uppercase(),
+            name: c.name,
+        })
 }
 
 /// The ASN of `ip` from the ASN database, if one is loaded and has a record for it.
@@ -498,7 +519,11 @@ impl Command for GeoIpCmd {
             .and_then(|t| s.users.get(&t))
             .map(|u| u.addr.ip())
             .or_else(|| target.parse::<IpAddr>().ok());
-        let nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
+        let nick = s
+            .users
+            .get(&uid)
+            .map(|u| u.nick.clone())
+            .unwrap_or_default();
         let msg = match ip {
             None => format!("GEOIP: no such nick, and {target} is not an IP"),
             Some(ip) => match describe(s, ip) {
@@ -543,7 +568,9 @@ mod tests {
         assert!(db.country(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).is_none());
         // IPv6 traversal (Google public DNS) also resolves to US.
         assert_eq!(
-            db.country("2001:4860:4860::8888".parse().unwrap()).unwrap().iso,
+            db.country("2001:4860:4860::8888".parse().unwrap())
+                .unwrap()
+                .iso,
             "US"
         );
     }
@@ -563,7 +590,10 @@ mod tests {
             .iter()
             .filter_map(|s| db.geo(s.parse().ok()?))
             .any(|g| g.city.is_some());
-        assert!(with_city, "City db should yield a city name for at least one known IP");
+        assert!(
+            with_city,
+            "City db should yield a city name for at least one known IP"
+        );
     }
 
     #[test]
@@ -574,7 +604,11 @@ mod tests {
         let Some(db) = Mmdb::open(&p) else { return };
         let a = db.asn(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))).unwrap();
         assert_eq!(a.number, 15169); // Google LLC
-        assert!(a.org.to_lowercase().contains("google"), "org was {:?}", a.org);
+        assert!(
+            a.org.to_lowercase().contains("google"),
+            "org was {:?}",
+            a.org
+        );
         assert!(db.asn(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).is_none());
     }
 }

@@ -30,7 +30,9 @@ impl Module for AutoOp {
                 let Some((pfx, mask)) = e.mask.split_once(':') else {
                     continue;
                 };
-                let Some(m) = pfx.chars().next() else { continue };
+                let Some(m) = pfx.chars().next() else {
+                    continue;
+                };
                 if "qaohv".contains(m) && !modes.contains(m) && glob_match(mask, &who) {
                     modes.push(m);
                 }

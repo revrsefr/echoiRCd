@@ -39,7 +39,11 @@ fn rand_name(len: usize) -> String {
 
 /// Is `uid` exempt from the LIST hold?
 fn is_exempt(s: &Server, uid: Uid) -> bool {
-    if crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::SERVERS_IGNORE_SECURELIST) {
+    if crate::modules::opertypes::has_priv(
+        s,
+        uid,
+        crate::modules::opertypes::privs::SERVERS_IGNORE_SECURELIST,
+    ) {
         return true;
     }
     if s.conf_bool("securelist_exemptregistered", true) && s.is_logged_in(uid) {

@@ -5,8 +5,8 @@
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::mpsc::SyncSender;
 use std::sync::mpsc::channel;
+use std::sync::mpsc::SyncSender;
 use std::time::Duration;
 
 use crate::ircd::Event;

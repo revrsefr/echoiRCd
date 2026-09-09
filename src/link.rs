@@ -402,9 +402,8 @@ impl Server {
     /// `ping_frequency + ping_timeout` — a hung peer whose TCP is up but which stopped
     /// talking. Returned for reaping so a stuck link can't hold resources forever.
     pub fn dead_links(&self, now: u64) -> Vec<Uid> {
-        let deadline =
-            (self.conf_num("ping_frequency", 120usize) + self.conf_num("ping_timeout", 30usize))
-                as u64;
+        let deadline = (self.conf_num("ping_frequency", 120usize)
+            + self.conf_num("ping_timeout", 30usize)) as u64;
         self.links
             .iter()
             .filter(|(_, l)| now.saturating_sub(l.last_seen) > deadline)
@@ -1497,7 +1496,8 @@ impl Server {
                     .get(&uuid)
                     .map(|r| (r.ident.clone(), r.ip.clone(), r.sid.clone()))
                     .unwrap_or_default();
-                if self.resolve_remote_collision(via, &existing, remote_ts, &ruser, &rip, &uuid, &rsid)
+                if self
+                    .resolve_remote_collision(via, &existing, remote_ts, &ruser, &rip, &uuid, &rsid)
                 {
                     return; // the changer lost; a SAVE will move it to its UUID
                 }
@@ -2320,13 +2320,12 @@ impl Server {
                         pi += 1;
                     }
                 }
-                'l'
-                    if sign == '+' => {
-                        if let Some(p) = params.get(pi) {
-                            out.push(p.clone());
-                            pi += 1;
-                        }
+                'l' if sign == '+' => {
+                    if let Some(p) = params.get(pi) {
+                        out.push(p.clone());
+                        pi += 1;
                     }
+                }
                 _ => {}
             }
         }
@@ -3138,7 +3137,10 @@ mod tests {
             s.resolve_remote_collision(1, "1AAAAAAAA", 200, "u", "9.9.9.9", "2BBAAAAAA", "2BB"),
             "newer incoming must change to its UUID"
         );
-        assert_eq!(s.remote_users["1AAAAAAAA"].nick, "foo", "older existing keeps the nick");
+        assert_eq!(
+            s.remote_users["1AAAAAAAA"].nick, "foo",
+            "older existing keeps the nick"
+        );
 
         // different people, incoming OLDER → incoming wins, existing renamed to its UUID.
         add_remote(&mut s, "1AABBBBBB", "bar", "1AA", "1.1.1.1", 300);
@@ -3344,11 +3346,19 @@ mod tests {
         let msg = crate::message::parse(":42S CHGHOST 42SB00000 newident@new.host").unwrap();
         s.link_chghost_recv(1, &msg);
 
-        assert_eq!(s.remote_users["42SB00000"].host, "new.host", "our copy's host updated");
-        assert_eq!(s.remote_users["42SB00000"].ident, "newident", "our copy's ident updated");
+        assert_eq!(
+            s.remote_users["42SB00000"].host, "new.host",
+            "our copy's host updated"
+        );
+        assert_eq!(
+            s.remote_users["42SB00000"].ident, "newident",
+            "our copy's ident updated"
+        );
         let lines: Vec<String> = std::iter::from_fn(|| urx.try_recv().ok()).collect();
         assert!(
-            lines.iter().any(|l| l == ":bob!b@old.host CHGHOST newident new.host"),
+            lines
+                .iter()
+                .any(|l| l == ":bob!b@old.host CHGHOST newident new.host"),
             "chghost-cap member must get the CHGHOST, got {lines:?}"
         );
     }
@@ -3458,7 +3468,10 @@ mod tests {
 
         let back = crate::message::parse(":42SB00000 AWAY").unwrap();
         s.link_away_recv(1, &back);
-        assert_eq!(s.remote_users["42SB00000"].away, None, "away cleared on return");
+        assert_eq!(
+            s.remote_users["42SB00000"].away, None,
+            "away cleared on return"
+        );
     }
 
     #[test]

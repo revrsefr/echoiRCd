@@ -192,9 +192,21 @@ fn chan_modes(n: &Node, key: &str) -> Option<String> {
 
 /// Assert the two nodes agree on `key`'s membership, timestamp and modes.
 fn assert_converged(a: &Node, b: &Node, key: &str) {
-    assert_eq!(members(a, key), members(b, key), "membership diverged on {key}");
-    assert_eq!(chan_ts(a, key), chan_ts(b, key), "channel TS diverged on {key}");
-    assert_eq!(chan_modes(a, key), chan_modes(b, key), "channel modes diverged on {key}");
+    assert_eq!(
+        members(a, key),
+        members(b, key),
+        "membership diverged on {key}"
+    );
+    assert_eq!(
+        chan_ts(a, key),
+        chan_ts(b, key),
+        "channel TS diverged on {key}"
+    );
+    assert_eq!(
+        chan_modes(a, key),
+        chan_modes(b, key),
+        "channel modes diverged on {key}"
+    );
 }
 
 #[test]
@@ -247,7 +259,11 @@ fn fjoin_ts_arbitration_lower_ts_wins() {
     b.srv.channels.get_mut("#c").unwrap().created = 200;
     link(&mut a, &mut b);
     assert_converged(&a, &b, "#c");
-    assert_eq!(chan_ts(&a, "#c"), Some(100), "the lower timestamp wins the channel");
+    assert_eq!(
+        chan_ts(&a, "#c"),
+        Some(100),
+        "the lower timestamp wins the channel"
+    );
     assert_eq!(members(&a, "#c").len(), 2, "both members merged");
 }
 

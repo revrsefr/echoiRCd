@@ -330,7 +330,10 @@ fn signore_list(s: &Server, uid: Uid) {
         .unwrap_or_default();
     let sn = &s.name;
     if list.is_empty() {
-        s.send(uid, format!(":{sn} NOTICE {nick} :Your SIGNORE list is empty."));
+        s.send(
+            uid,
+            format!(":{sn} NOTICE {nick} :Your SIGNORE list is empty."),
+        );
     } else {
         for m in &list {
             s.send(uid, format!(":{sn} NOTICE {nick} :SIGNORE {m}"));
@@ -353,7 +356,11 @@ impl Command for Signore {
             signore_list(s, uid);
             return CmdResult::Ok;
         };
-        let nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
+        let nick = s
+            .users
+            .get(&uid)
+            .map(|u| u.nick.clone())
+            .unwrap_or_default();
         let sn = s.name.clone();
         let (add, raw) = match arg.strip_prefix('-') {
             Some(m) => (false, m),
@@ -382,7 +389,10 @@ impl Command for Signore {
                     u.signore.push(mask.clone());
                 }
             }
-            let m = s.trf("SIGNORE \x02{0}\x02 added — you and they can no longer see each other's messages.", &[mask.as_str()]);
+            let m = s.trf(
+                "SIGNORE \x02{0}\x02 added — you and they can no longer see each other's messages.",
+                &[mask.as_str()],
+            );
             s.send(uid, format!(":{sn} NOTICE {nick} :{m}"));
         } else {
             if let Some(u) = s.users.get_mut(&uid) {
@@ -490,7 +500,10 @@ mod tests {
     fn chunk_join_splits_and_preserves_order() {
         let items: Vec<String> = (0..50).map(|i| format!("nick{i:04}")).collect();
         let chunks = chunk_join(&items, ',', 40);
-        assert!(chunks.len() > 1, "a long list must split into several lines");
+        assert!(
+            chunks.len() > 1,
+            "a long list must split into several lines"
+        );
         assert!(
             chunks.iter().all(|c| c.len() <= 40),
             "each chunk stays within budget"

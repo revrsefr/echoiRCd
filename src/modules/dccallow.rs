@@ -74,13 +74,7 @@ impl Module for DccAllow {
         "dccallow"
     }
 
-    fn on_pre_message(
-        &mut self,
-        s: &mut Server,
-        uid: Uid,
-        target: &str,
-        text: &str,
-    ) -> ModResult {
+    fn on_pre_message(&mut self, s: &mut Server, uid: Uid, target: &str, text: &str) -> ModResult {
         let Some(dcc) = parse_dcc(text) else {
             return ModResult::Passthru; // not a DCC request
         };
@@ -90,7 +84,11 @@ impl Module for DccAllow {
         if tuid == uid {
             return ModResult::Passthru;
         }
-        let sender = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
+        let sender = s
+            .users
+            .get(&uid)
+            .map(|u| u.nick.clone())
+            .unwrap_or_default();
         let low = sender.to_ascii_lowercase();
         // recipient already whitelisted this sender?
         let allowed = s
@@ -110,29 +108,30 @@ impl Module for DccAllow {
                     .any(|p| glob_match(p, fname));
                 (hit, format!("the file \"{fname}\""))
             }
-            Dcc::Chat => (s.conf_bool("dccallow_blockchat", false), "a DCC CHAT".to_string()),
+            Dcc::Chat => (
+                s.conf_bool("dccallow_blockchat", false),
+                "a DCC CHAT".to_string(),
+            ),
             Dcc::Other => (false, String::new()),
         };
         if !block {
             return ModResult::Passthru;
         }
-        let tnick = s.users.get(&tuid).map(|u| u.nick.clone()).unwrap_or_default();
+        let tnick = s
+            .users
+            .get(&tuid)
+            .map(|u| u.nick.clone())
+            .unwrap_or_default();
         let m1 = s.trf(
             "Your DCC to {0} was blocked; they must /DCCALLOW +{1} first.",
             &[tnick.as_str(), sender.as_str()],
         );
-        s.send(
-            uid,
-            format!(":{} NOTICE {sender} :*** {m1}", s.name),
-        );
+        s.send(uid, format!(":{} NOTICE {sender} :*** {m1}", s.name));
         let m2 = s.trf(
             "{0} tried to send you {1} — blocked. /DCCALLOW +{2} to allow it, then ask them to resend.",
             &[sender.as_str(), what.as_str(), sender.as_str()],
         );
-        s.send(
-            tuid,
-            format!(":{} NOTICE {tnick} :*** {m2}", s.name),
-        );
+        s.send(tuid, format!(":{} NOTICE {tnick} :*** {m2}", s.name));
         ModResult::Deny
     }
 }
@@ -151,8 +150,13 @@ impl Command for DccAllowCmd {
         1
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
-        let nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
-        let note = |s: &Server, msg: String| s.send(uid, format!(":{} NOTICE {nick} :{msg}", s.name));
+        let nick = s
+            .users
+            .get(&uid)
+            .map(|u| u.nick.clone())
+            .unwrap_or_default();
+        let note =
+            |s: &Server, msg: String| s.send(uid, format!(":{} NOTICE {nick} :{msg}", s.name));
         let arg = &params[0];
 
         if arg.eq_ignore_ascii_case("LIST") {
@@ -178,7 +182,10 @@ impl Command for DccAllowCmd {
             None => match arg.strip_prefix('-') {
                 Some(n) => (false, n),
                 None => {
-                    note(s, "*** Usage: DCCALLOW +<nick> | -<nick> | LIST".to_string());
+                    note(
+                        s,
+                        "*** Usage: DCCALLOW +<nick> | -<nick> | LIST".to_string(),
+                    );
                     return CmdResult::Ok;
                 }
             },

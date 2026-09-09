@@ -5,8 +5,8 @@
 use crate::map::HashMap;
 use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::SyncSender;
 use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
 use std::time::Instant;
 

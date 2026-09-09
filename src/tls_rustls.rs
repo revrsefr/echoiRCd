@@ -60,7 +60,10 @@ fn load_key(cert: &str, key: &str, provider: &CryptoProvider) -> io::Result<Arc<
     let key_der: PrivateKeyDer<'static> = rustls_pemfile::private_key(&mut &key_pem[..])
         .map_err(err)?
         .ok_or_else(|| err(format!("no private key in {key}")))?;
-    let signing_key = provider.key_provider.load_private_key(key_der).map_err(err)?;
+    let signing_key = provider
+        .key_provider
+        .load_private_key(key_der)
+        .map_err(err)?;
     Ok(Arc::new(CertifiedKey::new(certs, signing_key)))
 }
 
@@ -157,7 +160,10 @@ fn build_config(
     let default = load_key(&primary.cert, &primary.key, provider)?;
     let mut by_host: HashMap<String, Arc<CertifiedKey>> = HashMap::default();
     for (h, cp) in sni {
-        by_host.insert(h.to_ascii_lowercase(), load_key(&cp.cert, &cp.key, provider)?);
+        by_host.insert(
+            h.to_ascii_lowercase(),
+            load_key(&cp.cert, &cp.key, provider)?,
+        );
     }
     let resolver = Arc::new(SniResolver { default, by_host });
     let verifier = Arc::new(AcceptAnyClientCert {
@@ -176,7 +182,11 @@ fn build_config(
 }
 
 impl RustlsBackend {
-    pub fn new(cert: &str, key: &str, sni: Vec<(String, String, String)>) -> io::Result<RustlsBackend> {
+    pub fn new(
+        cert: &str,
+        key: &str,
+        sni: Vec<(String, String, String)>,
+    ) -> io::Result<RustlsBackend> {
         let provider = Arc::new(rustls::crypto::ring::default_provider());
         let primary = CertPaths {
             cert: cert.to_string(),

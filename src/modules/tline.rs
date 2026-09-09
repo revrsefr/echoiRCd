@@ -53,7 +53,12 @@ impl Command for TLine {
         let pcts = pct.to_string();
         let m = s.trf(
             "TLINE: {0} matches {1} of {2} local users ({3}%)",
-            &[mask.as_str(), matcheds.as_str(), totals.as_str(), pcts.as_str()],
+            &[
+                mask.as_str(),
+                matcheds.as_str(),
+                totals.as_str(),
+                pcts.as_str(),
+            ],
         );
         s.send(uid, format!(":{} NOTICE {nick} :*** {m}", s.name));
         CmdResult::Ok

@@ -46,10 +46,7 @@ pub fn grant(s: &mut Server, uid: Uid, title: &str, vhost: &str) {
     }
     let nick = nick(s, uid);
     let m = s.trf("TITLE: you are now known as \"{0}\".", &[title]);
-    s.send(
-        uid,
-        format!(":{} NOTICE {nick} :*** {m}", s.name),
-    );
+    s.send(uid, format!(":{} NOTICE {nick} :*** {m}", s.name));
 }
 
 /// Reject a TITLE attempt (bad name or password).
@@ -57,7 +54,10 @@ pub fn deny(s: &Server, uid: Uid) {
     let nick = nick(s, uid);
     s.send(
         uid,
-        format!(":{} NOTICE {nick} :*** TITLE: invalid title name or password.", s.name),
+        format!(
+            ":{} NOTICE {nick} :*** TITLE: invalid title name or password.",
+            s.name
+        ),
     );
 }
 

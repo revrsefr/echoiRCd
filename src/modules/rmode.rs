@@ -27,7 +27,11 @@ impl Command for RMode {
         let chan = params[0].clone();
         let key = chan.to_ascii_lowercase();
         let Some(mode) = params[1].chars().find(|c| c.is_ascii_alphabetic()) else {
-            let nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
+            let nick = s
+                .users
+                .get(&uid)
+                .map(|u| u.nick.clone())
+                .unwrap_or_default();
             s.send(
                 uid,
                 format!(

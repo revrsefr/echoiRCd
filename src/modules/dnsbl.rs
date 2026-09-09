@@ -42,7 +42,13 @@ pub fn parse_zone(value: &str) -> Option<DnsblZone> {
     }
     if !first.contains('=') {
         let domain = first.trim_end_matches('.').to_string();
-        return Some(DnsblZone { name: domain.clone(), domain, action: None, duration: None, reason: None });
+        return Some(DnsblZone {
+            name: domain.clone(),
+            domain,
+            action: None,
+            duration: None,
+            reason: None,
+        });
     }
     let attrs = parse_kv(value);
     let get = |k: &str| attrs.iter().find(|(a, _)| a == k).map(|(_, v)| v.clone());
@@ -210,7 +216,10 @@ fn act(s: &mut Server, uid: Uid, domain: &str, reply: Ipv4Addr) {
         .iter()
         .find(|z| z.domain.eq_ignore_ascii_case(domain))
         .cloned();
-    let name = zone.as_ref().map(|z| z.name.clone()).unwrap_or_else(|| domain.to_string());
+    let name = zone
+        .as_ref()
+        .map(|z| z.name.clone())
+        .unwrap_or_else(|| domain.to_string());
     let action = zone
         .as_ref()
         .and_then(|z| z.action.clone())
@@ -287,7 +296,10 @@ mod tests {
         assert_eq!(z.name, "Tor exit node");
         assert_eq!(z.action.as_deref(), Some("zline")); // lower-cased
         assert_eq!(z.duration, Some(604800)); // 1w
-        assert_eq!(z.reason.as_deref(), Some("Not allowed. See https://x/%ip% here"));
+        assert_eq!(
+            z.reason.as_deref(),
+            Some("Not allowed. See https://x/%ip% here")
+        );
         // attrs missing a domain are rejected
         assert!(parse_zone("name=\"no domain\" action=zline").is_none());
     }

@@ -20,7 +20,11 @@ pub fn redirect_target(s: &Server, uid: Uid, key: &str) -> Option<String> {
     let ch = s.channels.get(key)?;
     let who = s.users.get(&uid)?.prefix();
     // a matching +e exception cancels the ban, hence the redirect
-    if ch.excepts.iter().any(|e| glob_match(mask_part(&e.mask), &who)) {
+    if ch
+        .excepts
+        .iter()
+        .any(|e| glob_match(mask_part(&e.mask), &who))
+    {
         return None;
     }
     ch.bans.iter().find_map(|b| {

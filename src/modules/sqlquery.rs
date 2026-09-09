@@ -43,7 +43,11 @@ impl Command for SqlQuery {
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         // Netadmin-only: netadmin holds `servers/sql` through `privs *`.
         if !crate::modules::opertypes::has_priv(s, uid, "servers/sql") {
-            reply(s, uid, "SQL : commande réservée aux administrateurs réseau.");
+            reply(
+                s,
+                uid,
+                "SQL : commande réservée aux administrateurs réseau.",
+            );
             return CmdResult::Ok;
         }
         if !s.conf_bool("sqlquery", true) {
@@ -51,7 +55,11 @@ impl Command for SqlQuery {
             return CmdResult::Ok;
         }
         if !crate::database::is_enabled(s) {
-            reply(s, uid, "SQL : aucune base de données configurée (pgsql_host).");
+            reply(
+                s,
+                uid,
+                "SQL : aucune base de données configurée (pgsql_host).",
+            );
             return CmdResult::Ok;
         }
 
@@ -72,7 +80,11 @@ impl Command for SqlQuery {
         // Read-only guard (unless writes are explicitly enabled): one statement, SELECT.
         let query = sql.trim().trim_end_matches(';').trim();
         if query.contains(';') {
-            reply(s, uid, "SQL : une seule instruction à la fois (pas de « ; »).");
+            reply(
+                s,
+                uid,
+                "SQL : une seule instruction à la fois (pas de « ; »).",
+            );
             return CmdResult::Ok;
         }
         if !s.conf_bool("sqlquery_write", false) && !starts_select(query) {
@@ -96,7 +108,11 @@ impl Command for SqlQuery {
                 reply(
                     s,
                     uid,
-                    &format!("SQL : {} ligne(s), {} colonne(s).", rows.len(), rows.columns.len()),
+                    &format!(
+                        "SQL : {} ligne(s), {} colonne(s).",
+                        rows.len(),
+                        rows.columns.len()
+                    ),
                 );
                 if !rows.columns.is_empty() {
                     let head = rows.columns.join(" │ ");
@@ -178,7 +194,9 @@ mod tests {
     fn only_select_passes_the_read_only_gate() {
         assert!(starts_select("SELECT * FROM x"));
         assert!(starts_select("  select 1"));
-        assert!(!starts_select("WITH q AS (DELETE FROM x RETURNING *) SELECT * FROM q"));
+        assert!(!starts_select(
+            "WITH q AS (DELETE FROM x RETURNING *) SELECT * FROM q"
+        ));
         assert!(!starts_select("DELETE FROM x"));
         assert!(!starts_select("update x set y=1"));
     }

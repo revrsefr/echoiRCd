@@ -60,7 +60,9 @@ impl Catalog {
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
             Err(e) => {
-                warnings.push(format!("locale {locale}: cannot read {path}: {e} (using English)"));
+                warnings.push(format!(
+                    "locale {locale}: cannot read {path}: {e} (using English)"
+                ));
                 return (Catalog::passthrough(), warnings);
             }
         };
@@ -83,7 +85,10 @@ impl Catalog {
                         map.insert(key.into_boxed_str(), val.into_boxed_str());
                     }
                 }
-                None => warnings.push(format!("locale {locale}:{}: malformed entry, skipped", i + 1)),
+                None => warnings.push(format!(
+                    "locale {locale}:{}: malformed entry, skipped",
+                    i + 1
+                )),
             }
         }
         (
@@ -277,7 +282,10 @@ mod tests {
         std::fs::write("/tmp/echo-i18n-test/fr.conf", text).unwrap();
         let (cat, warns) = Catalog::load("/tmp/echo-i18n-test", "fr");
         assert!(warns.is_empty(), "{warns:?}");
-        assert_eq!(cat.tr("No such nick/channel"), "Aucun pseudo/salon de ce nom");
+        assert_eq!(
+            cat.tr("No such nick/channel"),
+            "Aucun pseudo/salon de ce nom"
+        );
         assert_eq!(cat.tr("unknown"), "unknown"); // fallback
     }
 
@@ -293,7 +301,10 @@ mod tests {
             "#chan :Vous n'êtes pas sur ce salon"
         );
         // data trailing not in catalog -> unchanged, no allocation
-        assert!(matches!(cat.tr_numeric("bob user host * :Real Name"), std::borrow::Cow::Borrowed(_)));
+        assert!(matches!(
+            cat.tr_numeric("bob user host * :Real Name"),
+            std::borrow::Cow::Borrowed(_)
+        ));
     }
 
     #[test]

@@ -230,7 +230,10 @@ mod tests {
 
     #[test]
     fn v1_partial_needs_more() {
-        assert!(matches!(parse(b"PROXY TCP4 192.0.2.9 10.0"), (Parsed::Need, _)));
+        assert!(matches!(
+            parse(b"PROXY TCP4 192.0.2.9 10.0"),
+            (Parsed::Need, _)
+        ));
         assert!(matches!(parse(b"PRO"), (Parsed::Need, _)));
     }
 
@@ -242,7 +245,10 @@ mod tests {
     #[test]
     fn v1_garbage_invalid() {
         assert!(matches!(parse(b"HELLO THERE\r\n"), (Parsed::Invalid, _)));
-        assert!(matches!(parse(b"PROXY TCP4 bad ip x y\r\n"), (Parsed::Invalid, _)));
+        assert!(matches!(
+            parse(b"PROXY TCP4 bad ip x y\r\n"),
+            (Parsed::Invalid, _)
+        ));
     }
 
     #[test]

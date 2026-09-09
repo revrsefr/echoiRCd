@@ -87,7 +87,13 @@ pub fn tee(s: &Server, msg: &str) {
     // text (nick/realname/quit reason), and a raw newline would forge a syslog record.
     let safe: String = msg
         .chars()
-        .map(|c| if (c as u32) < 0x20 || c == '\x7f' { ' ' } else { c })
+        .map(|c| {
+            if (c as u32) < 0x20 || c == '\x7f' {
+                ' '
+            } else {
+                c
+            }
+        })
         .collect();
     let line = format!("<{pri}>{tag}[{}]: {safe}", std::process::id());
     SINK.with(|cell| {

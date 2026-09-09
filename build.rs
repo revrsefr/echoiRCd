@@ -22,7 +22,8 @@ fn main() {
         Some(s) if !s.is_empty() => "-dirty",
         _ => "",
     };
-    let date = git(&["log", "-1", "--format=%cd", "--date=short"]).unwrap_or_else(|| "unknown".into());
+    let date =
+        git(&["log", "-1", "--format=%cd", "--date=short"]).unwrap_or_else(|| "unknown".into());
 
     let rustc = Command::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into()))
         .arg("--version")

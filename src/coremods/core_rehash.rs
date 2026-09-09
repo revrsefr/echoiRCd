@@ -48,7 +48,10 @@ impl Command for Rehash {
         match Config::try_load(&path) {
             Some(fresh) => {
                 // announce to everyone connected, not just opers
-                let m = s.trf("admin {0} has changed the configuration of the server.", &[who.as_str()]);
+                let m = s.trf(
+                    "admin {0} has changed the configuration of the server.",
+                    &[who.as_str()],
+                );
                 s.announce(&m);
                 let m = s.trf("{0} is rehashing the server config file.", &[who.as_str()]);
                 s.announce(&m);
@@ -63,7 +66,10 @@ impl Command for Rehash {
                     &[who.as_str()],
                 );
                 s.announce(&m);
-                let m = s.trf("Could not read {0} — the running configuration was kept.", &[path.as_str()]);
+                let m = s.trf(
+                    "Could not read {0} — the running configuration was kept.",
+                    &[path.as_str()],
+                );
                 s.send(uid, format!(":{} NOTICE {who} :*** {m}", s.name));
             }
         }

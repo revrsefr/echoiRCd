@@ -240,26 +240,26 @@ pub struct User {
     pub signon: u64,   // unix secs at registration (WHOIS 317)
     pub nick_ts: u64,  // unix secs the current nick was taken (nick-collision arbitration)
     pub addr: SocketAddr,
-    pub port: u16,     // listener port the client connected to (connectclass port=, ident)
+    pub port: u16, // listener port the client connected to (connectclass port=, ident)
     pub registered: bool,
-    pub dns_pending: bool,     // holding registration for a reverse-DNS lookup
-    pub ident_pending: bool,   // holding registration for an ident (RFC1413) lookup
-    pub auth_pending: bool,    // holding registration for an off-core connect-class password verify
+    pub dns_pending: bool,   // holding registration for a reverse-DNS lookup
+    pub ident_pending: bool, // holding registration for an ident (RFC1413) lookup
+    pub auth_pending: bool,  // holding registration for an off-core connect-class password verify
     pub waitpong: Option<String>, // conn_waitpong: cookie the client must PONG before registering
     pub class: Option<String>, // connectclass: assigned connection class name
-    pub pass: Option<String>,  // password sent via PASS (for connectclass passwords)
+    pub pass: Option<String>, // password sent via PASS (for connectclass passwords)
     pub deferred: Vec<String>, // handshake lines held while dns_pending (replayed after)
-    pub cap: bool,             // CAP negotiation in progress (holds registration)
-    pub cap_302: bool,         // client sent CAP LS 302 (cap-notify aware)
-    pub caps: Caps,            // enabled IRCv3 capabilities
+    pub cap: bool,           // CAP negotiation in progress (holds registration)
+    pub cap_302: bool,       // client sent CAP LS 302 (cap-notify aware)
+    pub caps: Caps,          // enabled IRCv3 capabilities
     pub sasl_mech: Option<String>, // SASL mechanism chosen, mid-handshake
     pub channels: HashSet<String>, // lowercased channel keys
-    pub invited: HashSet<String>,  // channels this user has a pending +i invite to (reverse index)
-    pub watch: Vec<String>,    // WATCH list — lowercased nicks
-    pub monitor: Vec<String>,  // MONITOR list — lowercased nicks
-    pub silence: Vec<String>,  // SILENCE masks — nick!user@host globs
-    pub signore: Vec<String>,  // SIGNORE masks — mutual server-side ignore (both ways)
-    pub accept: Vec<String>,   // ACCEPT list — lowercased nicks (callerid +g)
+    pub invited: HashSet<String>, // channels this user has a pending +i invite to (reverse index)
+    pub watch: Vec<String>,  // WATCH list — lowercased nicks
+    pub monitor: Vec<String>, // MONITOR list — lowercased nicks
+    pub silence: Vec<String>, // SILENCE masks — nick!user@host globs
+    pub signore: Vec<String>, // SIGNORE masks — mutual server-side ignore (both ways)
+    pub accept: Vec<String>, // ACCEPT list — lowercased nicks (callerid +g)
     pub quitting: Option<String>, // set by QUIT; drained by the core
     pub flags: UserFlags,
     pub last_active: u64, // unix secs of the last line received (liveness / ping sweep)
@@ -471,10 +471,16 @@ impl Server {
             .map(|u| u.nick.clone())
             .unwrap_or_default();
         let net = self.disp_network(uid).to_string();
-        let welcome = self.trf("Welcome to the {0} IRC Network, {1}", &[net.as_str(), nick.as_str()]);
+        let welcome = self.trf(
+            "Welcome to the {0} IRC Network, {1}",
+            &[net.as_str(), nick.as_str()],
+        );
         self.numeric(uid, RPL_WELCOME, &format!(":{welcome}"));
         let host = self.disp_name(uid).to_string();
-        let yourhost = self.trf("Your host is {0}, running echoircd-{1}", &[host.as_str(), RELEASE]);
+        let yourhost = self.trf(
+            "Your host is {0}, running echoircd-{1}",
+            &[host.as_str(), RELEASE],
+        );
         self.numeric(uid, RPL_YOURHOST, &format!(":{yourhost}"));
         let created = self.created.to_string();
         let created_msg = self.trf("This server was created at unix {0}", &[created.as_str()]);
@@ -599,7 +605,7 @@ mod tests {
         assert!(Caps::ls_line(true, false, "", 4096, 24).contains("sasl=PLAIN")); // 302 shows mechs
         assert!(!Caps::ls_line(true, false, "", 4096, 24).contains("EXTERNAL")); // plaintext: no EXTERNAL
         assert!(Caps::ls_line(true, true, "", 4096, 24).contains("sasl=PLAIN,EXTERNAL")); // TLS offers it
-        // SCRAM-SHA-256 is offered on both transports (challenge-response, no wire password)
+                                                                                          // SCRAM-SHA-256 is offered on both transports (challenge-response, no wire password)
         assert!(Caps::ls_line(true, false, "", 4096, 24).contains("SCRAM-SHA-256"));
         assert!(Caps::ls_line(true, true, "", 4096, 24).contains("SCRAM-SHA-256"));
         assert!(

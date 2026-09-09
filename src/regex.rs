@@ -113,9 +113,7 @@ impl Regex {
                     Inst::Match => return true,
                     Inst::Char(c) => pos < n && chars[pos] == *c,
                     Inst::Any => pos < n && chars[pos] != '\n',
-                    Inst::Class(items, neg) => {
-                        pos < n && class_hit(items, *neg, chars[pos])
-                    }
+                    Inst::Class(items, neg) => pos < n && class_hit(items, *neg, chars[pos]),
                     _ => false, // epsilon insts never reach clist
                 };
                 if hit {
@@ -447,9 +445,7 @@ impl Parser {
             Some('^') => Ast::Start,
             Some('$') => Ast::End,
             Some('\\') => self.parse_escape()?,
-            Some(c) if c == '*' || c == '+' || c == '?' => {
-                return Err("nothing to repeat".into())
-            }
+            Some(c) if c == '*' || c == '+' || c == '?' => return Err("nothing to repeat".into()),
             Some(c) => Ast::Char(c),
             None => Ast::Empty,
         };
@@ -624,7 +620,9 @@ mod tests {
         assert!(rx.is_match("bad!user@host.com i sell spamword cheap"));
         assert!(!rx.is_match("good!user@host.com hello there"));
         // ip-ish host anchor
-        assert!(Regex::new(r"@(10|192)\.").unwrap().is_match("n!u@192.168.0.1 real"));
+        assert!(Regex::new(r"@(10|192)\.")
+            .unwrap()
+            .is_match("n!u@192.168.0.1 real"));
     }
 
     #[test]

@@ -125,7 +125,11 @@ impl Module for RestrictCommands {
         // not on every command. Clone the one matched rule so the ext borrow drops
         // before we touch the server mutably below.
         let gen = srv.config_gen;
-        let stale = srv.ext.get::<RestrictCache>().map(|c| c.gen != gen).unwrap_or(true);
+        let stale = srv
+            .ext
+            .get::<RestrictCache>()
+            .map(|c| c.gen != gen)
+            .unwrap_or(true);
         if stale {
             let rules = parse(srv);
             srv.ext.set(RestrictCache { gen, rules });

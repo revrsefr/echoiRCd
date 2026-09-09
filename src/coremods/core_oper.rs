@@ -163,10 +163,19 @@ impl Command for Oper {
             let ot = otype.clone();
             let ok = s.spawn_crypto(move || {
                 let ok = crate::modules::password_hash::verify(&hash, &pass);
-                crate::ircd::Event::OperAuth { uid, ok, level, oper_type: ot }
+                crate::ircd::Event::OperAuth {
+                    uid,
+                    ok,
+                    level,
+                    oper_type: ot,
+                }
             });
             if !ok {
-                s.numeric(uid, ERR_PASSWDMISMATCH, ":Too many auth attempts, try again");
+                s.numeric(
+                    uid,
+                    ERR_PASSWDMISMATCH,
+                    ":Too many auth attempts, try again",
+                );
                 return CmdResult::Fail;
             }
             return CmdResult::Ok; // pending; oper-up happens when the verify returns
@@ -399,13 +408,13 @@ impl Command for GlobOps {
             .filter(|(_, u)| u.flags.oper)
             .map(|(&u, _)| u)
             .collect();
-        let m = s.trf("GLOBOPS from {0}: {1}", &[from.as_str(), params[0].as_str()]);
+        let m = s.trf(
+            "GLOBOPS from {0}: {1}",
+            &[from.as_str(), params[0].as_str()],
+        );
         for o in opers {
             let nick = s.users.get(&o).map(|u| u.nick.clone()).unwrap_or_default();
-            s.send(
-                o,
-                format!(":{} NOTICE {nick} :*** {m}", s.name),
-            );
+            s.send(o, format!(":{} NOTICE {nick} :*** {m}", s.name));
         }
         CmdResult::Ok
     }
@@ -488,7 +497,14 @@ impl Command for SaNick {
             );
             return CmdResult::Fail;
         };
-        if s.uid_servprotected(tuid) { s.numeric(uid, ERR_NOPRIVILEGES, ":Cannot use an SA command on a network service"); return CmdResult::Fail; }
+        if s.uid_servprotected(tuid) {
+            s.numeric(
+                uid,
+                ERR_NOPRIVILEGES,
+                ":Cannot use an SA command on a network service",
+            );
+            return CmdResult::Fail;
+        }
         let newnick = &params[1];
         if !valid_nick(newnick, s.conf_num("maxnick", 30usize)) {
             s.numeric(
@@ -499,7 +515,11 @@ impl Command for SaNick {
             return CmdResult::Fail;
         }
         // allow a case-only change: the in-use index would otherwise match the target itself
-        let cur = s.users.get(&tuid).map(|u| u.nick.clone()).unwrap_or_default();
+        let cur = s
+            .users
+            .get(&tuid)
+            .map(|u| u.nick.clone())
+            .unwrap_or_default();
         if !newnick.eq_ignore_ascii_case(&cur)
             && (s.find_nick(newnick).is_some()
                 || s.remote_nick.contains_key(&newnick.to_ascii_lowercase()))
@@ -552,7 +572,11 @@ impl Command for SvsNick {
             return CmdResult::Fail;
         }
         // allow a case-only change: the in-use index would otherwise match the target itself
-        let cur = s.users.get(&tuid).map(|u| u.nick.clone()).unwrap_or_default();
+        let cur = s
+            .users
+            .get(&tuid)
+            .map(|u| u.nick.clone())
+            .unwrap_or_default();
         if !newnick.eq_ignore_ascii_case(&cur)
             && (s.find_nick(newnick).is_some()
                 || s.remote_nick.contains_key(&newnick.to_ascii_lowercase()))
@@ -731,10 +755,7 @@ fn do_xline(s: &mut Server, uid: Uid, params: &[String], kind: XKind) -> CmdResu
             s.propagate_delline(kind.tag(), &mask);
         } else {
             let m = s.trf("{0}-line not found: {1}", &[kind.tag(), mask.as_str()]);
-            s.send(
-                uid,
-                format!(":{} NOTICE {nick} :{m}", s.name),
-            );
+            s.send(uid, format!(":{} NOTICE {nick} :{m}", s.name));
         }
         return CmdResult::Ok;
     }
@@ -912,20 +933,14 @@ impl Command for Rline {
                 s.propagate_delline("R", &pattern);
             } else {
                 let m = s.trf("R-line not found: {0}", &[pattern.as_str()]);
-                s.send(
-                    uid,
-                    format!(":{} NOTICE {nick} :{m}", s.name),
-                );
+                s.send(uid, format!(":{} NOTICE {nick} :{m}", s.name));
             }
             return CmdResult::Ok;
         }
         if let Err(e) = crate::regex::Regex::new(&pattern) {
             let e = e.to_string();
             let m = s.trf("Invalid RLINE regex: {0}", &[e.as_str()]);
-            s.send(
-                uid,
-                format!(":{} NOTICE {nick} :{m}", s.name),
-            );
+            s.send(uid, format!(":{} NOTICE {nick} :{m}", s.name));
             return CmdResult::Fail;
         }
         let dur = parse_duration(&params[1]).unwrap_or(0);
@@ -1014,7 +1029,10 @@ impl Command for NickUnlock {
             u.flags.nick_locked = false;
         }
         let by = oper_nick(s, uid);
-        let m = s.trf("{0} used NICKUNLOCK on {1}", &[by.as_str(), params[0].as_str()]);
+        let m = s.trf(
+            "{0} used NICKUNLOCK on {1}",
+            &[by.as_str(), params[0].as_str()],
+        );
         s.snotice_c('v', &m);
         CmdResult::Ok
     }
@@ -1055,10 +1073,10 @@ impl Command for Connect {
         let max_line = s.conf_num("max_line", crate::socketengine::DEFAULT_MAX_LINE);
         std::thread::spawn(move || crate::socketengine::connect_link(&addr, tx, counter, max_line));
         let by = oper_nick(s, uid);
-        s.snotice_c('l', &format!(
-            "{by} used CONNECT to {} ({}:{})",
-            b.name, b.ip, b.port
-        ));
+        s.snotice_c(
+            'l',
+            &format!("{by} used CONNECT to {} ({}:{})", b.name, b.ip, b.port),
+        );
         CmdResult::Ok
     }
 }
@@ -1149,10 +1167,10 @@ impl Command for ChgHost {
         };
         s.change_host_ident(t, None, Some(&params[1]));
         let by = oper_nick(s, uid);
-        s.snotice_c('v', &format!(
-            "{by} used CHGHOST on {}: {}",
-            params[0], params[1]
-        ));
+        s.snotice_c(
+            'v',
+            &format!("{by} used CHGHOST on {}: {}", params[0], params[1]),
+        );
         CmdResult::Ok
     }
 }
@@ -1201,10 +1219,10 @@ impl Command for ChgIdent {
         };
         s.change_host_ident(t, Some(&params[1]), None);
         let by = oper_nick(s, uid);
-        s.snotice_c('v', &format!(
-            "{by} used CHGIDENT on {}: {}",
-            params[0], params[1]
-        ));
+        s.snotice_c(
+            'v',
+            &format!("{by} used CHGIDENT on {}: {}", params[0], params[1]),
+        );
         CmdResult::Ok
     }
 }
@@ -1331,7 +1349,11 @@ impl Command for SaKick {
             return CmdResult::Fail;
         }
         if s.uid_servprotected(tuid) {
-            s.numeric(uid, ERR_NOPRIVILEGES, ":Cannot use an SA command on a network service");
+            s.numeric(
+                uid,
+                ERR_NOPRIVILEGES,
+                ":Cannot use an SA command on a network service",
+            );
             return CmdResult::Fail;
         }
         let reason = params
@@ -1353,7 +1375,10 @@ impl Command for SaKick {
         }
         s.channels.retain(|_, c| c.keep_alive());
         let by = oper_nick(s, uid);
-        let m = s.trf("{0} used SAKICK on {1} in {2}", &[by.as_str(), victim.as_str(), chan.as_str()]);
+        let m = s.trf(
+            "{0} used SAKICK on {1} in {2}",
+            &[by.as_str(), victim.as_str(), chan.as_str()],
+        );
         s.snotice_c('v', &m);
         CmdResult::Ok
     }
@@ -1380,12 +1405,22 @@ impl Command for SaQuit {
             .get(1)
             .cloned()
             .unwrap_or_else(|| "Services forced quit".to_string());
-        if s.uid_servprotected(tuid) { s.numeric(uid, ERR_NOPRIVILEGES, ":Cannot use an SA command on a network service"); return CmdResult::Fail; }
+        if s.uid_servprotected(tuid) {
+            s.numeric(
+                uid,
+                ERR_NOPRIVILEGES,
+                ":Cannot use an SA command on a network service",
+            );
+            return CmdResult::Fail;
+        }
         let m = s.trf("Closing link: (SAQUIT: {0})", &[reason.as_str()]);
         s.send(tuid, format!("ERROR :{m}"));
         s.remove_user(tuid, &format!("Quit: {reason}"));
         let by = oper_nick(s, uid);
-        let m = s.trf("{0} used SAQUIT on {1}: {2}", &[by.as_str(), params[0].as_str(), reason.as_str()]);
+        let m = s.trf(
+            "{0} used SAQUIT on {1}: {2}",
+            &[by.as_str(), params[0].as_str(), reason.as_str()],
+        );
         s.snotice_c('v', &m);
         CmdResult::Ok
     }
@@ -1422,7 +1457,10 @@ impl Command for ChgName {
         }
         s.notify_peers(t, &line, |c| c.setname);
         let by = oper_nick(s, uid);
-        let m = s.trf("{0} used CHGNAME on {1}: {2}", &[by.as_str(), params[0].as_str(), realname.as_str()]);
+        let m = s.trf(
+            "{0} used CHGNAME on {1}: {2}",
+            &[by.as_str(), params[0].as_str(), realname.as_str()],
+        );
         s.snotice_c('v', &m);
         CmdResult::Ok
     }
@@ -1598,7 +1636,10 @@ impl Command for SwhoisCmd {
             }
         }
         let by = oper_nick(s, uid);
-        let m = s.trf("{0} used SWHOIS on {1}: {2}", &[by.as_str(), params[0].as_str(), text.as_str()]);
+        let m = s.trf(
+            "{0} used SWHOIS on {1}: {2}",
+            &[by.as_str(), params[0].as_str(), text.as_str()],
+        );
         s.snotice_c('v', &m);
         CmdResult::Ok
     }

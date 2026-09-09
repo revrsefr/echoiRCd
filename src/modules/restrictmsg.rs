@@ -30,7 +30,11 @@ impl Module for RestrictMsg {
             return ModResult::Passthru;
         }
         // users/ignore-restrictmsg senders may message anyone
-        if crate::modules::opertypes::has_priv(srv, uid, crate::modules::opertypes::privs::USERS_IGNORE_RESTRICTMSG) {
+        if crate::modules::opertypes::has_priv(
+            srv,
+            uid,
+            crate::modules::opertypes::privs::USERS_IGNORE_RESTRICTMSG,
+        ) {
             return ModResult::Passthru;
         }
         let Some(tuid) = srv.find_nick(target) else {

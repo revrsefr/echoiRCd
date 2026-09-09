@@ -290,10 +290,7 @@ impl Module for AntiMixedUtf8 {
             "{0} (Flagged by the spam filter; network operators have been notified.)",
             &[block_msg.as_str()],
         );
-        srv.send(
-            uid,
-            format!(":{} NOTICE {nick} :*** {m}", srv.name),
-        );
+        srv.send(uid, format!(":{} NOTICE {nick} :*** {m}", srv.name));
 
         let action = srv.amu.action.to_ascii_lowercase();
         let (dur, reason, setter) = (

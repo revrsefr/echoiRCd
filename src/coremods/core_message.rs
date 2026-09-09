@@ -137,7 +137,11 @@ fn dm_blocked(s: &Server, uid: Uid, tuid: Uid) -> bool {
         None => return true,
     };
     if deny_uncommon
-        && !crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::USERS_IGNORE_COMMONCHANS)
+        && !crate::modules::opertypes::has_priv(
+            s,
+            uid,
+            crate::modules::opertypes::privs::USERS_IGNORE_COMMONCHANS,
+        )
     {
         let common = match (s.users.get(&uid), s.users.get(&tuid)) {
             (Some(a), Some(b)) => a.channels.intersection(&b.channels).next().is_some(),
@@ -154,9 +158,17 @@ fn dm_blocked(s: &Server, uid: Uid, tuid: Uid) -> bool {
         return true;
     }
     if callerid
-        && !crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::USERS_IGNORE_CALLERID)
+        && !crate::modules::opertypes::has_priv(
+            s,
+            uid,
+            crate::modules::opertypes::privs::USERS_IGNORE_CALLERID,
+        )
     {
-        let sender_nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
+        let sender_nick = s
+            .users
+            .get(&uid)
+            .map(|u| u.nick.clone())
+            .unwrap_or_default();
         if !s.is_accepted(tuid, &sender_nick) {
             return true;
         }
@@ -251,11 +263,7 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             .get(&key)
             .map(|c| c.modes.moderated)
             .unwrap_or(false);
-        if moderated
-            && mrank < RANK_VOICE
-            && !op_only
-            && !s.chanop_exempt(uid, &key, "moderated")
-        {
+        if moderated && mrank < RANK_VOICE && !op_only && !s.chanop_exempt(uid, &key, "moderated") {
             if !notice {
                 s.numeric(
                     uid,
@@ -318,8 +326,8 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             return CmdResult::Fail;
         }
         // +f message flood — ops/half-ops and opers are exempt; others get kicked
-        let flood_exempt = mrank >= RANK_HALFOP
-            || s.users.get(&uid).map(|u| u.flags.oper).unwrap_or(false);
+        let flood_exempt =
+            mrank >= RANK_HALFOP || s.users.get(&uid).map(|u| u.flags.oper).unwrap_or(false);
         if !flood_exempt && !s.chanop_exempt(uid, &key, "flood") {
             if let Some(ban) = s.messageflood_hit(uid, &key) {
                 s.flood_kick(uid, &key, ban);
@@ -468,8 +476,8 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
         let line = format!(":{prefix} {cmd} {target} :{body}");
         let ctags = s.line_ctags.clone();
         let msgid = s.next_msgid(); // one id shared by every recipient of this message
-        // Don't store a +U (opmoderated) ops-only message in CHATHISTORY / +H replay,
-        // else a non-op could retrieve what was withheld from them live.
+                                    // Don't store a +U (opmoderated) ops-only message in CHATHISTORY / +H replay,
+                                    // else a non-op could retrieve what was withheld from them live.
         if !op_only {
             record(s, &key, &prefix, cmd, target, &body, &msgid); // for CHATHISTORY
         }
@@ -493,7 +501,11 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             .map(|u| u.flags.deny_uncommon)
             .unwrap_or(false)
             && uid != tuid
-            && !crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::USERS_IGNORE_COMMONCHANS)
+            && !crate::modules::opertypes::has_priv(
+                s,
+                uid,
+                crate::modules::opertypes::privs::USERS_IGNORE_COMMONCHANS,
+            )
         {
             let common = match (s.users.get(&uid), s.users.get(&tuid)) {
                 (Some(a), Some(b)) => a.channels.intersection(&b.channels).next().is_some(),
@@ -551,11 +563,11 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
                         .map(|u| u.nick.clone())
                         .unwrap_or_default(),
                 );
-                let m = s.trf("Cannot message {0}: a TLS connection is required (+z)", &[tn.as_str()]);
-                s.send(
-                    uid,
-                    format!(":{} NOTICE {sn} :{m}", s.name),
+                let m = s.trf(
+                    "Cannot message {0}: a TLS connection is required (+z)",
+                    &[tn.as_str()],
                 );
+                s.send(uid, format!(":{} NOTICE {sn} :{m}", s.name));
             }
             return CmdResult::Fail;
         }
@@ -575,7 +587,11 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
         if target_g
             && uid != tuid
             && !s.is_accepted(tuid, &sender_nick)
-            && !crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::USERS_IGNORE_CALLERID)
+            && !crate::modules::opertypes::has_priv(
+                s,
+                uid,
+                crate::modules::opertypes::privs::USERS_IGNORE_CALLERID,
+            )
         {
             let (tnick, sident, shost) = {
                 let t = s.users.get(&tuid);
@@ -763,8 +779,11 @@ impl Command for TagMsg {
                 .get(&key)
                 .map(|c| c.members.keys().copied().collect())
                 .unwrap_or_default();
-            let reach_deaf =
-                crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::USERS_IGNORE_PRIVDEAF);
+            let reach_deaf = crate::modules::opertypes::has_priv(
+                s,
+                uid,
+                crate::modules::opertypes::privs::USERS_IGNORE_PRIVDEAF,
+            );
             for m in members {
                 if (m == uid && !echo)
                     || (s.users.get(&m).map(|u| u.flags.deaf).unwrap_or(false) && !reach_deaf)

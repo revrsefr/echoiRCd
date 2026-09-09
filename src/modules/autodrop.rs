@@ -40,7 +40,11 @@ impl Module for AutoDrop {
         // cache the set (config_gen-tagged): this hook runs hottest under the exact
         // scanner flood it defends against, so don't re-split the config per packet.
         let gen = s.config_gen;
-        let stale = s.ext.get::<DropCache>().map(|c| c.gen != gen).unwrap_or(true);
+        let stale = s
+            .ext
+            .get::<DropCache>()
+            .map(|c| c.gen != gen)
+            .unwrap_or(true);
         if stale {
             let cmds: HashSet<String> = s
                 .conf_all("autodrop_commands")

@@ -27,7 +27,11 @@ impl Command for GlobopsCmd {
             );
             return CmdResult::Fail;
         }
-        let nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
+        let nick = s
+            .users
+            .get(&uid)
+            .map(|u| u.nick.clone())
+            .unwrap_or_default();
         let body = params.join(" ");
         let m = s.trf("GLOBOPS from {0}: {1}", &[nick.as_str(), body.as_str()]);
         s.snotice_c('g', &m);

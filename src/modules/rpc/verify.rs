@@ -12,8 +12,8 @@ use crate::server::{now, Server};
 pub fn handle(s: &mut Server, action: &str, params: &str) -> Result<String, RpcError> {
     match action {
         "pass" => {
-            let token =
-                json_str(params, "token").ok_or_else(|| RpcError::invalid_params("token required"))?;
+            let token = json_str(params, "token")
+                .ok_or_else(|| RpcError::invalid_params("token required"))?;
             // Signed by whichever gate issued it — try both HS256 secrets.
             let secrets: Vec<String> = ["cloudflare_secret", "recaptcha_secret"]
                 .into_iter()
@@ -29,9 +29,13 @@ pub fn handle(s: &mut Server, action: &str, params: &str) -> Result<String, RpcE
                 return Err(RpcError::not_found("token has expired"));
             }
             let exp = jwt::claim_num(&claims, "exp").unwrap_or(0).max(0) as u64;
-            let ip = json_str(&claims, "ip").ok_or_else(|| RpcError::not_found("token missing ip"))?;
+            let ip =
+                json_str(&claims, "ip").ok_or_else(|| RpcError::not_found("token missing ip"))?;
             verify_common::mark_ip(s, &ip, exp);
-            Ok(obj(&[("verified", "true".into()), ("ip", format!("\"{ip}\""))]))
+            Ok(obj(&[
+                ("verified", "true".into()),
+                ("ip", format!("\"{ip}\"")),
+            ]))
         }
         _ => Err(RpcError::method_not_found(&format!("verify.{action}"))),
     }

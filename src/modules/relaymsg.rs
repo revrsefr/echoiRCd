@@ -71,7 +71,10 @@ impl Command for RelayMsg {
         if s.find_nick(nick).is_some() || s.remote_nick.contains_key(&nick.to_ascii_lowercase()) {
             return bad(s, "RELAYMSG spoofed nick is already in use");
         }
-        if nick.chars().any(|c| FORBIDDEN.contains(c) || c.is_whitespace() || c.is_control()) {
+        if nick
+            .chars()
+            .any(|c| FORBIDDEN.contains(c) || c.is_whitespace() || c.is_control())
+        {
             return bad(s, "Invalid characters in spoofed nick");
         }
         let seps = s
@@ -88,13 +91,21 @@ impl Command for RelayMsg {
 
         // build the fake source and relay it to every member (sender included, so
         // their own client sees the @draft/relaymsg echo)
-        let ident = s.conf("relaymsg_ident").filter(|v| !v.is_empty()).unwrap_or("relay").to_string();
+        let ident = s
+            .conf("relaymsg_ident")
+            .filter(|v| !v.is_empty())
+            .unwrap_or("relay")
+            .to_string();
         let host = s
             .conf("relaymsg_host")
             .filter(|v| !v.is_empty())
             .unwrap_or(s.name.as_str())
             .to_string();
-        let sender = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
+        let sender = s
+            .users
+            .get(&uid)
+            .map(|u| u.nick.clone())
+            .unwrap_or_default();
         let body = format!(":{nick}!{ident}@{host} PRIVMSG {chan} :{text}");
         let ctags = format!("draft/relaymsg={sender}");
         let msgid = s.next_msgid();

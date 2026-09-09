@@ -240,7 +240,12 @@ fn main() {
     // Write a pidfile only when `pidfile` is configured, so throwaway instances in
     // the same directory (e.g. the integration-test harness) can't clobber a real
     // server's pidfile and leave `echoircd rehash` pointing at a dead process.
-    if let Some(pidfile) = cfg.raw.get("pidfile").and_then(|v| v.first()).filter(|p| !p.is_empty()) {
+    if let Some(pidfile) = cfg
+        .raw
+        .get("pidfile")
+        .and_then(|v| v.first())
+        .filter(|p| !p.is_empty())
+    {
         if let Err(e) = std::fs::write(pidfile, format!("{}\n", std::process::id())) {
             eprintln!("echoircd: could not write pidfile {pidfile}: {e}");
         }
@@ -263,8 +268,10 @@ fn main() {
     let hs = raw_num("tls_handshake_timeout", 15);
     let handshake_timeout = (hs > 0).then(|| Duration::from_secs(hs as u64));
     // per-IP accept-rate limit (0 = off): drop connection-churn floods at the edge
-    let accept_limiter =
-        socketengine::AcceptLimiter::from_conf(raw_num("accept_rate", 0), raw_num("accept_burst", 0));
+    let accept_limiter = socketengine::AcceptLimiter::from_conf(
+        raw_num("accept_rate", 0),
+        raw_num("accept_burst", 0),
+    );
     // trusted PROXY-protocol source globs (reactor rewrites the client IP from them)
     let proxy_trust: Vec<String> = cfg.raw.get("proxy").cloned().unwrap_or_default();
 
@@ -301,7 +308,10 @@ fn main() {
             if cur != 0 {
                 let stuck = (base.elapsed().as_millis() as u64).saturating_sub(cur);
                 if stuck > watchdog_ms {
-                    let what = wl.lock().map(|g| g.clone()).unwrap_or_else(|e| e.into_inner().clone());
+                    let what = wl
+                        .lock()
+                        .map(|g| g.clone())
+                        .unwrap_or_else(|e| e.into_inner().clone());
                     eprintln!(
                         "[watchdog] core thread stuck ~{stuck}ms on '{what}' — a handler is blocking the whole server"
                     );
@@ -310,7 +320,9 @@ fn main() {
         });
     }
     let (busy, base) = (core_busy, wd_base);
-    let core = thread::spawn(move || Ircd::new(core_cfg, core_tx, core_counter).run(rx, busy, base, core_label));
+    let core = thread::spawn(move || {
+        Ircd::new(core_cfg, core_tx, core_counter).run(rx, busy, base, core_label)
+    });
 
     // background timer: drives ping/idle timeouts
     let tick_tx = tx.clone();
@@ -358,8 +370,13 @@ fn main() {
 
     // reactor worker pool: shared by the plaintext acceptor and the direct-TLS
     // acceptor, so client I/O (framing + TLS crypto) spreads across cores.
-    let reactors =
-        socketengine::spawn_reactors(tx.clone(), max_line, max_sendq, io_threads, handshake_timeout);
+    let reactors = socketengine::spawn_reactors(
+        tx.clone(),
+        max_line,
+        max_sendq,
+        io_threads,
+        handshake_timeout,
+    );
 
     // optional TLS listeners (bind_tls, repeatable + tls_cert + tls_key). A cert/bind
     // problem disables TLS but never takes the plaintext listeners down.
@@ -511,7 +528,13 @@ fn main() {
     echoircd::modules::metrics::maybe_start(&cfg);
 
     // optional WebSocket transport for browser IRC clients (see crate::websocket)
-    echoircd::websocket::maybe_start(&cfg, tx.clone(), counter.clone(), &mut inherited, &upgrade_reg);
+    echoircd::websocket::maybe_start(
+        &cfg,
+        tx.clone(),
+        counter.clone(),
+        &mut inherited,
+        &upgrade_reg,
+    );
 
     // dial any autoconnect uplinks (after a short delay so the peer can boot)
     for block in cfg.links.iter().filter(|b| b.autoconnect) {

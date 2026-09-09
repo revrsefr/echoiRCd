@@ -17,9 +17,9 @@ pub struct Member {
     /// through the `op()`/`set_op()`-style accessors below.
     pub prefixes: u8,
     pub custom_prefixes: Vec<char>, // config-defined prefix mode letters held (customprefix)
-    pub joined: u64,              // unix ts this member joined (for +d delaymsg; 0 = unknown)
-    pub recent_msgs: Vec<String>, // +K repeat: this member's last few lines here
-    pub hidden: bool,             // +D delayjoin: JOIN withheld until they reveal themselves
+    pub joined: u64,                // unix ts this member joined (for +d delaymsg; 0 = unknown)
+    pub recent_msgs: Vec<String>,   // +K repeat: this member's last few lines here
+    pub hidden: bool,               // +D delayjoin: JOIN withheld until they reveal themselves
 }
 
 /// Built-in prefix bits held in [`Member::prefixes`], high→low.
@@ -735,8 +735,11 @@ impl Server {
         // bypass sets `overrode`, snoticed once the join succeeds. `is_oper` still gates
         // the +O join *requirement* and the create/badchan module intercepts.
         let is_oper = self.users.get(&uid).map(|u| u.flags.oper).unwrap_or(false);
-        let can_override =
-            crate::modules::opertypes::has_priv(self, uid, crate::modules::opertypes::privs::CHANNELS_OVERRIDE);
+        let can_override = crate::modules::opertypes::has_priv(
+            self,
+            uid,
+            crate::modules::opertypes::privs::CHANNELS_OVERRIDE,
+        );
         let mut overrode = false;
         // connectclass max-channels cap (opers exempt)
         if !can_override {
@@ -767,8 +770,11 @@ impl Server {
             return;
         }
         // restrictchans — channels/restricted-create may create new channels (unless whitelisted)
-        let may_create =
-            crate::modules::opertypes::has_priv(self, uid, crate::modules::opertypes::privs::CHANNELS_RESTRICTED_CREATE);
+        let may_create = crate::modules::opertypes::has_priv(
+            self,
+            uid,
+            crate::modules::opertypes::privs::CHANNELS_RESTRICTED_CREATE,
+        );
         if crate::modules::restrictchans::intercept(self, uid, name, may_create) {
             return;
         }
@@ -1027,7 +1033,12 @@ impl Server {
         }
         // no-implicit-names: a client that negotiated the cap doesn't want the
         // automatic NAMES burst after JOIN (it asks with NAMES when it needs it).
-        if !self.users.get(&uid).map(|u| u.caps.no_implicit_names).unwrap_or(false) {
+        if !self
+            .users
+            .get(&uid)
+            .map(|u| u.caps.no_implicit_names)
+            .unwrap_or(false)
+        {
             self.send_names(uid, &key);
         }
         self.replay_chanhistory(uid, &key); // +H: replay recent messages to the joiner
@@ -1074,7 +1085,8 @@ impl Server {
             u.channels.remove(&key);
         }
         self.channels.retain(|_, c| c.keep_alive());
-        self.events.push_back(Hook::Part(uid, key, reason.to_string()));
+        self.events
+            .push_back(Hook::Part(uid, key, reason.to_string()));
         true
     }
 
@@ -1141,7 +1153,14 @@ impl Server {
     /// The PART-old + JOIN-new(+topic+names) fallback shown to one member that
     /// lacks draft/channel-rename, so their client follows the channel across a
     /// rename. Mirrors the JOIN broadcast (extended-join aware).
-    fn emulate_rename_join(&self, m: Uid, oldname: &str, newname: &str, newkey: &str, reason: &str) {
+    fn emulate_rename_join(
+        &self,
+        m: Uid,
+        oldname: &str,
+        newname: &str,
+        newkey: &str,
+        reason: &str,
+    ) {
         let Some(u) = self.users.get(&m) else {
             return;
         };
@@ -1256,7 +1275,11 @@ impl Server {
         // the channel were empty (channels/auspex still sees it, like WHO/WHOIS/LIST).
         if (ch.modes.secret || ch.modes.private)
             && !ch.members.contains_key(&uid)
-            && !crate::modules::opertypes::has_priv(self, uid, crate::modules::opertypes::privs::CHANNELS_AUSPEX)
+            && !crate::modules::opertypes::has_priv(
+                self,
+                uid,
+                crate::modules::opertypes::privs::CHANNELS_AUSPEX,
+            )
         {
             self.numeric(
                 uid,

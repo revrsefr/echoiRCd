@@ -29,31 +29,31 @@ use crate::Uid;
 #[derive(Default, Clone)]
 pub struct ConnClass {
     pub name: String,
-    pub allow: Vec<String>,          // IP/host masks (glob or CIDR); any match = match
-    pub deny: bool,                  // deny class: matching clients are refused
-    pub ssl: bool,                   // require TLS
-    pub ssl_trusted: bool,           // require a TLS client certificate (requiressl=trusted)
-    pub password: Option<String>,    // PASS credential (plain or hashed; verify auto-detects)
-    pub ports: Vec<u16>,             // restrict to these listener ports (empty = any)
-    pub asn: Vec<u32>,               // restrict to these origin AS numbers (empty = any)
-    pub localmax: Option<usize>,     // max local connections per IP in this class
-    pub globalmax: Option<usize>,    // max network-wide connections per IP
-    pub limit: Option<usize>,        // max total local users in this class
+    pub allow: Vec<String>, // IP/host masks (glob or CIDR); any match = match
+    pub deny: bool,         // deny class: matching clients are refused
+    pub ssl: bool,          // require TLS
+    pub ssl_trusted: bool,  // require a TLS client certificate (requiressl=trusted)
+    pub password: Option<String>, // PASS credential (plain or hashed; verify auto-detects)
+    pub ports: Vec<u16>,    // restrict to these listener ports (empty = any)
+    pub asn: Vec<u32>,      // restrict to these origin AS numbers (empty = any)
+    pub localmax: Option<usize>, // max local connections per IP in this class
+    pub globalmax: Option<usize>, // max network-wide connections per IP
+    pub limit: Option<usize>, // max total local users in this class
     pub maxchans: Option<usize>,
     pub pingfreq: Option<u64>,
-    pub timeout: Option<u64>,        // registration timeout
-    pub modes: Option<String>,       // usermodes set on connect
-    pub recvq: Option<usize>,        // per-conn receive-queue byte cap
-    pub hardsendq: Option<usize>,    // send-queue byte cap → disconnect
-    pub softsendq: Option<usize>,    // send-queue byte cap → pause reading (backpressure)
+    pub timeout: Option<u64>,            // registration timeout
+    pub modes: Option<String>,           // usermodes set on connect
+    pub recvq: Option<usize>,            // per-conn receive-queue byte cap
+    pub hardsendq: Option<usize>,        // send-queue byte cap → disconnect
+    pub softsendq: Option<usize>,        // send-queue byte cap → pause reading (backpressure)
     pub penaltythreshold: Option<usize>, // flood message cap override (see modules::flood)
-    pub commandrate: Option<u64>,    // flood window override, seconds
-    pub fakelag: bool,               // apply flood limiting (default); false = kill on flood
-    pub useident: bool,              // do an ident (RFC1413) lookup for this class
-    pub requireident: bool,          // refuse if the ident lookup fails
-    pub resolvehostnames: bool,      // resolve rDNS for this class (default yes)
-    pub maxconnwarn: bool,           // snotice opers when a limit refuses a client
-    pub waitpongexempt: bool,        // skip the conn_waitpong cookie for this class
+    pub commandrate: Option<u64>,        // flood window override, seconds
+    pub fakelag: bool,                   // apply flood limiting (default); false = kill on flood
+    pub useident: bool,                  // do an ident (RFC1413) lookup for this class
+    pub requireident: bool,              // refuse if the ident lookup fails
+    pub resolvehostnames: bool,          // resolve rDNS for this class (default yes)
+    pub maxconnwarn: bool,               // snotice opers when a limit refuses a client
+    pub waitpongexempt: bool,            // skip the conn_waitpong cookie for this class
 }
 
 /// Split a `key=value` value on commas into non-empty pieces.
@@ -75,7 +75,9 @@ fn apply(c: &mut ConnClass, k: &str, v: &str) {
         // stored credential in build() *after* the whole token pass, so it works
         // regardless of whether it appears before or after `password=`.
         "hash" => {}
-        "port" => c.ports.extend(list(v).filter_map(|p| p.parse::<u16>().ok())),
+        "port" => c
+            .ports
+            .extend(list(v).filter_map(|p| p.parse::<u16>().ok())),
         "asn" => c.asn.extend(crate::modules::asn::parse_list(v)),
         "localmax" => c.localmax = v.parse().ok(),
         "globalmax" => c.globalmax = v.parse().ok(),
@@ -112,7 +114,11 @@ fn raw_line(s: &Server, name: &str) -> Option<String> {
 /// `allow`/`deny`/`parent` keys, which stay class-local. Bounded against cycles.
 fn tokens_for(s: &Server, name: &str, depth: u8) -> Option<Vec<String>> {
     let line = raw_line(s, name)?;
-    let own: Vec<String> = line.split_whitespace().skip(1).map(str::to_string).collect();
+    let own: Vec<String> = line
+        .split_whitespace()
+        .skip(1)
+        .map(str::to_string)
+        .collect();
     let parent = own
         .iter()
         .find_map(|t| t.strip_prefix("parent="))
@@ -122,9 +128,7 @@ fn tokens_for(s: &Server, name: &str, depth: u8) -> Option<Vec<String>> {
         if depth < 8 {
             if let Some(pt) = tokens_for(s, &p, depth + 1) {
                 merged.extend(pt.into_iter().filter(|t| {
-                    !t.starts_with("allow=")
-                        && !t.starts_with("deny=")
-                        && !t.starts_with("parent=")
+                    !t.starts_with("allow=") && !t.starts_with("deny=") && !t.starts_with("parent=")
                 }));
             }
         }
@@ -242,9 +246,11 @@ pub fn ip_matches(mask: &str, ip: &str) -> bool {
 /// both the IP text and the host.
 fn mask_match(mask: &str, ip: &str, host: &str) -> bool {
     if let Some((net, bits)) = mask.split_once('/') {
-        if let (Ok(base), Ok(bits), Ok(target)) =
-            (net.parse::<IpAddr>(), bits.parse::<u8>(), ip.parse::<IpAddr>())
-        {
+        if let (Ok(base), Ok(bits), Ok(target)) = (
+            net.parse::<IpAddr>(),
+            bits.parse::<u8>(),
+            ip.parse::<IpAddr>(),
+        ) {
             return cidr_contains(base, bits, target);
         }
         return false;
@@ -296,7 +302,10 @@ fn pick(
             if class_count(s, &c.name, uid) >= max {
                 if c.maxconnwarn {
                     let max_s = max.to_string();
-                    let m = s.trf("connect class {0} is full ({1})", &[c.name.as_str(), max_s.as_str()]);
+                    let m = s.trf(
+                        "connect class {0} is full ({1})",
+                        &[c.name.as_str(), max_s.as_str()],
+                    );
                     s.snotice_c('c', &m);
                 }
                 continue; // full — try the next class
@@ -428,7 +437,11 @@ pub fn on_register(s: &mut Server, uid: Uid) -> AuthOutcome {
         }
         Pick::None => {} // keep whatever was assigned at connect
     }
-    let Some(class) = s.users.get(&uid).and_then(|u| u.class.clone()).and_then(|n| named(s, &n))
+    let Some(class) = s
+        .users
+        .get(&uid)
+        .and_then(|u| u.class.clone())
+        .and_then(|n| named(s, &n))
     else {
         return AuthOutcome::Proceed;
     };

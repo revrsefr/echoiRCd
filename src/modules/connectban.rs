@@ -124,9 +124,10 @@ pub fn on_connect(s: &mut Server, ip: IpAddr) {
         )
         .to_string();
     s.add_xline(XKind::Zline, &glob, dur, &setter, &reason);
-    s.snotice_c('x', &format!(
-        "Connect flooding from IP range {glob} (threshold {threshold})"
-    ));
+    s.snotice_c(
+        'x',
+        &format!("Connect flooding from IP range {glob} (threshold {threshold})"),
+    );
 }
 
 /// Periodically clears the whole tally.

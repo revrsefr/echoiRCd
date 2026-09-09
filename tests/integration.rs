@@ -48,8 +48,10 @@ fn gen_cert() -> (String, String) {
     b.set_subject_name(&name).unwrap();
     b.set_issuer_name(&name).unwrap();
     b.set_pubkey(&key).unwrap();
-    b.set_not_before(&Asn1Time::days_from_now(0).unwrap()).unwrap();
-    b.set_not_after(&Asn1Time::days_from_now(1).unwrap()).unwrap();
+    b.set_not_before(&Asn1Time::days_from_now(0).unwrap())
+        .unwrap();
+    b.set_not_after(&Asn1Time::days_from_now(1).unwrap())
+        .unwrap();
     b.sign(&key, MessageDigest::sha256()).unwrap();
     let cert = b.build();
     (
@@ -88,7 +90,9 @@ impl Server {
              bind_server = 127.0.0.1:{s2s}\nsid = 1AA\nmotd = hi\nio_threads = {io_threads}\n"
         );
         if accept_rate > 0 {
-            conf.push_str(&format!("accept_rate = {accept_rate}\naccept_burst = {accept_rate}\n"));
+            conf.push_str(&format!(
+                "accept_rate = {accept_rate}\naccept_burst = {accept_rate}\n"
+            ));
         }
         if tls {
             let (cert, key) = gen_cert();
@@ -110,7 +114,12 @@ impl Server {
             .stderr(Stdio::null())
             .spawn()
             .expect("spawn echoircd");
-        let srv = Server { child, plain, tls: tlsp, dir };
+        let srv = Server {
+            child,
+            plain,
+            tls: tlsp,
+            dir,
+        };
         srv.wait_ready();
         srv
     }
@@ -137,7 +146,8 @@ impl Server {
 
     fn plain_client(&self, nick: &str) -> TcpStream {
         let mut s = TcpStream::connect(("127.0.0.1", self.plain)).unwrap();
-        s.set_read_timeout(Some(Duration::from_millis(400))).unwrap();
+        s.set_read_timeout(Some(Duration::from_millis(400)))
+            .unwrap();
         register(&mut s, nick);
         s
     }
@@ -177,7 +187,8 @@ fn read_until<S: Read>(s: &mut S, needle: &str, timeout: Duration) -> bool {
                 }
             }
             Err(ref e)
-                if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {}
+                if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {
+            }
             Err(_) => break,
         }
     }
@@ -196,7 +207,8 @@ fn read_collect<S: Read>(s: &mut S, timeout: Duration) -> String {
             Ok(0) => break,
             Ok(n) => buf.extend_from_slice(&chunk[..n]),
             Err(ref e)
-                if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {}
+                if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {
+            }
             Err(_) => break,
         }
     }
@@ -235,7 +247,8 @@ fn plaintext_registration_privmsg_and_collision() {
 
     // a third client can't steal alice's nick
     let mut c = TcpStream::connect(("127.0.0.1", srv.plain)).unwrap();
-    c.set_read_timeout(Some(Duration::from_millis(400))).unwrap();
+    c.set_read_timeout(Some(Duration::from_millis(400)))
+        .unwrap();
     line(&mut c, "NICK alice");
     assert!(
         read_until(&mut c, " 433 ", Duration::from_secs(3)),
@@ -296,8 +309,10 @@ fn tls_in_reactor_handshake_and_cross_transport() {
 /// Register `nick` having negotiated capability `cap` (IRCv3 CAP LS/REQ/END).
 fn register_with_cap<S: Read + Write>(s: &mut S, nick: &str, cap: &str) {
     s.write_all(
-        format!("CAP LS 302\r\nNICK {nick}\r\nUSER {nick} 0 * :{nick}\r\nCAP REQ :{cap}\r\nCAP END\r\n")
-            .as_bytes(),
+        format!(
+            "CAP LS 302\r\nNICK {nick}\r\nUSER {nick} 0 * :{nick}\r\nCAP REQ :{cap}\r\nCAP END\r\n"
+        )
+        .as_bytes(),
     )
     .unwrap();
     assert!(
@@ -315,7 +330,9 @@ fn channel_rename_notifies_by_cap_and_needs_ops() {
     let srv = Server::start(2, false, 0);
     // alice negotiates draft/channel-rename; bob does not.
     let mut alice = TcpStream::connect(("127.0.0.1", srv.plain)).unwrap();
-    alice.set_read_timeout(Some(Duration::from_millis(400))).unwrap();
+    alice
+        .set_read_timeout(Some(Duration::from_millis(400)))
+        .unwrap();
     register_with_cap(&mut alice, "alice", "draft/channel-rename");
     let mut bob = srv.plain_client("bob");
 
@@ -344,9 +361,18 @@ fn channel_rename_notifies_by_cap_and_needs_ops() {
     );
     // bob's PART and JOIN arrive in one batch — collect and check both.
     let bobseen = read_collect(&mut bob, Duration::from_secs(4));
-    assert!(bobseen.contains("PART #old"), "plain client not PARTed: {bobseen:?}");
-    assert!(bobseen.contains("JOIN #new"), "plain client not re-JOINed: {bobseen:?}");
-    assert!(!bobseen.contains("RENAME"), "plain client should not see RENAME: {bobseen:?}");
+    assert!(
+        bobseen.contains("PART #old"),
+        "plain client not PARTed: {bobseen:?}"
+    );
+    assert!(
+        bobseen.contains("JOIN #new"),
+        "plain client not re-JOINed: {bobseen:?}"
+    );
+    assert!(
+        !bobseen.contains("RENAME"),
+        "plain client should not see RENAME: {bobseen:?}"
+    );
 
     // The channel now answers under the new name (and not the old).
     line(&mut alice, "PRIVMSG #new :landed");
@@ -369,7 +395,8 @@ fn accept_rate_limit_drops_connection_churn() {
     let mut socks = Vec::new();
     for i in 0..20 {
         if let Ok(mut s) = TcpStream::connect(("127.0.0.1", srv.plain)) {
-            s.set_read_timeout(Some(Duration::from_millis(600))).unwrap();
+            s.set_read_timeout(Some(Duration::from_millis(600)))
+                .unwrap();
             let _ = s.write_all(format!("NICK n{i}\r\nUSER n{i} 0 * :n\r\n").as_bytes());
             socks.push(s);
         }

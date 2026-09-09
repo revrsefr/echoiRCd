@@ -21,7 +21,11 @@ impl Command for OjoinCmd {
         1
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
-        let nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
+        let nick = s
+            .users
+            .get(&uid)
+            .map(|u| u.nick.clone())
+            .unwrap_or_default();
         if !s.is_oper(uid) {
             s.numeric(
                 uid,
@@ -33,7 +37,10 @@ impl Command for OjoinCmd {
         if !s.conf_bool("ojoin", false) {
             s.send(
                 uid,
-                format!(":{} NOTICE {nick} :*** OJOIN is not enabled on this server.", s.name),
+                format!(
+                    ":{} NOTICE {nick} :*** OJOIN is not enabled on this server.",
+                    s.name
+                ),
             );
             return CmdResult::Fail;
         }
@@ -47,9 +54,17 @@ impl Command for OjoinCmd {
         }
         crate::modules::operprefix::grant(s, uid, &key);
         if s.conf_bool("ojoin_op", true) {
-            crate::coremods::core_mode::svs_set_chan_modes(s, &chan, "+o", std::slice::from_ref(&nick));
+            crate::coremods::core_mode::svs_set_chan_modes(
+                s,
+                &chan,
+                "+o",
+                std::slice::from_ref(&nick),
+            );
         }
-        let m = s.trf("{0} used OJOIN to enter {1}", &[nick.as_str(), chan.as_str()]);
+        let m = s.trf(
+            "{0} used OJOIN to enter {1}",
+            &[nick.as_str(), chan.as_str()],
+        );
         s.snotice_c('v', &m);
         CmdResult::Ok
     }

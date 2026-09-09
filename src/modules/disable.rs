@@ -30,12 +30,20 @@ impl Module for Disable {
         _params: &[String],
     ) -> ModResult {
         // servers/use-disabled-commands opers bypass the disabled list
-        if crate::modules::opertypes::has_priv(srv, uid, crate::modules::opertypes::privs::SERVERS_USE_DISABLED_COMMANDS) {
+        if crate::modules::opertypes::has_priv(
+            srv,
+            uid,
+            crate::modules::opertypes::privs::SERVERS_USE_DISABLED_COMMANDS,
+        ) {
             return ModResult::Passthru;
         }
         // (re)build the set only when the config generation changes, not per command
         let gen = srv.config_gen;
-        let stale = srv.ext.get::<DisabledCache>().map(|c| c.gen != gen).unwrap_or(true);
+        let stale = srv
+            .ext
+            .get::<DisabledCache>()
+            .map(|c| c.gen != gen)
+            .unwrap_or(true);
         if stale {
             let cmds: HashSet<String> = srv
                 .conf_all("disabled_commands")

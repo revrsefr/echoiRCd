@@ -177,7 +177,9 @@ pub fn dechunk(body: &str) -> String {
             break;
         }
         out.extend_from_slice(&after[..size]);
-        rest = after[size..].strip_prefix(b"\r\n").unwrap_or(&after[size..]);
+        rest = after[size..]
+            .strip_prefix(b"\r\n")
+            .unwrap_or(&after[size..]);
     }
     String::from_utf8_lossy(&out).into_owned()
 }

@@ -39,7 +39,12 @@ struct SecGroup {
 /// A "require X" flag: bare or `=yes` requires it; an explicit falsy value excludes it.
 fn flag_tri(v: Option<&str>) -> Tri {
     match v {
-        Some(x) if matches!(x.to_ascii_lowercase().as_str(), "no" | "false" | "0" | "off") => {
+        Some(x)
+            if matches!(
+                x.to_ascii_lowercase().as_str(),
+                "no" | "false" | "0" | "off"
+            ) =>
+        {
             Tri::No
         }
         _ => Tri::Yes,
@@ -226,7 +231,10 @@ impl Command for SecGroupsCmd {
                 .map(|u| u.nick.clone())
                 .unwrap_or_default(),
         );
-        let m = s.trf("{0} is in security groups: {1}", &[tnick.as_str(), list.as_str()]);
+        let m = s.trf(
+            "{0} is in security groups: {1}",
+            &[tnick.as_str(), list.as_str()],
+        );
         s.send(uid, format!(":{} NOTICE {anick} :{m}", s.name));
         CmdResult::Ok
     }

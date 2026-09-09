@@ -438,7 +438,9 @@ mod tests {
 
     #[test]
     fn base64_roundtrips() {
-        let data = [0u8, 1, 2, 250, 128, 64, 32, 16, 255, 3, 7, 200, 199, 9, 11, 42];
+        let data = [
+            0u8, 1, 2, 250, 128, 64, 32, 16, 255, 3, 7, 200, 199, 9, 11, 42,
+        ];
         let enc = b64_encode(&data);
         assert_eq!(b64_decode(enc.as_bytes(), 16).unwrap(), data);
     }

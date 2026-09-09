@@ -4,8 +4,8 @@
 //! rate-limited. Recent message times live in the user's typed
 //! [`crate::extensible::Extensible`] slot, so the state is freed when the user quits.
 
-use crate::modules::connclass;
 use crate::module::{ModResult, Module};
+use crate::modules::connclass;
 use crate::server::{now, Server};
 use crate::Uid;
 
@@ -45,7 +45,10 @@ impl Module for Flood {
                 return ModResult::Passthru;
             };
             // opers holding users/flood bypass the message-rate limit
-            if crate::modules::opertypes::user_has_priv(u, crate::modules::opertypes::privs::USERS_FLOOD) {
+            if crate::modules::opertypes::user_has_priv(
+                u,
+                crate::modules::opertypes::privs::USERS_FLOOD,
+            ) {
                 return ModResult::Passthru;
             }
             let st = u.ext.get_or_insert_with(FloodState::default);

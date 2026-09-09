@@ -16,7 +16,11 @@ fn set(s: &mut Server, uid: Uid, key: &str, on: bool) {
     let Some(nick) = s.users.get(&uid).map(|u| u.nick.clone()) else {
         return;
     };
-    let changed = match s.channels.get_mut(key).and_then(|c| c.members.get_mut(&uid)) {
+    let changed = match s
+        .channels
+        .get_mut(key)
+        .and_then(|c| c.members.get_mut(&uid))
+    {
         Some(m) if m.oprefix() != on => {
             m.set_oprefix(on);
             true
@@ -27,11 +31,24 @@ fn set(s: &mut Server, uid: Uid, key: &str, on: bool) {
         return;
     }
     let sign = if on { '+' } else { '-' };
-    let name = s.channels.get(key).map(|c| c.name.clone()).unwrap_or_default();
-    s.to_channel(key, &format!(":{} MODE {name} {sign}y {nick}", s.name), None);
+    let name = s
+        .channels
+        .get(key)
+        .map(|c| c.name.clone())
+        .unwrap_or_default();
+    s.to_channel(
+        key,
+        &format!(":{} MODE {name} {sign}y {nick}", s.name),
+        None,
+    );
     // links: a timestamped FMODE (not a plain channel MODE), member named by uuid
     let sid = s.sid.clone();
-    s.propagate_chan_mode(&sid, &name, &format!("{sign}y"), std::slice::from_ref(&nick));
+    s.propagate_chan_mode(
+        &sid,
+        &name,
+        &format!("{sign}y"),
+        std::slice::from_ref(&nick),
+    );
 }
 
 /// Grant the oper prefix in `key` (used by ojoin and on-join auto-grant).

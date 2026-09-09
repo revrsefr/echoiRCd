@@ -93,7 +93,13 @@ pub fn compute_cloak(srv: &Server, uid: Uid) -> Option<String> {
 fn sanitize_label(s: &str) -> String {
     let out: String = s
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '.' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     if out.is_empty() {
         "unknown".to_string()

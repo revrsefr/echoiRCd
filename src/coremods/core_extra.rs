@@ -35,10 +35,18 @@ impl Command for Help {
             .first()
             .map(|t| t.to_ascii_uppercase())
             .unwrap_or_default();
-        let topic = if raw.is_empty() { "INDEX" } else { raw.as_str() };
+        let topic = if raw.is_empty() {
+            "INDEX"
+        } else {
+            raw.as_str()
+        };
         let head = if topic == "INDEX" { "*" } else { topic };
         // Clone the body so the server can be borrowed mutably for numeric() below.
-        let body: Vec<String> = s.help.get(topic).map(<[String]>::to_vec).unwrap_or_default();
+        let body: Vec<String> = s
+            .help
+            .get(topic)
+            .map(<[String]>::to_vec)
+            .unwrap_or_default();
         if body.is_empty() {
             s.numeric(
                 uid,
@@ -64,7 +72,11 @@ impl Command for List {
     }
     fn handle(&self, s: &mut Server, uid: Uid, _params: &[String]) -> CmdResult {
         s.numeric(uid, RPL_LISTSTART, "Channel :Users Name");
-        let auspex = crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::CHANNELS_AUSPEX);
+        let auspex = crate::modules::opertypes::has_priv(
+            s,
+            uid,
+            crate::modules::opertypes::privs::CHANNELS_AUSPEX,
+        );
         let keys: Vec<String> = s.channels.keys().cloned().collect();
         for key in keys {
             let ch = &s.channels[&key];
@@ -377,7 +389,11 @@ impl Command for Map {
         );
         // hideservices: services (U-lined) servers are hidden from non-opers.
         let hide_svc = s.conf_bool("hideservices", false)
-            && !crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::SERVERS_AUSPEX);
+            && !crate::modules::opertypes::has_priv(
+                s,
+                uid,
+                crate::modules::opertypes::privs::SERVERS_AUSPEX,
+            );
         let mut peers: Vec<String> = s
             .servers
             .values()

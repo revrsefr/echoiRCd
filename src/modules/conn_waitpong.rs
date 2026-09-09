@@ -38,7 +38,10 @@ fn exempt(s: &Server, uid: Uid) -> bool {
         IpAddr::V4(a) if a.is_loopback() => s.conf_bool("conn_waitpong_exempt_localhost4", false),
         IpAddr::V6(a) if a.is_loopback() => s.conf_bool("conn_waitpong_exempt_localhost6", false),
         // a loopback client on an IPv6 listener can arrive v4-mapped (::ffff:127.0.0.1)
-        IpAddr::V6(a) => a.to_ipv4_mapped().is_some_and(|m| m.is_loopback()) && s.conf_bool("conn_waitpong_exempt_localhost4", false),
+        IpAddr::V6(a) => {
+            a.to_ipv4_mapped().is_some_and(|m| m.is_loopback())
+                && s.conf_bool("conn_waitpong_exempt_localhost4", false)
+        }
         _ => false,
     }
 }

@@ -97,6 +97,9 @@ pub fn tick(s: &mut Server) {
             ),
         );
     } else if !now_flood && was_flood {
-        s.snotice_c('x', &format!("Unregistered-connection flood cleared: {live} pending"));
+        s.snotice_c(
+            'x',
+            &format!("Unregistered-connection flood cleared: {live} pending"),
+        );
     }
 }

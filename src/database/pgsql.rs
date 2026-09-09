@@ -344,23 +344,44 @@ mod tests {
         );
 
         // transactional snapshot replace: a bad row rolls the whole batch back
-        c.query("CREATE TEMP TABLE rep (addr text primary key, score bigint)", &[])
-            .unwrap();
+        c.query(
+            "CREATE TEMP TABLE rep (addr text primary key, score bigint)",
+            &[],
+        )
+        .unwrap();
         c.query_tx(&[
-            ("INSERT INTO rep (addr, score) VALUES ($1, $2)".into(), vec![Some(b"a".to_vec()), Some(b"1".to_vec())]),
-            ("INSERT INTO rep (addr, score) VALUES ($1, $2)".into(), vec![Some(b"b".to_vec()), Some(b"2".to_vec())]),
+            (
+                "INSERT INTO rep (addr, score) VALUES ($1, $2)".into(),
+                vec![Some(b"a".to_vec()), Some(b"1".to_vec())],
+            ),
+            (
+                "INSERT INTO rep (addr, score) VALUES ($1, $2)".into(),
+                vec![Some(b"b".to_vec()), Some(b"2".to_vec())],
+            ),
         ])
         .expect("commit");
-        assert_eq!(c.query("SELECT count(*) FROM rep", &[]).unwrap().rows[0][0], Some("2".into()));
+        assert_eq!(
+            c.query("SELECT count(*) FROM rep", &[]).unwrap().rows[0][0],
+            Some("2".into())
+        );
         // a duplicate key mid-batch must abort and leave the table unchanged
         assert!(c
             .query_tx(&[
                 ("DELETE FROM rep".into(), vec![]),
-                ("INSERT INTO rep (addr, score) VALUES ($1, $2)".into(), vec![Some(b"a".to_vec()), Some(b"9".to_vec())]),
-                ("INSERT INTO rep (addr, score) VALUES ($1, $2)".into(), vec![Some(b"a".to_vec()), Some(b"9".to_vec())]),
+                (
+                    "INSERT INTO rep (addr, score) VALUES ($1, $2)".into(),
+                    vec![Some(b"a".to_vec()), Some(b"9".to_vec())]
+                ),
+                (
+                    "INSERT INTO rep (addr, score) VALUES ($1, $2)".into(),
+                    vec![Some(b"a".to_vec()), Some(b"9".to_vec())]
+                ),
             ])
             .is_err());
-        assert_eq!(c.query("SELECT count(*) FROM rep", &[]).unwrap().rows[0][0], Some("2".into()));
+        assert_eq!(
+            c.query("SELECT count(*) FROM rep", &[]).unwrap().rows[0][0],
+            Some("2".into())
+        );
         c.close();
     }
 }

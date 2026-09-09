@@ -36,7 +36,10 @@ pub fn parse_list(v: &str) -> Vec<u32> {
         .map(str::trim)
         .filter(|t| !t.is_empty())
         .filter_map(|t| {
-            let n = t.strip_prefix("AS").or_else(|| t.strip_prefix("as")).unwrap_or(t);
+            let n = t
+                .strip_prefix("AS")
+                .or_else(|| t.strip_prefix("as"))
+                .unwrap_or(t);
             n.parse::<u32>().ok()
         })
         .collect()

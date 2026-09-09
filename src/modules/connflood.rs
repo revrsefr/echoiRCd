@@ -33,7 +33,9 @@ pub fn over_limit(s: &mut Server, ip: IpAddr) -> bool {
         return false;
     };
     let n = now();
-    let store = s.ext.get_or_insert_with::<ConnHistory>(ConnHistory::default);
+    let store = s
+        .ext
+        .get_or_insert_with::<ConnHistory>(ConnHistory::default);
     // Bound memory: a wide source-IP spread (e.g. an IPv6 /64) could otherwise grow
     // this map unbounded between tick GCs — once it's large, drop stale buckets now.
     if store.0.len() > MAX_TRACKED_IPS {

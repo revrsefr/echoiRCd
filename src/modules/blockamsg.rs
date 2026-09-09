@@ -51,7 +51,11 @@ impl Module for BlockAmsg {
             return ModResult::Passthru;
         }
         // servers/ignore-blockamsg opers bypass the check entirely
-        if crate::modules::opertypes::has_priv(srv, uid, crate::modules::opertypes::privs::SERVERS_IGNORE_BLOCKAMSG) {
+        if crate::modules::opertypes::has_priv(
+            srv,
+            uid,
+            crate::modules::opertypes::privs::SERVERS_IGNORE_BLOCKAMSG,
+        ) {
             return ModResult::Passthru;
         }
 

@@ -248,9 +248,7 @@ fn parse_provider(
             "pass" | "password" => cfg.password = v,
             "tls" => cfg.tls = truthy(&v),
             "pool" => pool = v.parse().unwrap_or(pool),
-            "connect_timeout" => {
-                cfg.connect_timeout = Duration::from_secs(v.parse().unwrap_or(5))
-            }
+            "connect_timeout" => cfg.connect_timeout = Duration::from_secs(v.parse().unwrap_or(5)),
             "timeout" => cfg.io_timeout = Duration::from_secs(v.parse().unwrap_or(30)),
             "queue_max" => qmax = v.parse().unwrap_or(qmax),
             _ => {}
@@ -296,7 +294,14 @@ pub fn init(srv: &mut Server) {
     let event_tx = srv.event_tx.clone();
     let mut providers = HashMap::new();
     // the primary provider (the flat pgsql_* keys) is keyed by ""
-    spawn_provider(&event_tx, &mut providers, String::new(), cfg.clone(), pool, qmax);
+    spawn_provider(
+        &event_tx,
+        &mut providers,
+        String::new(),
+        cfg.clone(),
+        pool,
+        qmax,
+    );
     // extra named providers — a module can target one by id (e.g. sqlauth → its own DB)
     for spec in srv.conf_all("provider").to_vec() {
         if let Some((id, pcfg, ppool, pqmax)) = parse_provider(&spec, &cfg, pool, qmax) {
@@ -358,16 +363,15 @@ fn run_worker(cfg: PgConfig, queue: Queue, core_tx: SyncSender<Event>) {
         // Isolate a panicking query (e.g. malformed data from a broken server): turn
         // it into an error result instead of killing this worker — which would shrink
         // the pool and leave that request's callback waiting forever.
-        let result: SqlResult =
-            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                execute_request(&mut conn, &cfg, &req)
-            })) {
-                Ok(r) => r,
-                Err(_) => {
-                    conn = None; // the connection state is now indeterminate — reconnect
-                    Err("pgsql: worker recovered from a panicking query".into())
-                }
-            };
+        let result: SqlResult = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            execute_request(&mut conn, &cfg, &req)
+        })) {
+            Ok(r) => r,
+            Err(_) => {
+                conn = None; // the connection state is now indeterminate — reconnect
+                Err("pgsql: worker recovered from a panicking query".into())
+            }
+        };
         if core_tx
             .send(Event::SqlResult { id: req.id, result })
             .is_err()
@@ -472,7 +476,10 @@ where
             .get_mut::<SqlState>()
             .and_then(|st| st.pending.remove(&id));
         if let Some(cb) = cb {
-            cb(srv, Err("pgsql: overloaded — query rejected (queue full)".into()));
+            cb(
+                srv,
+                Err("pgsql: overloaded — query rejected (queue full)".into()),
+            );
         }
     }
 }
@@ -811,7 +818,7 @@ pub fn store_save(srv: &Server, name: &str, content: String) {
     let queued = submit(
         &queue,
         SqlRequest {
-            id: 0,                             // fire-and-forget
+            id: 0, // fire-and-forget
             sql: STORE_UPSERT.to_string(),
             params,
             coalesce: Some(name.to_string()), // newest save for this store wins
@@ -1049,10 +1056,7 @@ mod tests {
     fn named_handles_trailing_dollar_and_empty() {
         assert_eq!(resolve_named("", vec![]).unwrap().0, "");
         // a lone trailing '$' is copied through, never read as a placeholder
-        assert_eq!(
-            resolve_named("SELECT 1 $", vec![]).unwrap().0,
-            "SELECT 1 $"
-        );
+        assert_eq!(resolve_named("SELECT 1 $", vec![]).unwrap().0, "SELECT 1 $");
     }
 
     fn store_write(name: &str, content: &str) -> SqlRequest {
@@ -1113,9 +1117,13 @@ mod tests {
             connect_timeout: Duration::from_secs(5),
             io_timeout: Duration::from_secs(30),
         };
-        let (id, cfg, pool, qmax) =
-            parse_provider(r#"id=auth host=db.internal database=webapp pass="p w" pool=4"#, &base, 2, 1024)
-                .unwrap();
+        let (id, cfg, pool, qmax) = parse_provider(
+            r#"id=auth host=db.internal database=webapp pass="p w" pool=4"#,
+            &base,
+            2,
+            1024,
+        )
+        .unwrap();
         assert_eq!(id, "auth");
         assert_eq!(cfg.host, "db.internal");
         assert_eq!(cfg.database, "webapp");

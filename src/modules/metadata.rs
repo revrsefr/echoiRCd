@@ -43,12 +43,12 @@ impl Module for Metadata {
         // theirs. Without this, metadata on a channel that empties leaks forever
         // (and is re-persisted to disk).
         let orphans: Vec<String> = match s.ext.get::<MetaStore>() {
-            Some(st) => st
-                .0
-                .keys()
-                .filter(|k| k.starts_with('#') && !s.channels.contains_key(k.as_str()))
-                .cloned()
-                .collect(),
+            Some(st) => {
+                st.0.keys()
+                    .filter(|k| k.starts_with('#') && !s.channels.contains_key(k.as_str()))
+                    .cloned()
+                    .collect()
+            }
             None => return,
         };
         if orphans.is_empty() {
@@ -178,10 +178,16 @@ impl Command for MetadataCmd {
                             // can't grow the store without limit
                             let cur = st.0.get(&key);
                             let overlong = v.len() > maxval;
-                            let too_many = cur.map(|m| m.len() >= maxkeys && !m.contains_key(&mkey))
+                            let too_many = cur
+                                .map(|m| m.len() >= maxkeys && !m.contains_key(&mkey))
                                 .unwrap_or(false);
                             if overlong || too_many {
-                                s.fail(uid, "METADATA", "KEY_INVALID", "value too long or too many keys");
+                                s.fail(
+                                    uid,
+                                    "METADATA",
+                                    "KEY_INVALID",
+                                    "value too long or too many keys",
+                                );
                                 return CmdResult::Fail;
                             }
                             st.0.entry(key.clone())
@@ -248,13 +254,22 @@ impl Command for MetadataCmd {
 /// and echo the change to that user if they negotiated the metadata cap. Backs the
 /// profile keys (avatar/bio/pronouns/timezone/url) that NickServ SET populates, so
 /// they surface over draft/metadata-2 instead of being dropped on the link.
-pub fn apply_user(s: &mut Server, uid: Uid, nick: &str, mkey: &str, value: Option<&str>, setter: &str) {
+pub fn apply_user(
+    s: &mut Server,
+    uid: Uid,
+    nick: &str,
+    mkey: &str,
+    value: Option<&str>,
+    setter: &str,
+) {
     let sk = format!("u{uid}");
     {
         let st = s.ext.get_or_insert_with::<MetaStore>(MetaStore::default);
         match value {
             Some(v) => {
-                st.0.entry(sk).or_default().insert(mkey.to_string(), v.to_string());
+                st.0.entry(sk)
+                    .or_default()
+                    .insert(mkey.to_string(), v.to_string());
             }
             None => {
                 if let Some(m) = st.0.get_mut(&sk) {

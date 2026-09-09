@@ -103,7 +103,8 @@ pub fn apply_mode(s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
             .all(|c| chan_mode(c).is_some_and(|h| h.is_list()));
     // Viewing autoop (+w), exemptchanops (+X) or filter (+g) exposes trusted
     // host/pattern lists, so require half-op to read them (public ban lists stay open).
-    let sensitive_view = pure_list_query && modestring.chars().any(|c| matches!(c, 'w' | 'X' | 'g'));
+    let sensitive_view =
+        pure_list_query && modestring.chars().any(|c| matches!(c, 'w' | 'X' | 'g'));
     if (!pure_list_query || sensitive_view) && s.rank(uid, &key) < RANK_HALFOP {
         s.numeric(
             uid,
@@ -273,7 +274,11 @@ fn apply_snomask(s: &mut Server, uid: Uid, adding: bool, param: Option<&str>) ->
         .get(&uid)
         .map(|u| u.flags.snomask_cats.chars().collect())
         .unwrap_or_default();
-    let all = || crate::users::DEFAULT_SNOMASK.chars().collect::<std::collections::BTreeSet<char>>();
+    let all = || {
+        crate::users::DEFAULT_SNOMASK
+            .chars()
+            .collect::<std::collections::BTreeSet<char>>()
+    };
     if !adding {
         cats.clear();
     } else {
@@ -285,7 +290,13 @@ fn apply_snomask(s: &mut Server, uid: Uid, adding: bool, param: Option<&str>) ->
                     match c {
                         '+' => sign = '+',
                         '-' => sign = '-',
-                        '*' => cats = if sign == '+' { all() } else { Default::default() },
+                        '*' => {
+                            cats = if sign == '+' {
+                                all()
+                            } else {
+                                Default::default()
+                            }
+                        }
                         c if crate::users::DEFAULT_SNOMASK.contains(c) => {
                             if sign == '+' {
                                 cats.insert(c);
@@ -396,7 +407,11 @@ fn apply_user_modes(s: &mut Server, uid: Uid, target: &str, params: &[String]) -
     if !applied.is_empty() {
         s.send(uid, format!(":{me} MODE {me} :{applied}"));
         // propagate to peers so remote WHOIS + services track the user's modes
-        let uuid = s.users.get(&uid).map(|u| u.uuid.clone()).unwrap_or_default();
+        let uuid = s
+            .users
+            .get(&uid)
+            .map(|u| u.uuid.clone())
+            .unwrap_or_default();
         s.propagate_from_user(uid, &format!("MODE {uuid} {applied}"));
     }
     CmdResult::Ok

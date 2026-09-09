@@ -53,11 +53,11 @@ impl Command for SslInfo {
         };
         let tls = if secure { "yes" } else { "no" };
         let fp = certfp.unwrap_or_else(|| "none".to_string());
-        let m = s.trf("SSLINFO {0}: TLS={1} certfp={2}", &[nick.as_str(), tls, fp.as_str()]);
-        s.send(
-            uid,
-            format!(":{} NOTICE {asker} :{m}", s.name),
+        let m = s.trf(
+            "SSLINFO {0}: TLS={1} certfp={2}",
+            &[nick.as_str(), tls, fp.as_str()],
         );
+        s.send(uid, format!(":{} NOTICE {asker} :{m}", s.name));
         CmdResult::Ok
     }
 }
@@ -76,7 +76,11 @@ impl Command for Links {
         );
         // hideservices: services (U-lined) servers are hidden from non-opers.
         let hide_svc = s.conf_bool("hideservices", false)
-            && !crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::SERVERS_AUSPEX);
+            && !crate::modules::opertypes::has_priv(
+                s,
+                uid,
+                crate::modules::opertypes::privs::SERVERS_AUSPEX,
+            );
         let mut rows: Vec<(String, String)> = s
             .servers
             .values()
@@ -122,11 +126,7 @@ impl Command for Whois {
                     );
                     // 312: the user's server and its description (not a placeholder —
                     // the actual server info, so a services user reads as its server).
-                    s.numeric(
-                        uid,
-                        RPL_WHOISSERVER,
-                        &format!("{} {srv} :{sdesc}", ru.nick),
-                    );
+                    s.numeric(uid, RPL_WHOISSERVER, &format!("{} {srv} :{sdesc}", ru.nick));
                     // 313: a user on a U-lined services server is "a network service"
                     // — its oper line reads as a service, not an operator.
                     if s.server_is_service(&ru.sid) {
@@ -182,8 +182,16 @@ impl Command for Whois {
         };
         let asker_oper = s.is_oper(uid);
         // auspex: see through user privacy (real host+IP, geo) / channel privacy (secret chans)
-        let asker_auspex_u = crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::USERS_AUSPEX);
-        let asker_auspex_c = crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::CHANNELS_AUSPEX);
+        let asker_auspex_u = crate::modules::opertypes::has_priv(
+            s,
+            uid,
+            crate::modules::opertypes::privs::USERS_AUSPEX,
+        );
+        let asker_auspex_c = crate::modules::opertypes::has_priv(
+            s,
+            uid,
+            crate::modules::opertypes::privs::CHANNELS_AUSPEX,
+        );
         let is_self = tuid == uid;
         // hidewhois: hide sensitive lines from ordinary users (opers/self exempt per config)
         let hide = crate::modules::hidewhois::hide(s, uid, tuid, asker_oper);
@@ -445,14 +453,15 @@ impl Command for Whois {
         // +W showwhois — tell the target that someone looked them up (users/secret-whois is silent)
         if showwhois
             && !is_self
-            && !crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::USERS_SECRET_WHOIS)
+            && !crate::modules::opertypes::has_priv(
+                s,
+                uid,
+                crate::modules::opertypes::privs::USERS_SECRET_WHOIS,
+            )
         {
             let by = s.users.get(&uid).map(|u| u.prefix()).unwrap_or_default();
             let m = s.trf("{0} did a /WHOIS on you", &[by.as_str()]);
-            s.send(
-                tuid,
-                format!(":{} NOTICE {nick} :*** {m}", s.name),
-            );
+            s.send(tuid, format!(":{} NOTICE {nick} :*** {m}", s.name));
         }
         s.numeric(uid, RPL_ENDOFWHOIS, &format!("{nick} :End of /WHOIS list"));
         CmdResult::Ok
@@ -481,8 +490,16 @@ impl Command for Who {
         let asker_oper = s.is_oper(uid);
         // auspex: reveal secret/private channel members (channels/auspex) and +i users
         // who share no channel with the asker (users/auspex)
-        let asker_auspex_u = crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::USERS_AUSPEX);
-        let asker_auspex_c = crate::modules::opertypes::has_priv(s, uid, crate::modules::opertypes::privs::CHANNELS_AUSPEX);
+        let asker_auspex_u = crate::modules::opertypes::has_priv(
+            s,
+            uid,
+            crate::modules::opertypes::privs::USERS_AUSPEX,
+        );
+        let asker_auspex_c = crate::modules::opertypes::has_priv(
+            s,
+            uid,
+            crate::modules::opertypes::privs::CHANNELS_AUSPEX,
+        );
         let multi = s
             .users
             .get(&uid)
@@ -532,7 +549,11 @@ impl Command for Who {
         } else if let Some(tuid) = s.find_nick(target) {
             // hide a +i (invisible) user from a WHO by someone who shares no channel
             // with them (self and opers always see them).
-            let hidden = s.users.get(&tuid).map(|u| u.flags.invisible).unwrap_or(false)
+            let hidden = s
+                .users
+                .get(&tuid)
+                .map(|u| u.flags.invisible)
+                .unwrap_or(false)
                 && tuid != uid
                 && !asker_auspex_u
                 && !s

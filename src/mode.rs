@@ -429,16 +429,23 @@ impl ChanMode for OperFlagChan {
             s.numeric(
                 uid,
                 ERR_NOPRIVILEGES,
-                &format!("{chan} :Only IRC operators may set channel mode +{}", self.ch),
+                &format!(
+                    "{chan} :Only IRC operators may set channel mode +{}",
+                    self.ch
+                ),
             );
             return Applied::No;
         }
         // per-oper-type chanmode allowlist (services under sudo pass through)
-        if adding && !s.mode_sudo && !crate::modules::opertypes::can_use_mode(s, uid, self.ch, true) {
+        if adding && !s.mode_sudo && !crate::modules::opertypes::can_use_mode(s, uid, self.ch, true)
+        {
             s.numeric(
                 uid,
                 ERR_NOPRIVILEGES,
-                &format!("{chan} :Your oper type may not set channel mode +{}", self.ch),
+                &format!(
+                    "{chan} :Your oper type may not set channel mode +{}",
+                    self.ch
+                ),
             );
             return Applied::No;
         }
@@ -799,7 +806,11 @@ impl ChanMode for ListMode {
                 }
             }
             if full {
-                s.numeric(uid, ERR_BANLISTFULL, &format!("{chan} {mask} :Channel list is full"));
+                s.numeric(
+                    uid,
+                    ERR_BANLISTFULL,
+                    &format!("{chan} {mask} :Channel list is full"),
+                );
                 return Applied::No;
             }
             Applied::Yes(Some(mask))
@@ -1372,7 +1383,10 @@ impl UserMode for OperFlag {
             return false;
         }
         // per-oper-type usermode allowlist (services under sudo pass through)
-        if adding && !s.mode_sudo && !crate::modules::opertypes::can_use_mode(s, uid, self.ch, false) {
+        if adding
+            && !s.mode_sudo
+            && !crate::modules::opertypes::can_use_mode(s, uid, self.ch, false)
+        {
             s.numeric(
                 uid,
                 ERR_NOPRIVILEGES,

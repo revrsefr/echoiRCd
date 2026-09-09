@@ -30,13 +30,7 @@ impl Module for SolveMsg {
         "solvemsg"
     }
 
-    fn on_pre_message(
-        &mut self,
-        s: &mut Server,
-        uid: Uid,
-        target: &str,
-        text: &str,
-    ) -> ModResult {
+    fn on_pre_message(&mut self, s: &mut Server, uid: Uid, target: &str, text: &str) -> ModResult {
         if !s.conf_bool("solvemsg", false) {
             return ModResult::Passthru;
         }
@@ -61,7 +55,11 @@ impl Module for SolveMsg {
             return ModResult::Passthru; // already solved
         }
         let pending = st.and_then(|st| st.answer);
-        let nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
+        let nick = s
+            .users
+            .get(&uid)
+            .map(|u| u.nick.clone())
+            .unwrap_or_default();
 
         // is this message the answer to an outstanding challenge?
         if let Some(ans) = pending {
