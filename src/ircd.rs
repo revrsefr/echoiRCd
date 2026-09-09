@@ -794,6 +794,9 @@ impl Ircd {
 
     fn on_tick(&mut self) {
         self.server.ping_links(); // keepalive on every server link
+        for uid in self.server.dead_links(crate::server::now()) {
+            self.server.close_link(uid, "Ping timeout"); // hung peer: silent past ping_freq+timeout
+        }
         self.server.purge_xlines(); // drop expired server bans
         self.server.purge_tbans(); // lift expired timed channel bans (TBAN)
         self.server.purge_flood_state(); // reclaim per-member +f/+J state of departed users

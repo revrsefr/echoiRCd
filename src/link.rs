@@ -37,6 +37,7 @@ pub struct Link {
     pub sid: Option<String>,
     pub name: Option<String>,
     pub bursting: bool, // between the peer's BURST and ENDBURST
+    pub last_seen: u64, // unix secs of the last line from this link (dead-link reap)
 }
 
 /// A server known on the network, for LINKS / MAP / routing.
@@ -149,6 +150,7 @@ impl Server {
                 sid: None,
                 name: None,
                 bursting: false,
+                last_seen: now(),
             },
         );
     }
@@ -161,6 +163,9 @@ impl Server {
 
     /// Dispatch one parsed S2S line from link `uid`.
     pub fn on_link(&mut self, uid: Uid, msg: &Message) {
+        if let Some(l) = self.links.get_mut(&uid) {
+            l.last_seen = now(); // any line (incl. PONG) marks the link alive
+        }
         let registered = self.links.get(&uid).map(|l| l.registered).unwrap_or(false);
         match msg.command.as_str() {
             "SERVER" if !registered => self.link_server(uid, msg),
@@ -391,6 +396,20 @@ impl Server {
         for u in uids {
             self.link_out(u, format!("PING :{token}"));
         }
+    }
+
+    /// Links that haven't sent any line (not even a PONG to `ping_links`) within
+    /// `ping_frequency + ping_timeout` — a hung peer whose TCP is up but which stopped
+    /// talking. Returned for reaping so a stuck link can't hold resources forever.
+    pub fn dead_links(&self, now: u64) -> Vec<Uid> {
+        let deadline =
+            (self.conf_num("ping_frequency", 120usize) + self.conf_num("ping_timeout", 30usize))
+                as u64;
+        self.links
+            .iter()
+            .filter(|(_, l)| now.saturating_sub(l.last_seen) > deadline)
+            .map(|(&u, _)| u)
+            .collect()
     }
 
     /// Relay `line` to every registered link except `except` (the origin).
