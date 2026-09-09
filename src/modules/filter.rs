@@ -192,9 +192,15 @@ impl Command for FilterCmd {
                             return CmdResult::Fail;
                         }
                     };
+                    // live-propagate the add to linked peers (same wire as burst_filters);
+                    // encode now, before it moves into the set. Removal has no representation
+                    // in the m_filter metadata wire (add/replace-by-pattern only), so a local
+                    // remove is not relayed — peers keep it until their own burst/change.
+                    let wire = encode_filter(&filter);
                     let f = s.ext.get_or_insert_with::<Filters>(Filters::default);
                     f.0.retain(|r| r.pattern != pattern);
                     f.0.push(filter);
+                    s.propagate(&format!(":{} METADATA * filter :{}", s.sid, wire), None);
                     let m = s.trf(
                         "{0} added FILTER {1} (engine={2} action={3})",
                         &[nick.as_str(), pattern.as_str(), engine.as_str(), action.as_str()],
