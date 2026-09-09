@@ -420,6 +420,14 @@ impl Ircd {
                         status,
                         &body,
                     );
+                } else if let Some(detail) = tag.strip_prefix("bridge:tg:") {
+                    crate::modules::bridge::on_http_result(
+                        &mut self.server,
+                        uid,
+                        detail,
+                        status,
+                        &body,
+                    );
                 }
             }
             Event::RpcRequest {

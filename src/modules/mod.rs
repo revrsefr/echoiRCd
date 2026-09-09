@@ -12,6 +12,7 @@ pub mod autodrop;
 pub mod autoop;
 pub mod banredirect;
 pub mod blockamsg;
+pub mod bridge;
 pub mod channames;
 pub mod channelban;
 pub mod chanlog;
@@ -124,6 +125,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(chathistory::ChatHistoryGc),
         Box::new(event_playback::EventPlayback),
         Box::new(webpush::WebPush),
+        Box::new(bridge::Bridge),
         Box::new(account_registration::AcctRegGc),
     ]
 }
