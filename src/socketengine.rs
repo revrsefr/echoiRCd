@@ -19,7 +19,7 @@ use crate::map::{HashMap, HashSet};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -324,7 +324,7 @@ fn resolve_io_threads(io_threads: usize) -> usize {
 /// only frame lines and feed it Events — so per-connection I/O (plaintext framing and
 /// TLS crypto alike) scales across cores with no shared locking.
 pub fn spawn_reactors(
-    core: Sender<Event>,
+    core: SyncSender<Event>,
     max_line: usize,
     max_sendq: usize,
     io_threads: usize,
@@ -501,7 +501,7 @@ pub fn run_acceptor(
 /// routed to the owning worker by the `out_tx` baked into that connection's OutSink),
 /// while uids come from the shared counter and stay globally unique.
 fn spawn_reactor(
-    core: Sender<Event>,
+    core: SyncSender<Event>,
     max_line: usize,
     max_sendq: usize,
     handshake_timeout: Option<Duration>,
@@ -538,7 +538,7 @@ fn reactor_loop(
     handoff_rx: Receiver<Accepted>,
     out_tx: Sender<Out>,
     out_rx: Receiver<Out>,
-    core: Sender<Event>,
+    core: SyncSender<Event>,
     max_line: usize,
     max_sendq: usize,
     handshake_timeout: Option<Duration>,
@@ -792,7 +792,7 @@ fn try_handshake(
     poll: &mut Poll,
     conns: &mut HashMap<usize, Conn>,
     t: usize,
-    core: &Sender<Event>,
+    core: &SyncSender<Event>,
 ) -> bool {
     let mut close = false;
     let mut connect: Option<(
@@ -860,7 +860,7 @@ const MAX_READ_PER_TURN: usize = 64 * 1024;
 
 /// Drain readable bytes from `t` (edge-triggered: read until WouldBlock), frame
 /// complete lines and forward them to the core; close on EOF/error.
-fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: &Sender<Event>) -> bool {
+fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: &SyncSender<Event>) -> bool {
     // a TLS conn must finish negotiating before any application bytes flow
     if !try_handshake(poll, conns, t, core) {
         return false;
@@ -992,7 +992,7 @@ fn read_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: 
 /// interest, and close once a `closing` connection's buffer is drained. If the
 /// backlog dropped back under softsendq, un-pause reads and catch up (edge-triggered:
 /// data that arrived while paused won't re-fire, so read it here).
-fn flush_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: &Sender<Event>) {
+fn flush_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: &SyncSender<Event>) {
     // a writable event during a TLS handshake advances it, not the (empty) write queue
     if !try_handshake(poll, conns, t, core) {
         return;
@@ -1041,7 +1041,7 @@ fn flush_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core:
 }
 
 /// Deregister + drop `t`'s socket and tell the core the connection is gone.
-fn close_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: &Sender<Event>) {
+fn close_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core: &SyncSender<Event>) {
     if let Some(mut c) = conns.remove(&t) {
         let _ = poll.registry().deregister(c.sock.source());
         // send a TLS close_notify for an established session (not a half-done handshake)
@@ -1069,7 +1069,7 @@ fn close_conn(poll: &mut Poll, conns: &mut HashMap<usize, Conn>, t: usize, core:
 /// header before the handshake) and every server link keep the thread path.
 pub fn accept_loop(
     listener: TcpListener,
-    core: Sender<Event>,
+    core: SyncSender<Event>,
     tls: Option<Arc<dyn TlsBackend>>,
     counter: Arc<AtomicU64>,
     link: bool,
@@ -1176,7 +1176,7 @@ pub fn accept_loop(
 
 /// Dial an outbound server link and wire it to the core (an `outbound` link that
 /// introduces itself first). Used for auto-connecting to a configured uplink.
-pub fn connect_link(addr: &str, core: Sender<Event>, counter: Arc<AtomicU64>, max_line: usize) {
+pub fn connect_link(addr: &str, core: SyncSender<Event>, counter: Arc<AtomicU64>, max_line: usize) {
     let stream = match TcpStream::connect(addr) {
         Ok(s) => s,
         Err(e) => {
@@ -1219,7 +1219,7 @@ pub fn connect_link(addr: &str, core: Sender<Event>, counter: Arc<AtomicU64>, ma
 
 // --- plaintext link: two blocking threads -----------------------------------
 
-fn reader_loop(stream: TcpStream, uid: Uid, core: Sender<Event>, max_line: usize) {
+fn reader_loop(stream: TcpStream, uid: Uid, core: SyncSender<Event>, max_line: usize) {
     let mut buf = BufReader::new(stream);
     let mut line = String::new();
     loop {
@@ -1270,7 +1270,7 @@ fn tls_conn(
     mut stream: TcpStream,
     uid: Uid,
     addr: SocketAddr,
-    core: Sender<Event>,
+    core: SyncSender<Event>,
     link: bool,
     max_line: usize,
     proxy_trust: Vec<String>,

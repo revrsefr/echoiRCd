@@ -44,7 +44,7 @@ pub mod scram;
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -312,7 +312,7 @@ pub fn init(srv: &mut Server) {
 
 /// Spawn one provider's worker pool and register its queue.
 fn spawn_provider(
-    event_tx: &Sender<Event>,
+    event_tx: &SyncSender<Event>,
     providers: &mut HashMap<String, Provider>,
     id: String,
     cfg: PgConfig,
@@ -339,7 +339,7 @@ fn spawn_provider(
 /// One persistent worker: owns a connection, pulls requests off the shared queue,
 /// runs each query (blocking — but off the core), and injects the result as an
 /// Event. A dead connection is transparently reconnected once per request.
-fn run_worker(cfg: PgConfig, queue: Queue, core_tx: Sender<Event>) {
+fn run_worker(cfg: PgConfig, queue: Queue, core_tx: SyncSender<Event>) {
     let mut conn: Option<PgConn> = None;
     loop {
         let req = {
@@ -948,7 +948,7 @@ mod tests {
             io_timeout: Duration::from_secs(5),
         };
         let queue: Queue = Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(65536);
         std::thread::spawn({
             let q = queue.clone();
             move || run_worker(cfg, q, tx)

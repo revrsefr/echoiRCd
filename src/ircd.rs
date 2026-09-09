@@ -5,7 +5,8 @@
 use crate::map::HashMap;
 use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -195,7 +196,7 @@ pub struct Ircd {
 impl Ircd {
     pub fn new(
         cfg: Config,
-        event_tx: Sender<Event>,
+        event_tx: SyncSender<Event>,
         conn_counter: std::sync::Arc<std::sync::atomic::AtomicU64>,
     ) -> Ircd {
         let mut server = Server::new(cfg, event_tx, conn_counter);

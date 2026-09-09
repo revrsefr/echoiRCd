@@ -419,7 +419,7 @@ mod tests {
     // channel with remote/services members (e.g. reverse + a bot in #echoircd).
     #[test]
     fn active_channel_counts_remote_members() {
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(65536);
         let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
         let (utx, _urx) = mpsc::channel();
         let mut chans = HashSet::default();

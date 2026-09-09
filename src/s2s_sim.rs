@@ -44,7 +44,7 @@ impl Node {
             password: "pw".to_string(),
             autoconnect: false,
         }];
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(65536);
         let srv = Server::new(cfg, tx, Arc::new(AtomicU64::new(1)));
         let (_dead_tx, link_rx) = mpsc::channel(); // replaced in `link`
         Node {

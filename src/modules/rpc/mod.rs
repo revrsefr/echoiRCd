@@ -27,7 +27,7 @@ pub mod user;
 pub mod verify;
 pub mod whowas;
 
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::SyncSender;
 
 use crate::config::Config;
 use crate::ircd::Event;
@@ -149,7 +149,7 @@ pub fn envelope(method: &str, id: &str, result: Result<String, RpcError>) -> Str
 
 /// Start the RPC HTTP listener if configured. Called from `main` with a clone of
 /// the core's event sender. No-op (with a stderr note) when disabled or misconfigured.
-pub fn maybe_start(cfg: &Config, tx: Sender<Event>) {
+pub fn maybe_start(cfg: &Config, tx: SyncSender<Event>) {
     let get = |k: &str| cfg.raw.get(k).and_then(|v| v.last()).map(|s| s.as_str());
     let on = get("rpc").map(crate::config::yesish).unwrap_or(false);
     if !on {

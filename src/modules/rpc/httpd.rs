@@ -5,7 +5,8 @@
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::channel;
 use std::time::Duration;
 
 use crate::ircd::Event;
@@ -15,7 +16,7 @@ const IO_TIMEOUT: Duration = Duration::from_secs(20);
 const CORE_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Accept loop. Never returns while the listener is alive.
-pub fn serve(listener: TcpListener, tx: Sender<Event>, user: String, token: String) {
+pub fn serve(listener: TcpListener, tx: SyncSender<Event>, user: String, token: String) {
     for conn in listener.incoming() {
         let Ok(stream) = conn else { continue };
         let (tx, user, token) = (tx.clone(), user.clone(), token.clone());
@@ -60,7 +61,7 @@ fn auth_ok(header: Option<&str>, user: &str, token: &str) -> bool {
 
 fn handle(
     mut stream: TcpStream,
-    tx: &Sender<Event>,
+    tx: &SyncSender<Event>,
     user: &str,
     token: &str,
 ) -> std::io::Result<()> {

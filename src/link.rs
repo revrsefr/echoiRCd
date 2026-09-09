@@ -2945,7 +2945,7 @@ mod tests {
         use crate::users::{Caps, UserFlags};
         use std::sync::atomic::AtomicU64;
         use std::sync::{mpsc, Arc};
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(65536);
         let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
         let (utx, urx) = mpsc::channel();
         s.users.insert(
@@ -3031,7 +3031,7 @@ mod tests {
         use crate::config::Config;
         use std::sync::atomic::AtomicU64;
         use std::sync::{mpsc, Arc};
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(65536);
         let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
 
         fn add_remote(s: &mut Server, uuid: &str, nick: &str, sid: &str, ip: &str, ts: u64) {
@@ -3084,7 +3084,7 @@ mod tests {
         use crate::users::{Caps, UserFlags};
         use std::sync::atomic::AtomicU64;
         use std::sync::{mpsc, Arc};
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(65536);
         let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
         s.remote_users.insert(
             "42SB00000".to_string(),
@@ -3182,7 +3182,7 @@ mod tests {
         use crate::users::{Caps, UserFlags};
         use std::sync::atomic::AtomicU64;
         use std::sync::{mpsc, Arc};
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(65536);
         let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
         s.remote_users.insert(
             "42SB00000".to_string(),
@@ -3284,7 +3284,7 @@ mod tests {
         use crate::users::{Caps, UserFlags};
         use std::sync::atomic::AtomicU64;
         use std::sync::{mpsc, Arc};
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(65536);
         let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
         s.remote_users.insert(
             "42SB00000".to_string(),
@@ -3403,7 +3403,7 @@ mod tests {
         use crate::config::Config;
         use std::sync::atomic::AtomicU64;
         use std::sync::{mpsc, Arc};
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(65536);
         let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
         // a services bot the network already knows about
         s.remote_users.insert(
@@ -3444,7 +3444,7 @@ mod tests {
         use crate::users::{Caps, UserFlags};
         use std::sync::atomic::AtomicU64;
         use std::sync::{mpsc, Arc};
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(65536);
         let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
         s.servers.insert(
             "42S".to_string(),
@@ -3557,7 +3557,7 @@ mod tests {
         use crate::config::Config;
         use std::sync::atomic::AtomicU64;
         use std::sync::{mpsc, Arc};
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(65536);
         let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
         s.remote_users.insert(
             "42SAAAAAA".to_string(),
@@ -3597,7 +3597,7 @@ mod tests {
         use crate::config::Config;
         use std::sync::atomic::AtomicU64;
         use std::sync::{mpsc, Arc};
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(65536);
         let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
         s.remote_users.insert(
             "42SAAAAAA".to_string(),
@@ -3705,7 +3705,7 @@ mod tests {
         use crate::config::Config;
         use std::sync::atomic::AtomicU64;
         use std::sync::{mpsc, Arc};
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(65536);
         let mut cfg = Config::default();
         cfg.sasl_server = "services.example.net".to_string();
         cfg.raw
@@ -3724,7 +3724,7 @@ mod tests {
         use crate::config::Config;
         use std::sync::atomic::AtomicU64;
         use std::sync::{mpsc, Arc};
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(65536);
         let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
         let mk = |sid: &str, is_service: bool| RemoteServer {
             sid: sid.to_string(),
@@ -3761,7 +3761,7 @@ mod tests {
         use std::sync::atomic::AtomicU64;
         use std::sync::{mpsc, Arc};
 
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(65536);
         let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
         s.servers.insert(
             "42S".into(),
@@ -3853,7 +3853,7 @@ mod tests {
         use std::sync::atomic::AtomicU64;
         use std::sync::{mpsc, Arc};
 
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(65536);
         let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
         s.servers.insert(
             "42S".into(),

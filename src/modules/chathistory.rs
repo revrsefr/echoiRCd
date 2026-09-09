@@ -489,7 +489,7 @@ mod tests {
     // (default 7d), so the key set can't grow forever with every distinct DM/channel.
     #[test]
     fn gc_drops_stale_conversation_keys() {
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(65536);
         let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
         let n = now();
         let msg = |ts| HistMsg {
@@ -516,7 +516,7 @@ mod tests {
     // CHATHISTORY/+H can filter it out for clients without the cap; messages aren't.
     #[test]
     fn event_playback_records_and_flags_events() {
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(65536);
         let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
         record(&mut s, "#c", "a!u@h", "PRIVMSG", "#c", "hi", "m1");
         record_event(&mut s, "#c", ":a!u@h JOIN #c");

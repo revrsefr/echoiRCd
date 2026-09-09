@@ -271,7 +271,17 @@ fn main() {
     // one uid counter shared by every listener (and by CONNECT) so ids stay unique
     let counter = Arc::new(AtomicU64::new(1));
 
-    let (tx, rx) = mpsc::channel();
+    // Bounded core event queue: reactor/worker producers backpressure when the core
+    // falls behind, instead of the queue growing until OOM. The core thread never
+    // sends to it inline (only worker threads do), so a full queue can't deadlock it.
+    let core_queue_max: usize = cfg
+        .raw
+        .get("core_queue_max")
+        .and_then(|v| v.first())
+        .and_then(|s| s.parse().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(16384);
+    let (tx, rx) = mpsc::sync_channel(core_queue_max);
     let core_cfg = cfg.clone();
     let core_tx = tx.clone(); // the core self-injects events (DNS results)
     let core_counter = counter.clone();

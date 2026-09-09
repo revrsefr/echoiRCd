@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::AtomicU64;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -236,7 +236,7 @@ pub struct Server {
     pub label_capture: RefCell<Option<(Uid, Vec<String>)>>,
     /// Rolling in-memory server log (fed by `snotice`), read by the RPC log methods.
     pub log: RefCell<LogState>,
-    pub event_tx: Sender<Event>,      // self-inject events (DNS results)
+    pub event_tx: SyncSender<Event>,      // self-inject events (DNS results)
     pub conn_counter: Arc<AtomicU64>, // mints connection uids (for CONNECT dials)
     /// Module-owned server state, keyed by type. Each `modules/*.rs` stores its
     /// own struct here so features live in their own file instead of this one.
@@ -246,7 +246,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new(cfg: Config, event_tx: Sender<Event>, conn_counter: Arc<AtomicU64>) -> Server {
+    pub fn new(cfg: Config, event_tx: SyncSender<Event>, conn_counter: Arc<AtomicU64>) -> Server {
         let (catalog, i18n_warn) = crate::i18n::Catalog::load(
             cfg.raw
                 .get("locale_dir")
@@ -1823,7 +1823,7 @@ mod tests {
     }
 
     fn srv() -> Server {
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(65536);
         Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)))
     }
 

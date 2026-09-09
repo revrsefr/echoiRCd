@@ -22,7 +22,8 @@
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, Sender, TryRecvError};
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -133,7 +134,7 @@ pub fn accept_key(client_key: &str) -> String {
 /// Start the ws:// and/or wss:// listeners if configured. Called from `main`.
 pub fn maybe_start(
     cfg: &Config,
-    core: Sender<Event>,
+    core: SyncSender<Event>,
     counter: Arc<AtomicU64>,
     inherited: &mut Vec<(String, TcpListener)>,
     reg: &Arc<std::sync::Mutex<Vec<(&'static str, std::os::fd::RawFd)>>>,
@@ -230,7 +231,7 @@ pub fn maybe_start(
 /// Accept forever; one thread per connection.
 fn accept_ws(
     listener: TcpListener,
-    core: Sender<Event>,
+    core: SyncSender<Event>,
     counter: Arc<AtomicU64>,
     tls: Option<Arc<dyn TlsBackend>>,
     cfg: WsConfig,
@@ -253,7 +254,7 @@ fn ws_conn(
     raw: TcpStream,
     uid: Uid,
     addr: SocketAddr,
-    core: Sender<Event>,
+    core: SyncSender<Event>,
     tls: Option<Arc<dyn TlsBackend>>,
     cfg: WsConfig,
 ) {
@@ -296,7 +297,7 @@ fn ws_session<S: WsStream>(
     uid: Uid,
     addr: SocketAddr,
     tls_secure: bool,
-    core: Sender<Event>,
+    core: SyncSender<Event>,
     shutdown: TcpStream,
     cfg: WsConfig,
 ) {
@@ -359,7 +360,7 @@ fn ws_session<S: WsStream>(
 fn io_loop<S: WsStream>(
     stream: &mut S,
     uid: Uid,
-    core: &Sender<Event>,
+    core: &SyncSender<Event>,
     out_rx: &Receiver<String>,
     cfg: &WsConfig,
     send_opcode: u8,
@@ -461,7 +462,7 @@ fn io_loop<S: WsStream>(
 
 /// Split a completed data message into IRC lines and forward them; returns false if
 /// the core has gone away. Clears `msg`.
-fn deliver(msg: &mut Vec<u8>, uid: Uid, core: &Sender<Event>) -> bool {
+fn deliver(msg: &mut Vec<u8>, uid: Uid, core: &SyncSender<Event>) -> bool {
     let text = String::from_utf8_lossy(msg);
     for piece in text.split('\n') {
         let l = piece.trim_end_matches('\r');
