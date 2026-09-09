@@ -1004,6 +1004,9 @@ impl Server {
             if key == "filter" {
                 crate::modules::filter::apply_metadata(self, &value);
             }
+            // multi-hop: relay global metadata onward to every other link (never back
+            // down the one it arrived on), so a 3rd+ server also converges.
+            self.propagate(&msg.to_wire(), Some(from));
             return;
         }
         let Some(tuid) = self.link_local_target(&target) else {
