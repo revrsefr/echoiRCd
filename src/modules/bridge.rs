@@ -106,6 +106,13 @@ impl Module for Bridge {
 
 /// Read `bridge = telegram #chan <token_file> <chat_id>` lines into `BridgeState`.
 fn load_routes(srv: &mut Server) {
+    // preserve poll offsets across a reload (matched by chat) so we don't re-inject a
+    // backlog of already-seen Telegram messages when the config is re-read.
+    let prev: std::collections::HashMap<String, u64> = srv
+        .ext
+        .get::<BridgeState>()
+        .map(|st| st.routes.iter().map(|r| (r.chat.clone(), r.offset)).collect())
+        .unwrap_or_default();
     let lines: Vec<String> = srv.conf_all("bridge").to_vec();
     let mut routes = Vec::new();
     for line in &lines {
@@ -126,8 +133,8 @@ fn load_routes(srv: &mut Server) {
             channel: chan.to_ascii_lowercase(),
             channel_disp: chan.to_string(),
             token,
+            offset: prev.get(chat).copied().unwrap_or(0),
             chat: chat.to_string(),
-            offset: 0,
             polling: false,
         });
     }
@@ -248,6 +255,63 @@ fn first_object(arr: &str) -> Option<&str> {
         }
     }
     None
+}
+
+/// BRIDGE — oper: list configured bridges, or `BRIDGE RELOAD` to re-read the config
+/// and apply added/changed `bridge` lines without a restart (offsets are preserved).
+pub fn commands() -> Vec<Box<dyn crate::command::Command>> {
+    vec![Box::new(BridgeCmd)]
+}
+
+struct BridgeCmd;
+impl crate::command::Command for BridgeCmd {
+    fn name(&self) -> &'static str {
+        "BRIDGE"
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> crate::command::CmdResult {
+        use crate::command::CmdResult;
+        if !s.is_oper(uid) {
+            s.numeric(
+                uid,
+                crate::numeric::ERR_NOPRIVILEGES,
+                ":Permission Denied- BRIDGE is for IRC operators",
+            );
+            return CmdResult::Fail;
+        }
+        let nick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
+        if params.first().is_some_and(|p| p.eq_ignore_ascii_case("reload")) {
+            load_routes(s);
+            let n = s.ext.get::<BridgeState>().map(|st| st.routes.len()).unwrap_or(0);
+            s.send(uid, format!(":{} NOTICE {nick} :bridge: reloaded {n} route(s)", s.name));
+            return CmdResult::Ok;
+        }
+        let list: Vec<String> = s
+            .ext
+            .get::<BridgeState>()
+            .map(|st| {
+                st.routes
+                    .iter()
+                    .map(|r| {
+                        format!(
+                            "telegram {} <-> chat {} (offset {}{})",
+                            r.channel_disp,
+                            r.chat,
+                            r.offset,
+                            if r.polling { ", polling" } else { "" }
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if list.is_empty() {
+            s.send(uid, format!(":{} NOTICE {nick} :bridge: no routes configured", s.name));
+        } else {
+            for l in list {
+                s.send(uid, format!(":{} NOTICE {nick} :bridge {l}", s.name));
+            }
+        }
+        CmdResult::Ok
+    }
 }
 
 #[cfg(test)]

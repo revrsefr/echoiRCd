@@ -167,5 +167,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(namedmodes::commands())
         .chain(webpush::commands())
         .chain(sqlquery::commands())
+        .chain(bridge::commands())
         .collect()
 }
