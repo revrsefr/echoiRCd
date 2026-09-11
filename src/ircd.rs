@@ -109,6 +109,14 @@ pub enum Event {
         id: u64,
         result: crate::database::SqlResult,
     },
+    /// A message arrived on a persistent bridge worker (e.g. the XMPP client), to be
+    /// injected into the IRC `channel` from `sender`. Keyed by channel so it survives
+    /// a bridge reload (indices don't).
+    BridgeIn {
+        channel: String,
+        sender: String,
+        text: String,
+    },
     /// Background timer tick — drives ping/idle timeouts.
     Tick,
     /// Re-read the config file and apply it live (from SIGHUP / the `rehash` CLI).
@@ -166,6 +174,9 @@ fn write_event_label(ev: &Event, out: &mut String) {
             let _ = write!(out, "RPC {method}");
         }
         Event::SqlResult { .. } => out.push_str("SQL result"),
+        Event::BridgeIn { channel, .. } => {
+            let _ = write!(out, "bridge message -> {channel}");
+        }
         Event::Tick => out.push_str("tick (ping/idle sweep)"),
         Event::Rehash => out.push_str("rehash"),
     }
@@ -420,7 +431,7 @@ impl Ircd {
                         status,
                         &body,
                     );
-                } else if let Some(detail) = tag.strip_prefix("bridge:tg:") {
+                } else if let Some(detail) = tag.strip_prefix("bridge:") {
                     crate::modules::bridge::on_http_result(
                         &mut self.server,
                         uid,
@@ -445,6 +456,11 @@ impl Ircd {
             Event::SqlResult { id, result } => {
                 crate::database::on_result(&mut self.server, id, result)
             }
+            Event::BridgeIn {
+                channel,
+                sender,
+                text,
+            } => crate::modules::bridge::on_bridge_in(&mut self.server, &channel, &sender, &text),
             Event::Tick => self.on_tick(),
             Event::Rehash => self.on_rehash(),
         }

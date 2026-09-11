@@ -27,6 +27,20 @@ pub fn post(
     timeout: Duration,
     verify: bool,
 ) -> Result<(u16, String), String> {
+    request("POST", url, content_type, body, headers, timeout, verify)
+}
+
+/// Like [`post`] but with an explicit HTTP `method` (GET/PUT/DELETE/…). `body` is
+/// sent verbatim with `content_type` (empty for a bodyless GET). Blocking.
+pub fn request(
+    method: &str,
+    url: &str,
+    content_type: &str,
+    body: &str,
+    headers: &[(String, String)],
+    timeout: Duration,
+    verify: bool,
+) -> Result<(u16, String), String> {
     let (scheme, rest) = url.split_once("://").ok_or("bad url (no scheme)")?;
     let (hostport, path) = match rest.split_once('/') {
         Some((hp, p)) => (hp, format!("/{p}")),
@@ -39,7 +53,7 @@ pub fn post(
     };
 
     let mut req = format!(
-        "POST {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: echoIRCd\r\nAccept: */*\r\n\
+        "{method} {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: echoIRCd\r\nAccept: */*\r\n\
          Content-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n",
         body.len()
     );

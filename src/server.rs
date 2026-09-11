@@ -654,6 +654,30 @@ impl Server {
         body: String,
         headers: Vec<(String, String)>,
     ) -> bool {
+        self.spawn_http_full(
+            uid,
+            tag,
+            "POST".into(),
+            url,
+            "application/x-www-form-urlencoded".into(),
+            body,
+            headers,
+        )
+    }
+
+    /// As [`Self::spawn_http`] but with an explicit HTTP `method` and `content_type`,
+    /// so a caller can issue a `GET`/`PUT` with a raw JSON body (e.g. the Matrix
+    /// client-server API). Shares the same bounded worker pool as `spawn_http`.
+    pub fn spawn_http_full(
+        &self,
+        uid: Uid,
+        tag: String,
+        method: String,
+        url: String,
+        content_type: String,
+        body: String,
+        headers: Vec<(String, String)>,
+    ) -> bool {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static ACTIVE: AtomicUsize = AtomicUsize::new(0);
         struct Guard;
@@ -671,9 +695,10 @@ impl Server {
         let verify = self.conf_bool("http_tls_verify", true);
         std::thread::spawn(move || {
             let _guard = Guard; // decrements even on panic
-            let (status, body) = crate::http::post(
+            let (status, body) = crate::http::request(
+                &method,
                 &url,
-                "application/x-www-form-urlencoded",
+                &content_type,
                 &body,
                 &headers,
                 std::time::Duration::from_secs(10),

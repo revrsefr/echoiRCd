@@ -62,3 +62,4 @@ pub mod users;
 pub mod watch;
 pub mod websocket;
 pub mod xline;
+pub mod xmpp;

@@ -588,18 +588,24 @@ modules {
     # relaymsg_ident      "relay";
     # relaymsg_host       "relay.example.com";   # default: the server name
     # --- bridge: in-core channel bridge to another chat network (no external appservice).
-    #     One line per bridged channel; the token is read from a FILE so it never lives
-    #     inline. Manage live with the `/BRIDGE` oper command (list) and `/BRIDGE RELOAD`
-    #     (re-read without a restart).
-    #     Two delivery modes:
-    #       relay  (default) — a remote sender shows as `name/tg` via draft/relaymsg.
-    #       mode=puppet      — each remote sender becomes a REAL virtual member (nick
-    #                          `name[tg]`, +B bot): visible in WHO/NAMES and tab-complete,
+    #     One line per bridged channel; every credential is read from a FILE so it never
+    #     lives inline. Manage live with the `/BRIDGE` oper command (list) and
+    #     `/BRIDGE RELOAD` (re-read without a restart). Backends: telegram, matrix, xmpp.
+    #     Two delivery modes (append `mode=puppet` for the second):
+    #       relay  (default) — a remote sender shows as `name/<net>` via draft/relaymsg.
+    #       puppet           — each remote sender becomes a REAL virtual member (nick
+    #                          `name[<net>]`, +B bot): visible in WHO/NAMES and tab-complete,
     #                          idle-parted after `bridge_puppet_idle` seconds (default 3600),
-    #                          re-joining on their next message. ---
+    #                          re-joining on their next message.
+    #     Telegram cred file = the bot token. Matrix cred file = homeserver URL on line 1,
+    #     access token on line 2. XMPP cred file = bare JID line 1, password line 2, and an
+    #     optional connect host:port line 3 (STARTTLS on :5222 + SASL PLAIN + MUC join). ---
     # bridge  telegram #argentina /home/irc/secrets/tg_argentina -1001234567890;
     # bridge  telegram #argentina /home/irc/secrets/tg_argentina -1001234567890 mode=puppet;
+    # bridge  matrix   #argentina /home/irc/secrets/mx_argentina '!abcdef:matrix.org' mode=puppet;
+    # bridge  xmpp     #argentina /home/irc/secrets/xmpp_argentina argentina@conference.jabber.example echobridge mode=puppet;
     # bridge_puppet_idle  3600;   # seconds a puppet may sit idle before it is parted
+    # bridge_xmpp_nick    "echobridge";   # default MUC nick when an xmpp line omits one
     # --- extjwt: /EXTJWT issues a signed token proving IRC identity to a service ---
     # extjwt_secret   "CHANGE_THIS_HS256_SECRET";   # required to enable
     # extjwt_duration 30;     # token lifetime, seconds
