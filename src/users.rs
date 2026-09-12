@@ -43,6 +43,11 @@ pub struct UserFlags {
     pub via_webirc: bool,     // connected through a WEBIRC gateway (securitygroups)
     pub via_websocket: bool,  // connected over the WebSocket transport (ws://, wss://)
     pub away: Option<String>, // AWAY message, if set
+    // anti-abuse session state (not IRC modes): kept here so it defaults in every
+    // constructor. See modules::targetlimit and the AWAY throttle.
+    pub recent_targets: Vec<u64>, // MRU hashes of recent PRIVMSG/NOTICE targets
+    pub target_credit: u64,       // token-bucket "not-before" secs for a new target
+    pub last_away: u64,           // secs of the last AWAY change (away throttle)
 }
 
 impl UserFlags {

@@ -230,6 +230,17 @@ flood {
     # joinflood_duration 60;   # +j (join flood) default window
     # nickflood_duration 60;   # +F (nick flood) default window
     # connflood          "5 10";   # refuse > N connections per S seconds from one IP
+    # --- target-change throttle (anti-spam): a non-oper may address up to target_max
+    #     distinct recent PRIVMSG/NOTICE targets in a burst, then one new target per
+    #     target_delay seconds. Re-messaging a recent target is free, so normal chat is
+    #     unaffected; fanning out across many fresh targets (spam) is throttled.
+    #     target_delay 0 disables it. no_multi_targets refuses comma target lists. ---
+    # target_max          20;
+    # target_delay        10;   # seconds per new target once the burst is spent (0=off)
+    # no_multi_targets    no;   # refuse "PRIVMSG a,b,c" outright
+    # --- away throttle: minimum seconds between AWAY changes (0=off, opers exempt) —
+    #     stops a client flooding away-notify peers with rapid away/back toggles ---
+    # away_delay          0;
     # --- blockamsg: block mass /amsg and /ame ---
     # blockamsg          yes;
     # blockamsg_delay    3;    # same text to a different target list within N s = block

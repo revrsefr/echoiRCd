@@ -17,6 +17,7 @@ pub mod chanlog;
 pub mod channames;
 pub mod channelban;
 pub mod chathistory;
+pub mod clearmode;
 pub mod cloak;
 pub mod cloudflare_challenge;
 pub mod conn_waitpong;
@@ -81,6 +82,7 @@ pub mod snoop;
 pub mod solvemsg;
 pub mod sqlquery;
 pub mod syslog;
+pub mod targetlimit;
 pub mod tline;
 pub mod verify_common;
 pub mod webpush;
@@ -126,6 +128,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(chathistory::ChatHistoryGc),
         Box::new(event_playback::EventPlayback),
         Box::new(webpush::WebPush),
+        Box::new(targetlimit::TargetLimit),
         Box::new(bridge::Bridge),
         Box::new(metricslog::MetricsLog::default()),
         Box::new(account_registration::AcctRegGc),
@@ -160,6 +163,7 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(extended_isupport::commands())
         .chain(tline::commands())
         .chain(rmode::commands())
+        .chain(clearmode::commands())
         .chain(customtitle::commands())
         .chain(dccallow::commands())
         .chain(geoip::commands())

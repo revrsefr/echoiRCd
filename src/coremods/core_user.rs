@@ -141,9 +141,33 @@ impl Command for Away {
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         let msg = params.first().cloned().filter(|m| !m.is_empty());
         let now_away = msg.is_some();
+        // AWAY throttle: rate-limit changes (0 = off) so a client can't flood
+        // away-notify peers with rapid away/back toggles. Opers exempt.
+        let delay: u64 = s.conf_num("away_delay", 0u64);
+        if delay > 0 && !s.is_oper(uid) {
+            let last = s.users.get(&uid).map(|u| u.flags.last_away).unwrap_or(0);
+            let now = crate::server::now();
+            if now.saturating_sub(last) < delay {
+                let nick = s
+                    .users
+                    .get(&uid)
+                    .map(|u| u.nick.clone())
+                    .unwrap_or_default();
+                let wait = delay - now.saturating_sub(last);
+                s.send(
+                    uid,
+                    format!(
+                        ":{} NOTICE {nick} :Please wait {wait}s before changing your away status",
+                        s.name
+                    ),
+                );
+                return CmdResult::Fail;
+            }
+        }
         let prefix = match s.users.get_mut(&uid) {
             Some(u) => {
                 u.flags.away = msg.clone();
+                u.flags.last_away = crate::server::now();
                 u.prefix()
             }
             None => return CmdResult::Fail,
