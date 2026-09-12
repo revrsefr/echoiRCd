@@ -51,6 +51,7 @@ pub mod maphide;
 pub mod markread;
 pub mod metadata;
 pub mod metrics;
+pub mod metricslog;
 pub mod multiline;
 pub mod namedmodes;
 pub mod network_icon;
@@ -126,6 +127,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(event_playback::EventPlayback),
         Box::new(webpush::WebPush),
         Box::new(bridge::Bridge),
+        Box::new(metricslog::MetricsLog::default()),
         Box::new(account_registration::AcctRegGc),
     ]
 }
@@ -168,5 +170,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(webpush::commands())
         .chain(sqlquery::commands())
         .chain(bridge::commands())
+        .chain(metricslog::commands())
         .collect()
 }

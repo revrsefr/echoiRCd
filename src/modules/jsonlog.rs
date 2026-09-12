@@ -48,7 +48,7 @@ fn skip_run(b: &[char], mut i: usize, max: usize, ok: impl Fn(char) -> bool) -> 
 
 /// IRCv3 message-tag value escape (space→`\s`, `;`→`\:`, `\`→`\\`, CR/LF). Required
 /// because the JSON is full of spaces and would otherwise split the wire line apart.
-fn escape_tag(v: &str) -> String {
+pub(crate) fn escape_tag(v: &str) -> String {
     let mut out = String::with_capacity(v.len());
     for c in v.chars() {
         match c {

@@ -506,6 +506,12 @@ logging {
     # --- metrics: OpenMetrics/Prometheus scrape endpoint (plaintext HTTP GET);
     #     bind privately or behind a proxy. ---
     # metrics_bind "127.0.0.1:9109";
+    # --- draft/metrics: the same counters/gauges as a JSON object over IRC (no scrape
+    #     endpoint needed). Opers get it on demand with the `METRICS` command; a client
+    #     that negotiates `CAP REQ draft/metrics` is also pushed one every
+    #     metrics_push_interval seconds (0 = command-only, no push). The JSON is the
+    #     NOTICE body and, for a draft/metrics client, also a `draft/metrics=` tag. ---
+    # metrics_push_interval 60;
     # --- chanlog: mirror the oper snotice stream into a channel. Add snomask
     #     letters after the channel to log only those (x x-lines, d dnsbl,
     #     c connects, o oper, q quit, k kill …); none = everything. Repeatable. ---

@@ -164,6 +164,7 @@ define_caps! {
     "draft/multiline" => multiline,
     "draft/account-registration" => acct_registration,
     "draft/json-log" => json_log,
+    "draft/metrics" => metrics,
     "draft/extended-isupport" => ext_isupport,
     "reverse.im/filehost" => filehost,
     "draft/relaymsg" => relaymsg,

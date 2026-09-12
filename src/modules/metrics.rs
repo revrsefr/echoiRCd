@@ -40,6 +40,32 @@ pub fn handle() -> Arc<Metrics> {
     METRICS.get_or_init(|| Arc::new(Metrics::default())).clone()
 }
 
+/// Render the current values as a single structured JSON object — the same counters
+/// and gauges as [`render`], plus a timestamp and server name. Used by the
+/// `draft/metrics` capability to deliver metrics over IRC (see `modules::metricslog`).
+pub fn snapshot_json(m: &Metrics, server: &str) -> String {
+    use crate::modules::rpc::json::{obj, qstr};
+    let n = |v: u64| v.to_string();
+    obj(&[
+        (
+            "timestamp",
+            qstr(&crate::server::iso_time(crate::server::now())),
+        ),
+        ("server", qstr(server)),
+        ("commands_total", n(m.commands.load(Relaxed))),
+        ("messages_total", n(m.messages.load(Relaxed))),
+        ("connects_total", n(m.connects.load(Relaxed))),
+        ("users", n(m.users.load(Relaxed))),
+        ("channels", n(m.channels.load(Relaxed))),
+        ("servers", n(m.servers.load(Relaxed))),
+        ("links", n(m.links.load(Relaxed))),
+        ("pgsql_queries_total", n(m.pgsql_queries.load(Relaxed))),
+        ("pgsql_errors_total", n(m.pgsql_errors.load(Relaxed))),
+        ("pgsql_dropped_total", n(m.pgsql_dropped.load(Relaxed))),
+        ("pgsql_queue_depth", n(m.pgsql_queue_depth.load(Relaxed))),
+    ])
+}
+
 /// Render the current values in OpenMetrics/Prometheus text exposition format.
 fn render(m: &Metrics) -> String {
     let mut o = String::new();
@@ -141,6 +167,25 @@ pub fn maybe_start(cfg: &Config) {
             std::thread::spawn(move || serve(listener, metrics));
         }
         Err(e) => eprintln!("echoircd: cannot bind metrics {bind}: {e}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_json_is_numeric_and_keyed() {
+        let m = Metrics::default();
+        m.commands.store(7, Relaxed);
+        m.users.store(3, Relaxed);
+        let j = snapshot_json(&m, "irc.example.org");
+        assert!(j.starts_with('{') && j.ends_with('}'));
+        assert!(j.contains("\"server\":\"irc.example.org\""));
+        // numeric fields are unquoted JSON numbers
+        assert!(j.contains("\"commands_total\":7"));
+        assert!(j.contains("\"users\":3"));
+        assert!(!j.contains("\"commands_total\":\"7\""));
     }
 }
 
