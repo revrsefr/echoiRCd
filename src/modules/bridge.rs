@@ -18,8 +18,10 @@
 //! bridge = xmpp     #chan /path/cred_file   <room@conf.server>   [nick] [mode=puppet] [server=host:port]
 //! ```
 //! Telegram cred file = the bot token. Matrix cred file = homeserver URL on line 1,
-//! access token on line 2. XMPP cred file = bare JID on line 1, password on line 2,
-//! optional `host:port` on line 3.
+//! access token on line 2; the room may be a `!id:server` or a `#alias:server` (resolved
+//! via the room directory at load). XMPP cred file = bare JID on line 1, password on
+//! line 2, optional `host:port` on line 3; the server is otherwise found by SRV lookup
+//! (`_xmpp-client._tcp.<domain>`), auth is SCRAM-SHA-1 when offered else PLAIN.
 //!
 //! Injection always uses `send_tagged`/puppet paths (NOT the command path), so a
 //! bridged message never re-enters `on_pre_message` — the bridge cannot loop.
@@ -507,17 +509,33 @@ fn load_routes(srv: &mut Server) {
             transport,
         });
     }
-    // kick a whoami for each Matrix route so we can suppress echoing our own sends
-    let whoami: Vec<(usize, String, String)> = routes
+    // For each Matrix route: kick a whoami (to suppress echoing our own sends) and, when
+    // the room is an alias (#room:server), a directory resolve to its internal !id.
+    let kicks: Vec<(usize, String, String, bool, bool)> = routes
         .iter()
         .enumerate()
         .filter_map(|(i, r)| match &r.transport {
             Transport::Matrix {
                 base,
                 token,
+                room,
                 self_id,
                 ..
-            } if self_id.is_empty() => Some((i, base.clone(), token.clone())),
+            } => Some((
+                i,
+                base.clone(),
+                token.clone(),
+                self_id.is_empty(),
+                room.starts_with('#'),
+            )),
+            _ => None,
+        })
+        .collect();
+    let aliases: HashMap<usize, String> = routes
+        .iter()
+        .enumerate()
+        .filter_map(|(i, r)| match &r.transport {
+            Transport::Matrix { room, .. } if room.starts_with('#') => Some((i, room.clone())),
             _ => None,
         })
         .collect();
@@ -526,23 +544,40 @@ fn load_routes(srv: &mut Server) {
         .get_or_insert_with::<BridgeState>(BridgeState::default);
     st.routes = routes;
     st.loaded = true;
-    for (idx, base, token) in whoami {
-        let url = format!("{base}/_matrix/client/v3/account/whoami");
+    for (idx, base, token, need_whoami, need_resolve) in kicks {
         let headers = vec![("Authorization".into(), format!("Bearer {token}"))];
-        srv.spawn_http_full(
-            0,
-            format!("bridge:mx:whoami:{idx}"),
-            "GET".into(),
-            url,
-            "application/json".into(),
-            String::new(),
-            headers,
-        );
+        if need_whoami {
+            srv.spawn_http_full(
+                0,
+                format!("bridge:mx:whoami:{idx}"),
+                "GET".into(),
+                format!("{base}/_matrix/client/v3/account/whoami"),
+                "application/json".into(),
+                String::new(),
+                headers.clone(),
+            );
+        }
+        if need_resolve {
+            if let Some(alias) = aliases.get(&idx) {
+                srv.spawn_http_full(
+                    0,
+                    format!("bridge:mx:resolve:{idx}"),
+                    "GET".into(),
+                    format!(
+                        "{base}/_matrix/client/v3/directory/room/{}",
+                        crate::http::urlencode(alias)
+                    ),
+                    "application/json".into(),
+                    String::new(),
+                    headers,
+                );
+            }
+        }
     }
 }
 
 /// Async HTTP result for a `bridge:*` tag. `detail` is the part after `bridge:`, e.g.
-/// `tg:poll:0`, `tg:out`, `mx:sync:0`, `mx:whoami:0`, `mx:out`.
+/// `tg:poll:0`, `tg:out`, `mx:sync:0`, `mx:whoami:0`, `mx:resolve:0`, `mx:out`.
 pub fn on_http_result(srv: &mut Server, _uid: Uid, detail: &str, _status: u16, body: &str) {
     if let Some(d) = detail.strip_prefix("tg:") {
         tg_result(srv, d, body);
@@ -639,6 +674,23 @@ fn mx_result(srv: &mut Server, detail: &str, body: &str) {
                     st.routes.get_mut(i).map(|r| &mut r.transport)
                 {
                     *self_id = id;
+                }
+            }
+        }
+        return;
+    }
+    if let Some(i) = detail
+        .strip_prefix("resolve:")
+        .and_then(|s| s.parse::<usize>().ok())
+    {
+        // #alias:server -> internal !id, so send + sync-room-key both work
+        let id = json::get_str(body, "room_id").unwrap_or_default();
+        if id.starts_with('!') {
+            if let Some(st) = srv.ext.get_mut::<BridgeState>() {
+                if let Some(Transport::Matrix { room, .. }) =
+                    st.routes.get_mut(i).map(|r| &mut r.transport)
+                {
+                    *room = id;
                 }
             }
         }

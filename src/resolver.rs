@@ -57,6 +57,7 @@ fn evict_if_full<K: Eq + std::hash::Hash, V>(map: &mut HashMap<K, (V, Instant)>)
 
 const QTYPE_A: u16 = 1;
 const QTYPE_PTR: u16 = 12;
+const QTYPE_SRV: u16 = 33;
 const QCLASS_IN: u16 = 1;
 
 /// Reserve a lookup slot; `false` if too many are already in flight.
@@ -246,6 +247,60 @@ pub fn a_lookup(qname: &str, timeout: Duration) -> Option<Ipv4Addr> {
         g.insert(qname.to_string(), (val, Instant::now() + ttl));
     }
     val
+}
+
+/// Resolve SRV records for `qname` (e.g. `_xmpp-client._tcp.example.com`) and return
+/// `(target_host, port)` candidates in RFC 2782 order: ascending priority, then
+/// descending weight. Empty on NXDOMAIN / error / a `.` target (service disabled). No
+/// caching — the only caller (the XMPP bridge) connects rarely.
+pub fn srv_lookup(qname: &str, timeout: Duration) -> Vec<(String, u16)> {
+    let id = rand_txid();
+    match send_query(&nameserver(), qname, QTYPE_SRV, id, timeout) {
+        Some(reply) => parse_srv_reply(&reply, id),
+        None => Vec::new(),
+    }
+}
+
+fn parse_srv_reply(msg: &[u8], want_id: u16) -> Vec<(String, u16)> {
+    if msg.len() < 12 || u16::from_be_bytes([msg[0], msg[1]]) != want_id || msg[3] & 0x0f != 0 {
+        return Vec::new();
+    }
+    let qd = u16::from_be_bytes([msg[4], msg[5]]);
+    let an = u16::from_be_bytes([msg[6], msg[7]]);
+    let mut pos = 12;
+    for _ in 0..qd {
+        pos = match skip_name(msg, pos).and_then(|p| p.checked_add(4)) {
+            Some(p) if p <= msg.len() => p,
+            _ => return Vec::new(),
+        };
+    }
+    let mut recs: Vec<(u16, u16, u16, String)> = Vec::new(); // priority, weight, port, target
+    for _ in 0..an {
+        let Some(p) = skip_name(msg, pos) else { break };
+        pos = p;
+        if pos + 10 > msg.len() {
+            break;
+        }
+        let rtype = u16::from_be_bytes([msg[pos], msg[pos + 1]]);
+        let rdlen = u16::from_be_bytes([msg[pos + 8], msg[pos + 9]]) as usize;
+        let rdata = pos + 10;
+        if rdata + rdlen > msg.len() {
+            break;
+        }
+        if rtype == QTYPE_SRV && rdlen >= 7 {
+            let priority = u16::from_be_bytes([msg[rdata], msg[rdata + 1]]);
+            let weight = u16::from_be_bytes([msg[rdata + 2], msg[rdata + 3]]);
+            let port = u16::from_be_bytes([msg[rdata + 4], msg[rdata + 5]]);
+            if let Some((target, _)) = read_name(msg, rdata + 6, 0) {
+                if !target.is_empty() {
+                    recs.push((priority, weight, port, target));
+                }
+            }
+        }
+        pos = rdata + rdlen;
+    }
+    recs.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+    recs.into_iter().map(|(_, _, port, t)| (t, port)).collect()
 }
 
 /// Parse a DNS reply for the first A record (4-byte address). Bounds-checked.
@@ -455,5 +510,42 @@ mod tests {
         m.extend_from_slice(&rd);
         assert_eq!(parse_ptr_reply(&m, 0x4543).as_deref(), Some("host.example"));
         assert_eq!(parse_ptr_reply(&m, 0x9999), None); // wrong id
+    }
+
+    #[test]
+    fn parses_srv_reply_ordered() {
+        // two SRV answers; the lower-priority target must sort first
+        let id = 0x1234u16;
+        let mut m = Vec::new();
+        m.extend_from_slice(&id.to_be_bytes());
+        m.extend_from_slice(&[0x81, 0x80]);
+        m.extend_from_slice(&[0, 1, 0, 2, 0, 0, 0, 0]); // qd=1 an=2
+        super::encode_name(&mut m, "_xmpp-client._tcp.example.com");
+        m.extend_from_slice(&QTYPE_SRV.to_be_bytes());
+        m.extend_from_slice(&QCLASS_IN.to_be_bytes());
+        let mut answer = |prio: u16, port: u16, target: &str, m: &mut Vec<u8>| {
+            super::encode_name(m, "_xmpp-client._tcp.example.com");
+            m.extend_from_slice(&QTYPE_SRV.to_be_bytes());
+            m.extend_from_slice(&QCLASS_IN.to_be_bytes());
+            m.extend_from_slice(&[0, 0, 0, 60]);
+            let mut rd = Vec::new();
+            rd.extend_from_slice(&prio.to_be_bytes());
+            rd.extend_from_slice(&5u16.to_be_bytes()); // weight
+            rd.extend_from_slice(&port.to_be_bytes());
+            super::encode_name(&mut rd, target);
+            m.extend_from_slice(&(rd.len() as u16).to_be_bytes());
+            m.extend_from_slice(&rd);
+        };
+        answer(20, 5223, "backup.example.com", &mut m);
+        answer(10, 5222, "primary.example.com", &mut m);
+        let recs = parse_srv_reply(&m, id);
+        assert_eq!(
+            recs,
+            vec![
+                ("primary.example.com".to_string(), 5222),
+                ("backup.example.com".to_string(), 5223),
+            ]
+        );
+        assert!(parse_srv_reply(&m, 0x9999).is_empty()); // wrong id
     }
 }

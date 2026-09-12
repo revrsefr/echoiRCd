@@ -598,11 +598,13 @@ modules {
     #                          idle-parted after `bridge_puppet_idle` seconds (default 3600),
     #                          re-joining on their next message.
     #     Telegram cred file = the bot token. Matrix cred file = homeserver URL on line 1,
-    #     access token on line 2. XMPP cred file = bare JID line 1, password line 2, and an
-    #     optional connect host:port line 3 (STARTTLS on :5222 + SASL PLAIN + MUC join). ---
+    #     access token on line 2; the room may be a `!id:server` OR a `#alias:server`
+    #     (resolved via the room directory). XMPP cred file = bare JID line 1, password
+    #     line 2, optional connect host:port line 3 (else the c2s SRV record is used);
+    #     STARTTLS on :5222 + SASL SCRAM-SHA-1 (PLAIN fallback) + MUC join. ---
     # bridge  telegram #argentina /home/irc/secrets/tg_argentina -1001234567890;
     # bridge  telegram #argentina /home/irc/secrets/tg_argentina -1001234567890 mode=puppet;
-    # bridge  matrix   #argentina /home/irc/secrets/mx_argentina '!abcdef:matrix.org' mode=puppet;
+    # bridge  matrix   #argentina /home/irc/secrets/mx_argentina '#argentina:matrix.org' mode=puppet;
     # bridge  xmpp     #argentina /home/irc/secrets/xmpp_argentina argentina@conference.jabber.example echobridge mode=puppet;
     # bridge_puppet_idle  3600;   # seconds a puppet may sit idle before it is parted
     # bridge_xmpp_nick    "echobridge";   # default MUC nick when an xmpp line omits one

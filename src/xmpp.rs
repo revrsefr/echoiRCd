@@ -1,8 +1,9 @@
-//! Minimal XMPP client-to-server MUC bridge worker: TCP + STARTTLS (openssl), SASL
-//! PLAIN over TLS, resource bind, and a Multi-User-Chat join. Runs on its own thread;
-//! inbound groupchat messages become [`Event::BridgeIn`], outbound lines arrive over an
-//! mpsc channel. Not a general XMPP stack — only what a channel bridge needs. Dropping
-//! the outbound `Sender` (a bridge reload) closes the stream and ends the thread.
+//! Minimal XMPP client-to-server MUC bridge worker: SRV lookup + TCP + STARTTLS
+//! (openssl), SASL (SCRAM-SHA-1 preferred, PLAIN fallback), resource bind, and a
+//! Multi-User-Chat join. Runs on its own thread; inbound groupchat messages become
+//! [`Event::BridgeIn`], outbound lines arrive over an mpsc channel. Not a general XMPP
+//! stack — only what a channel bridge needs. Dropping the outbound `Sender` (a bridge
+//! reload) closes the stream and ends the thread.
 
 use crate::ircd::Event;
 use openssl::ssl::{SslConnector, SslMethod, SslStream};
@@ -91,7 +92,14 @@ fn run(cfg: Config) -> Result<(), String> {
             Some((h, p)) => (h.to_string(), p.parse().unwrap_or(5222)),
             None => (s.clone(), 5222u16),
         },
-        None => (domain.clone(), 5222u16),
+        // RFC 6120: resolve the c2s SRV record; fall back to the domain on :5222.
+        None => crate::resolver::srv_lookup(
+            &format!("_xmpp-client._tcp.{domain}"),
+            Duration::from_secs(5),
+        )
+        .into_iter()
+        .next()
+        .unwrap_or((domain.clone(), 5222)),
     };
 
     let tcp = TcpStream::connect((host.as_str(), port)).map_err(|e| e.to_string())?;
@@ -115,20 +123,16 @@ fn run(cfg: Config) -> Result<(), String> {
     wire.set_read_timeout(Some(Duration::from_secs(10)));
     buf.clear();
 
-    // re-open over TLS, then SASL PLAIN
+    // re-open over TLS, then SASL with the strongest offered mechanism
     send(&mut wire, &stream_header(&domain))?;
-    wait_for(&mut wire, &mut buf, "stream:features")?;
-    let plain = openssl::base64::encode_block(format!("\0{user}\0{}", cfg.password).as_bytes());
-    send(
-        &mut wire,
-        &format!("<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='PLAIN'>{plain}</auth>"),
-    )?;
-    let t = read_token(&mut wire, &mut buf)?;
-    if t.contains("failure") {
-        return Err("SASL PLAIN authentication failed".into());
-    }
-    if !t.contains("success") {
-        return Err(format!("unexpected auth reply: {t}"));
+    let feats = wait_for(&mut wire, &mut buf, "stream:features")?;
+    let mechs = parse_mechs(&feats);
+    if mechs.iter().any(|m| m == "SCRAM-SHA-1") {
+        sasl_scram_sha1(&mut wire, &mut buf, &user, &cfg.password)?;
+    } else if mechs.iter().any(|m| m == "PLAIN") {
+        sasl_plain(&mut wire, &mut buf, &user, &cfg.password)?;
+    } else {
+        return Err("no supported SASL mechanism offered (need SCRAM-SHA-1 or PLAIN)".into());
     }
     buf.clear();
 
@@ -276,6 +280,163 @@ fn handle_stanza(cfg: &Config, w: &mut Wire, tok: &str) {
     }
 }
 
+/// The `<mechanism>NAME</mechanism>` names advertised in a `<stream:features>` token.
+fn parse_mechs(features: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = features;
+    while let Some(s) = rest.find("<mechanism>") {
+        let after = &rest[s + 11..];
+        match after.find("</mechanism>") {
+            Some(e) => {
+                out.push(after[..e].trim().to_string());
+                rest = &after[e + 12..];
+            }
+            None => break,
+        }
+    }
+    out
+}
+
+/// SASL PLAIN: `base64(\0authcid\0passwd)`, safe over the TLS the caller has by now.
+fn sasl_plain(w: &mut Wire, buf: &mut Vec<u8>, user: &str, pass: &str) -> Result<(), String> {
+    let b64 = openssl::base64::encode_block(format!("\0{user}\0{pass}").as_bytes());
+    send(
+        w,
+        &format!("<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='PLAIN'>{b64}</auth>"),
+    )?;
+    let t = read_token(w, buf)?;
+    if t.contains("success") {
+        Ok(())
+    } else {
+        Err("SASL PLAIN authentication failed".into())
+    }
+}
+
+/// SASL SCRAM-SHA-1 (RFC 5802) — the password never crosses the wire; also verifies the
+/// server signature so a MITM that lacks it can't complete the exchange.
+fn sasl_scram_sha1(w: &mut Wire, buf: &mut Vec<u8>, user: &str, pass: &str) -> Result<(), String> {
+    let mut nonce = [0u8; 18];
+    openssl::rand::rand_bytes(&mut nonce).map_err(|e| e.to_string())?;
+    let cnonce = openssl::base64::encode_block(&nonce);
+    let client_first_bare = format!("n={},r={cnonce}", sasl_escape(user));
+    let client_first = format!("n,,{client_first_bare}");
+    send(
+        w,
+        &format!(
+            "<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='SCRAM-SHA-1'>{}</auth>",
+            openssl::base64::encode_block(client_first.as_bytes())
+        ),
+    )?;
+
+    let chal = read_token(w, buf)?;
+    let server_first = inner_text(&chal, "challenge")
+        .and_then(|b| openssl::base64::decode_block(&b).ok())
+        .and_then(|v| String::from_utf8(v).ok())
+        .ok_or("SCRAM: bad challenge")?;
+    let snonce = scram_field(&server_first, 'r').ok_or("SCRAM: no server nonce")?;
+    let salt = scram_field(&server_first, 's')
+        .and_then(|b| openssl::base64::decode_block(&b).ok())
+        .ok_or("SCRAM: no salt")?;
+    let iters: usize = scram_field(&server_first, 'i')
+        .and_then(|v| v.parse().ok())
+        .ok_or("SCRAM: no iteration count")?;
+    if !snonce.starts_with(&cnonce) {
+        return Err("SCRAM: server nonce does not extend ours".into());
+    }
+
+    let salted = pbkdf2_sha1(pass.as_bytes(), &salt, iters);
+    let client_key = hmac_sha1(&salted, b"Client Key");
+    let stored_key = sha1(&client_key);
+    let client_final_bare = format!("c=biws,r={snonce}");
+    let auth_msg = format!("{client_first_bare},{server_first},{client_final_bare}");
+    let client_sig = hmac_sha1(&stored_key, auth_msg.as_bytes());
+    let proof: Vec<u8> = client_key
+        .iter()
+        .zip(client_sig.iter())
+        .map(|(a, b)| a ^ b)
+        .collect();
+    let client_final = format!(
+        "{client_final_bare},p={}",
+        openssl::base64::encode_block(&proof)
+    );
+    send(
+        w,
+        &format!(
+            "<response xmlns='urn:ietf:params:xml:ns:xmpp-sasl'>{}</response>",
+            openssl::base64::encode_block(client_final.as_bytes())
+        ),
+    )?;
+
+    let succ = read_token(w, buf)?;
+    if !succ.contains("success") {
+        return Err("SCRAM: authentication failed".into());
+    }
+    // verify the server proof (v=) when present
+    if let Some(v) = inner_text(&succ, "success")
+        .and_then(|b| openssl::base64::decode_block(&b).ok())
+        .and_then(|d| String::from_utf8(d).ok())
+        .and_then(|sf| scram_field(&sf, 'v'))
+    {
+        let server_key = hmac_sha1(&salted, b"Server Key");
+        let server_sig = hmac_sha1(&server_key, auth_msg.as_bytes());
+        if openssl::base64::encode_block(&server_sig) != v {
+            return Err("SCRAM: server signature mismatch".into());
+        }
+    }
+    Ok(())
+}
+
+/// Value of comma-delimited SCRAM attribute `key` (e.g. `r`, `s`, `i`, `v`).
+fn scram_field(msg: &str, key: char) -> Option<String> {
+    let pfx = format!("{key}=");
+    msg.split(',')
+        .find_map(|p| p.strip_prefix(&pfx))
+        .map(|s| s.to_string())
+}
+
+/// SCRAM username escaping: `=` → `=3D`, `,` → `=2C`.
+fn sasl_escape(s: &str) -> String {
+    s.replace('=', "=3D").replace(',', "=2C")
+}
+
+fn sha1(d: &[u8]) -> Vec<u8> {
+    openssl::hash::hash(openssl::hash::MessageDigest::sha1(), d)
+        .map(|b| b.to_vec())
+        .unwrap_or_default()
+}
+
+fn hmac_sha1(key: &[u8], data: &[u8]) -> Vec<u8> {
+    use openssl::{hash::MessageDigest, pkey::PKey, sign::Signer};
+    let k = match PKey::hmac(if key.is_empty() { &[0] } else { key }) {
+        Ok(k) => k,
+        Err(_) => return Vec::new(),
+    };
+    let mut s = match Signer::new(MessageDigest::sha1(), &k) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    if s.update(data).is_err() {
+        return Vec::new();
+    }
+    s.sign_to_vec().unwrap_or_default()
+}
+
+fn pbkdf2_sha1(pass: &[u8], salt: &[u8], iters: usize) -> Vec<u8> {
+    let mut out = vec![0u8; 20];
+    if openssl::pkcs5::pbkdf2_hmac(
+        pass,
+        salt,
+        iters,
+        openssl::hash::MessageDigest::sha1(),
+        &mut out,
+    )
+    .is_err()
+    {
+        return Vec::new();
+    }
+    out
+}
+
 /// Pull the next top-level XML token from `buf`, consuming its bytes. `None` if `buf`
 /// doesn't yet hold a complete token. Handles the `<?xml?>` decl, the unbalanced
 /// `<stream:stream>` open/close, self-closing tags, and balanced elements (quote- and
@@ -401,15 +562,21 @@ fn attr(tag: &str, name: &str) -> Option<String> {
     None
 }
 
-/// Text between the first `<body ...>` and its `</body>`. `None` if absent/empty tag.
-fn extract_body(msg: &str) -> Option<String> {
-    let start = msg.find("<body")?;
-    let gt = msg[start..].find('>')? + start;
-    if msg.as_bytes().get(gt.wrapping_sub(1)) == Some(&b'/') {
-        return None; // <body/>
+/// Raw text between the first `<elem ...>` and its `</elem>`. `None` if absent or a
+/// self-closing empty tag.
+fn inner_text(xml: &str, elem: &str) -> Option<String> {
+    let start = xml.find(&format!("<{elem}"))?;
+    let gt = xml[start..].find('>')? + start;
+    if xml.as_bytes().get(gt.wrapping_sub(1)) == Some(&b'/') {
+        return None; // <elem/>
     }
-    let close = msg[gt + 1..].find("</body>")? + gt + 1;
-    Some(msg[gt + 1..close].to_string())
+    let close = xml[gt + 1..].find(&format!("</{elem}>"))? + gt + 1;
+    Some(xml[gt + 1..close].trim().to_string())
+}
+
+/// Text of the first `<body>…</body>` in a message stanza.
+fn extract_body(msg: &str) -> Option<String> {
+    inner_text(msg, "body")
 }
 
 fn xml_escape(s: &str) -> String {
@@ -532,5 +699,59 @@ mod tests {
     #[test]
     fn empty_body_is_none() {
         assert_eq!(extract_body("<message><body/></message>"), None);
+    }
+
+    #[test]
+    fn parses_sasl_mechanisms() {
+        let f = "<stream:features><mechanisms xmlns='urn:...'>\
+                 <mechanism>SCRAM-SHA-1</mechanism><mechanism>PLAIN</mechanism>\
+                 </mechanisms></stream:features>";
+        assert_eq!(parse_mechs(f), vec!["SCRAM-SHA-1", "PLAIN"]);
+    }
+
+    #[test]
+    fn scram_field_and_escape() {
+        let sf = "r=abc123,s=QSXCR+Q6sek8bf92,i=4096";
+        assert_eq!(scram_field(sf, 'r').as_deref(), Some("abc123"));
+        assert_eq!(scram_field(sf, 'i').as_deref(), Some("4096"));
+        assert_eq!(scram_field(sf, 'x'), None);
+        assert_eq!(sasl_escape("a=b,c"), "a=3Db=2Cc");
+    }
+
+    #[test]
+    fn inner_text_extracts() {
+        assert_eq!(
+            inner_text("<challenge xmlns='x'>Zm9v</challenge>", "challenge").as_deref(),
+            Some("Zm9v")
+        );
+        assert_eq!(inner_text("<success/>", "success"), None);
+    }
+
+    // RFC 5802 §5 SCRAM-SHA-1 worked example — proves pbkdf2/hmac/sha1 + the proof XOR.
+    #[test]
+    fn scram_sha1_rfc5802_vector() {
+        let salt = openssl::base64::decode_block("QSXCR+Q6sek8bf92").unwrap();
+        let salted = pbkdf2_sha1(b"pencil", &salt, 4096);
+        let client_key = hmac_sha1(&salted, b"Client Key");
+        let stored_key = sha1(&client_key);
+        let auth_msg = "n=user,r=fyko+d2lbbFgONRv9qkxdawL,\
+             r=fyko+d2lbbFgONRv9qkxdawL3rfcNHYJY1ZVvWVs7j,s=QSXCR+Q6sek8bf92,i=4096,\
+             c=biws,r=fyko+d2lbbFgONRv9qkxdawL3rfcNHYJY1ZVvWVs7j";
+        let client_sig = hmac_sha1(&stored_key, auth_msg.as_bytes());
+        let proof: Vec<u8> = client_key
+            .iter()
+            .zip(client_sig.iter())
+            .map(|(a, b)| a ^ b)
+            .collect();
+        assert_eq!(
+            openssl::base64::encode_block(&proof),
+            "v0X8v3Bz2T0CJGbJQyF0X+HI4Ts="
+        );
+        let server_key = hmac_sha1(&salted, b"Server Key");
+        let server_sig = hmac_sha1(&server_key, auth_msg.as_bytes());
+        assert_eq!(
+            openssl::base64::encode_block(&server_sig),
+            "rmF9pqV8S7suAoZWja4dJRkFsKQ="
+        );
     }
 }
