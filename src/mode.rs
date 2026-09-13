@@ -343,13 +343,57 @@ static AUDITORIUM: Flag = Flag {
     ch: 'u',
     set: set_auditorium,
 };
-fn set_encrypted(m: &mut ChanModes, v: bool) {
-    m.encrypted = v;
+/// `+E` — end-to-end encrypted channel. Every message must carry the
+/// `+E2E <ciphertext>` envelope; the server relays it verbatim, holds no key, and
+/// skips content filters. It can only be *set* when every local member already runs
+/// an E2E-capable client (advertises the `echoircd/e2e` cap), else `ERR_E2EONLYCHAN`;
+/// the join-time block for plaintext clients lives in [`crate::channels::Server::join`].
+struct Encrypted;
+static ENCRYPTED: Encrypted = Encrypted;
+impl ChanMode for Encrypted {
+    fn letter(&self) -> char {
+        'E'
+    }
+    fn wants_param(&self, _adding: bool) -> bool {
+        false
+    }
+    fn apply(
+        &self,
+        s: &mut Server,
+        chan: &str,
+        key: &str,
+        uid: Uid,
+        adding: bool,
+        _param: Option<&str>,
+    ) -> Applied {
+        if adding {
+            let members: Vec<Uid> = s
+                .channels
+                .get(key)
+                .map(|c| c.members.keys().copied().collect())
+                .unwrap_or_default();
+            let total = members.len();
+            let plain = members
+                .iter()
+                .filter(|m| !s.users.get(m).map(|u| u.caps.e2e).unwrap_or(false))
+                .count();
+            if plain > 0 {
+                s.numeric(
+                    uid,
+                    ERR_E2EONLYCHAN,
+                    &format!(
+                        "{chan} :All members must run an end-to-end encryption capable client ({plain}/{total} do not)"
+                    ),
+                );
+                return Applied::No;
+            }
+        }
+        if let Some(c) = s.channels.get_mut(key) {
+            c.modes.encrypted = adding;
+        }
+        Applied::Yes(None)
+    }
 }
-static ENCRYPTED: Flag = Flag {
-    ch: 'E',
-    set: set_encrypted,
-};
 fn set_nokicks(m: &mut ChanModes, v: bool) {
     m.nokicks = v;
 }

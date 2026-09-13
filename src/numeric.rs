@@ -151,6 +151,7 @@ pub const ERR_BANLISTFULL: u16 = 478; // +b/+e/+I list at its per-channel cap
 pub const ERR_CHANOPRIVSNEEDED: u16 = 482;
 pub const ERR_SECUREONLYCHAN: u16 = 489; // can't join a +z channel without TLS
 pub const ERR_ALLMUSTSSL: u16 = 490; // can't set +z while a member isn't on TLS
+pub const ERR_E2EONLYCHAN: u16 = 927; // can't join a +E channel without the echoircd/e2e cap
 pub const ERR_NOTREGISTERED: u16 = 451;
 pub const ERR_NEEDMOREPARAMS: u16 = 461;
 pub const ERR_ALREADYREGISTERED: u16 = 462;

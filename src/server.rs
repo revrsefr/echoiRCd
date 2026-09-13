@@ -2656,4 +2656,78 @@ mod tests {
             "PRIVMSG must reset the WHOIS idle clock"
         );
     }
+
+    #[test]
+    fn e2e_channel_gates_join_on_cap() {
+        let mut s = srv();
+        let arx = add_user(&mut s, 1, "ann");
+        s.users.get_mut(&1).unwrap().caps.e2e = true;
+        s.join(1, "#e2e", None); // ann creates it (she has the cap)
+        let _ = arx.try_iter().count();
+        s.channels.get_mut("#e2e").unwrap().modes.encrypted = true;
+
+        // a plaintext client is refused with ERR_E2EONLYCHAN and never joins
+        let brx = add_user(&mut s, 2, "bob"); // no e2e cap
+        s.join(2, "#e2e", None);
+        let bob: Vec<String> = brx.try_iter().collect();
+        assert!(
+            bob.iter().any(|l| l.contains(" 927 ")),
+            "plaintext join must be refused: {bob:?}"
+        );
+        assert!(!s.is_member(2, "#e2e"), "bob must not be a member");
+
+        // an E2E-capable client joins normally
+        let crx = add_user(&mut s, 3, "cara");
+        s.users.get_mut(&3).unwrap().caps.e2e = true;
+        s.join(3, "#e2e", None);
+        let _ = crx.try_iter().count();
+        assert!(s.is_member(3, "#e2e"), "cara joins with the cap");
+    }
+
+    #[test]
+    fn e2e_channel_refuses_plaintext_relays_ciphertext() {
+        let mut s = srv();
+        let arx = add_user(&mut s, 1, "ann");
+        let brx = add_user(&mut s, 2, "bob");
+        for u in [1, 2] {
+            s.users.get_mut(&u).unwrap().caps.e2e = true;
+        }
+        s.join(1, "#e2e", None);
+        s.join(2, "#e2e", None);
+        s.channels.get_mut("#e2e").unwrap().modes.encrypted = true;
+        let _ = arx.try_iter().count();
+        let _ = brx.try_iter().count();
+
+        // plaintext is refused: no member receives it, sender gets ERR_CANNOTSENDTOCHAN
+        let _ = crate::coremods::core_message::deliver(
+            &mut s,
+            1,
+            &["#e2e".to_string(), "hello world".to_string()],
+            false,
+        );
+        let bob1: Vec<String> = brx.try_iter().collect();
+        assert!(
+            !bob1.iter().any(|l| l.contains("PRIVMSG")),
+            "plaintext must not reach members: {bob1:?}"
+        );
+        let ann1: Vec<String> = arx.try_iter().collect();
+        assert!(
+            ann1.iter().any(|l| l.contains(" 404 ")),
+            "sender must get ERR_CANNOTSENDTOCHAN: {ann1:?}"
+        );
+
+        // a properly enveloped ciphertext line relays verbatim to members
+        let _ = crate::coremods::core_message::deliver(
+            &mut s,
+            1,
+            &["#e2e".to_string(), "+E2E QUJD9x==".to_string()],
+            false,
+        );
+        let bob2: Vec<String> = brx.try_iter().collect();
+        assert!(
+            bob2.iter()
+                .any(|l| l.contains("PRIVMSG") && l.contains("+E2E")),
+            "ciphertext must relay verbatim: {bob2:?}"
+        );
+    }
 }

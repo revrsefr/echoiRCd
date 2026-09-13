@@ -855,6 +855,21 @@ impl Server {
                 }
                 overrode = true;
             }
+            // +E — end-to-end encrypted: joiners must run an E2E-capable client, else
+            // they would only see ciphertext and could never read the channel.
+            if ch.modes.encrypted && !self.users.get(&uid).map(|u| u.caps.e2e).unwrap_or(false) {
+                if !can_override {
+                    self.numeric(
+                        uid,
+                        ERR_E2EONLYCHAN,
+                        &format!(
+                            "{name} :Cannot join channel; an end-to-end encryption capable client is required (+E is set)"
+                        ),
+                    );
+                    return;
+                }
+                overrode = true;
+            }
             // +O — IRC operators only (opers are allowed by definition)
             if ch.modes.oper_only && !is_oper {
                 self.numeric(
