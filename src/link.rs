@@ -1053,7 +1053,17 @@ impl Server {
             return;
         }
         let Some(tuid) = self.link_local_target(&target) else {
-            self.forward_to_target(&target, msg, from);
+            // A remote user's services account is network-wide state: apply it to our
+            // copy (account-tag / extended-join / `a:` extbans / WHOIS) and relay to our
+            // other peers. The change-guard inside stops duplicate and looping relays.
+            // Other metadata keys stay directed toward the target's own server.
+            if key == "accountname" {
+                if self.apply_remote_account(&target, &value, from) {
+                    self.propagate(&msg.to_wire(), Some(from));
+                }
+            } else {
+                self.forward_to_target(&target, msg, from);
+            }
             return;
         };
         // Metadata pushed onto a local user (login state, profile fields) is a
@@ -2192,6 +2202,45 @@ impl Server {
                 self.send(m, line.to_string());
             }
         }
+    }
+
+    /// A remote user's services account changed (a `METADATA <uuid> accountname`, on
+    /// burst or live): update our copy so account-tag, extended-join, `a:` extbans and
+    /// WHOIS reflect it, and give local account-notify members who share a channel a live
+    /// `ACCOUNT` line. Returns whether anything actually changed — `false` for an unknown
+    /// user, a wrong route, or the same account, so the caller then neither notifies nor
+    /// relays, which also breaks propagation loops. `value` empty / `*` / `0` = logged out.
+    fn apply_remote_account(&mut self, target: &str, value: &str, from: Uid) -> bool {
+        let uuid = if self.remote_users.contains_key(target) {
+            target.to_string()
+        } else if let Some(u) = self.remote_nick.get(&target.to_ascii_lowercase()) {
+            u.clone()
+        } else {
+            return false;
+        };
+        // Only the server that actually owns the user may set their account; a peer
+        // naming a user who lives behind a different link is forging it.
+        if !self.sourced_via(&uuid, from) {
+            return false;
+        }
+        let new_acct =
+            (!value.is_empty() && value != "*" && value != "0").then(|| value.to_string());
+        let prefix = match self.remote_users.get_mut(&uuid) {
+            Some(r) => {
+                if r.account == new_acct {
+                    return false; // no change — absorb duplicates, stop relay loops
+                }
+                r.account = new_acct.clone();
+                r.prefix()
+            }
+            None => return false,
+        };
+        let line = match &new_acct {
+            Some(a) => format!(":{prefix} ACCOUNT {a}"),
+            None => format!(":{prefix} ACCOUNT *"),
+        };
+        self.notify_common_local_if(&uuid, &line, |c| c.account_notify);
+        true
     }
 
     /// A remote user's host/ident changed (a CHGHOST/CHGIDENT whose target lives
@@ -3687,6 +3736,223 @@ mod tests {
         assert!(
             lines.iter().any(|l| l == ":0AAAAAAAB MODE 0AAAAAAAB +B"),
             "peer must receive the services-driven MODE, got {lines:?}"
+        );
+    }
+
+    #[test]
+    fn remote_accountname_updates_copy_and_notifies_cap_members() {
+        use crate::config::Config;
+        use crate::extensible::Extensible;
+        use crate::users::{Caps, UserFlags};
+        use std::sync::atomic::AtomicU64;
+        use std::sync::{mpsc, Arc};
+        let (tx, _rx) = mpsc::sync_channel(65536);
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+        s.remote_users.insert(
+            "42SB00000".to_string(),
+            RemoteUser {
+                uuid: "42SB00000".to_string(),
+                nick: "bob".into(),
+                ident: "b".into(),
+                host: "h".into(),
+                realname: "r".into(),
+                account: None,
+                ip: String::new(),
+                modes: String::new(),
+                sid: "42S".into(),
+                via: 1,
+                nick_ts: 0,
+                away: None,
+            },
+        );
+        let (utx, urx) = mpsc::channel();
+        s.users.insert(
+            7,
+            User {
+                uid: 7,
+                uuid: "0AAAAAAAB".into(),
+                nick: "alice".into(),
+                ident: "a".into(),
+                realname: "a".into(),
+                host: "localhost".into(),
+                cloak: String::new(),
+                vhost: None,
+                secure: false,
+                certfp: None,
+                tls_info: None,
+                sni: None,
+                brand_server: None,
+                brand_network: None,
+                account: None,
+                signon: 0,
+                nick_ts: 0,
+                addr: "127.0.0.1:1".parse().unwrap(),
+                port: 6667,
+                registered: true,
+                dns_pending: false,
+                ident_pending: false,
+                auth_pending: false,
+                waitpong: None,
+                class: None,
+                pass: None,
+                deferred: Vec::new(),
+                cap: false,
+                cap_302: false,
+                caps: {
+                    let mut c = Caps::default();
+                    c.account_notify = true;
+                    c
+                },
+                sasl_mech: None,
+                channels: HashSet::default(),
+                invited: HashSet::default(),
+                watch: Vec::new(),
+                monitor: Vec::new(),
+                silence: Vec::new(),
+                signore: Vec::new(),
+                accept: Vec::new(),
+                quitting: None,
+                flags: UserFlags::default(),
+                last_active: 0,
+                last_msg: 0,
+                ping_sent: false,
+                ext: Extensible::default(),
+                out: OutSink::Thread(utx),
+                sock: None,
+            },
+        );
+        s.uuid_local.insert("0AAAAAAAB".into(), 7);
+        let mut ch = Channel::new("#c");
+        ch.members.insert(7, Member::default());
+        ch.rmembers.insert("42SB00000".into(), Member::default());
+        s.channels.insert("#c".into(), ch);
+
+        // services logs the remote user in — our copy must record it and cap members hear it
+        let msg = crate::message::parse(":42S METADATA 42SB00000 accountname :bobacct").unwrap();
+        s.link_metadata(1, &msg);
+        assert_eq!(
+            s.remote_users["42SB00000"].account.as_deref(),
+            Some("bobacct"),
+            "our copy records the remote user's account"
+        );
+        let lines: Vec<String> = std::iter::from_fn(|| urx.try_recv().ok()).collect();
+        assert!(
+            lines.iter().any(|l| l == ":bob!b@h ACCOUNT bobacct"),
+            "account-notify member must see ACCOUNT, got {lines:?}"
+        );
+
+        // logout (`*`) clears it
+        let out = crate::message::parse(":42S METADATA 42SB00000 accountname :*").unwrap();
+        s.link_metadata(1, &out);
+        assert_eq!(
+            s.remote_users["42SB00000"].account, None,
+            "logout clears the account copy"
+        );
+
+        // a wrong-route assertion (user is not behind link 2) must be ignored
+        let spoof = crate::message::parse(":42S METADATA 42SB00000 accountname :evil").unwrap();
+        s.link_metadata(2, &spoof);
+        assert_eq!(
+            s.remote_users["42SB00000"].account, None,
+            "account change from the wrong link is rejected"
+        );
+    }
+
+    #[test]
+    fn local_login_and_logout_broadcast_accountname_to_peers() {
+        use crate::config::Config;
+        use crate::extensible::Extensible;
+        use crate::users::{Caps, UserFlags};
+        use std::sync::atomic::AtomicU64;
+        use std::sync::{mpsc, Arc};
+        let (tx, _rx) = mpsc::sync_channel(65536);
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+
+        let (utx, _urx) = mpsc::channel();
+        s.users.insert(
+            7,
+            User {
+                uid: 7,
+                uuid: "0AAAAAAAB".into(),
+                nick: "alice".into(),
+                ident: "a".into(),
+                realname: "a".into(),
+                host: "localhost".into(),
+                cloak: String::new(),
+                vhost: None,
+                secure: false,
+                certfp: None,
+                tls_info: None,
+                sni: None,
+                brand_server: None,
+                brand_network: None,
+                account: None,
+                signon: 0,
+                nick_ts: 0,
+                addr: "127.0.0.1:1".parse().unwrap(),
+                port: 6667,
+                registered: true,
+                dns_pending: false,
+                ident_pending: false,
+                auth_pending: false,
+                waitpong: None,
+                class: None,
+                pass: None,
+                deferred: Vec::new(),
+                cap: false,
+                cap_302: false,
+                caps: Caps::default(),
+                sasl_mech: None,
+                channels: HashSet::default(),
+                invited: HashSet::default(),
+                watch: Vec::new(),
+                monitor: Vec::new(),
+                silence: Vec::new(),
+                signore: Vec::new(),
+                accept: Vec::new(),
+                quitting: None,
+                flags: UserFlags::default(),
+                last_active: 0,
+                last_msg: 0,
+                ping_sent: false,
+                ext: Extensible::default(),
+                out: OutSink::Thread(utx),
+                sock: None,
+            },
+        );
+        s.uuid_local.insert("0AAAAAAAB".into(), 7);
+        let (ltx, lrx) = mpsc::channel();
+        s.links.insert(
+            2,
+            Link {
+                uid: 2,
+                out: OutSink::Thread(ltx),
+                outbound: false,
+                registered: true,
+                sent_server: true,
+                sid: Some("42S".into()),
+                name: Some("peer.".into()),
+                bursting: false,
+                last_seen: 0,
+            },
+        );
+
+        s.set_login(7, "aliceacct");
+        let after_login: Vec<String> = std::iter::from_fn(|| lrx.try_recv().ok()).collect();
+        assert!(
+            after_login
+                .iter()
+                .any(|l| l.contains("METADATA 0AAAAAAAB accountname :aliceacct")),
+            "peer must receive the login, got {after_login:?}"
+        );
+
+        s.logout(7);
+        let after_logout: Vec<String> = std::iter::from_fn(|| lrx.try_recv().ok()).collect();
+        assert!(
+            after_logout
+                .iter()
+                .any(|l| l.contains("METADATA 0AAAAAAAB accountname :*")),
+            "peer must receive the logout, got {after_logout:?}"
         );
     }
 

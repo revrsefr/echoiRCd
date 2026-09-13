@@ -26,11 +26,11 @@ impl Server {
     /// Log `uid` into `account` (services-driven): sets the account name, flips
     /// `+r`, and reflects the mode back to the user.
     pub fn set_login(&mut self, uid: Uid, account: &str) {
-        let (nick, prefix, registered) = match self.users.get_mut(&uid) {
+        let (nick, prefix, registered, uuid) = match self.users.get_mut(&uid) {
             Some(u) => {
                 u.account = Some(account.to_string());
                 u.flags.logged_in = true;
-                (u.nick.clone(), u.prefix(), u.registered)
+                (u.nick.clone(), u.prefix(), u.registered, u.uuid.clone())
             }
             None => return,
         };
@@ -43,6 +43,13 @@ impl Server {
         // connected. A SASL-at-connect login runs before registration completes, so
         // it's already reflected in the "Client connecting: … account: …" notice.
         if registered {
+            // Multi-server: announce our user's login to peers so their RemoteUser copy,
+            // account-tag, extended-join and `a:` extbans converge. A pre-registration
+            // login (SASL at connect) is instead carried by the burst's accountname line.
+            self.propagate(
+                &format!(":{} METADATA {uuid} accountname :{account}", self.sid),
+                None,
+            );
             let m = self.trf(
                 "Client {0} is now logged in as {1}",
                 &[nick.as_str(), account],
@@ -53,15 +60,20 @@ impl Server {
 
     /// Log `uid` out of any account (services-driven): clears `+r`.
     pub fn logout(&mut self, uid: Uid) {
-        let (nick, prefix) = match self.users.get_mut(&uid) {
+        let (nick, prefix, uuid) = match self.users.get_mut(&uid) {
             Some(u) if u.account.is_some() => {
                 u.account = None;
                 u.flags.logged_in = false;
-                (u.nick.clone(), u.prefix())
+                (u.nick.clone(), u.prefix(), u.uuid.clone())
             }
             _ => return,
         };
         self.send(uid, format!(":{} MODE {nick} :-r", self.name));
         self.notify_peers(uid, &format!(":{prefix} ACCOUNT *"), |c| c.account_notify);
+        // Multi-server: announce the logout to peers so their copy converges.
+        self.propagate(
+            &format!(":{} METADATA {uuid} accountname :*", self.sid),
+            None,
+        );
     }
 }
