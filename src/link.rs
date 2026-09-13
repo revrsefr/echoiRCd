@@ -1766,7 +1766,7 @@ impl Server {
     /// so the network converges on the same rules (matches the peer's netburst).
     fn burst_filters(&self, link_uid: Uid) {
         if let Some(f) = self.ext.get::<crate::modules::filter::Filters>() {
-            for r in &f.0 {
+            for r in f.rules() {
                 self.link_out(
                     link_uid,
                     format!(

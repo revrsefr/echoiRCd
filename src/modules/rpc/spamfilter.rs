@@ -15,7 +15,8 @@ pub fn handle(s: &mut Server, action: &str, params: &str) -> Result<String, RpcE
                 .ext
                 .get::<Filters>()
                 .map(|f| {
-                    f.0.iter()
+                    f.rules()
+                        .iter()
                         .map(|r| {
                             obj(&[
                                 ("pattern", qstr(&r.pattern)),
@@ -44,10 +45,10 @@ pub fn handle(s: &mut Server, action: &str, params: &str) -> Result<String, RpcE
             let filter = SpamFilter::new(pattern, engine, action, duration, reason)
                 .map_err(|e| RpcError::invalid_params(&e))?;
             let set = s.ext.get_or_insert_with::<Filters>(Filters::default);
-            if set.0.iter().any(|f| f.pattern == filter.pattern) {
+            if set.rules().iter().any(|f| f.pattern == filter.pattern) {
                 return Err(RpcError::not_found("filter already exists"));
             }
-            set.0.push(filter);
+            set.upsert(filter);
             Ok(obj(&[("result", "true".into())]))
         }
         "del" => {
@@ -55,9 +56,7 @@ pub fn handle(s: &mut Server, action: &str, params: &str) -> Result<String, RpcE
                 .or_else(|| json::get_str(params, "name"))
                 .ok_or_else(|| RpcError::invalid_params("missing 'pattern'"))?;
             let set = s.ext.get_or_insert_with::<Filters>(Filters::default);
-            let before = set.0.len();
-            set.0.retain(|f| f.pattern != pattern);
-            if set.0.len() < before {
+            if set.remove(&pattern) {
                 Ok(obj(&[("result", "true".into())]))
             } else {
                 Err(RpcError::not_found("no matching filter"))

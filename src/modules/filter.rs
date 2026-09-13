@@ -42,17 +42,82 @@ impl SpamFilter {
     }
 }
 
-/// The rule set, stored in `Server.ext`.
+/// The rule set, stored in `Server.ext`. All the regex-engine rules are additionally
+/// compiled into one combined [`RegexSet`](crate::regex::RegexSet) so a message is tested
+/// against every regex rule in a single pass instead of one scan per rule; glob rules
+/// (cheap already) stay matched individually. Rule order is preserved for "first match".
 #[derive(Default)]
-pub struct Filters(pub Vec<SpamFilter>);
+pub struct Filters {
+    rules: Vec<SpamFilter>,
+    set: Option<crate::regex::RegexSet>, // combined regex-engine patterns (None if none/too big)
+    set_idx: Vec<usize>,                 // set pattern index -> index into `rules`
+}
 
 impl Filters {
-    /// The (action, reason, duration) of the first rule whose pattern matches `text`.
+    /// The rules, in order (for listing / bursting to peers).
+    pub fn rules(&self) -> &[SpamFilter] {
+        &self.rules
+    }
+
+    /// Add a rule, replacing any existing rule with the same pattern, then rebuild the
+    /// combined regex set.
+    pub fn upsert(&mut self, rule: SpamFilter) {
+        self.rules.retain(|r| r.pattern != rule.pattern);
+        self.rules.push(rule);
+        self.rebuild();
+    }
+
+    /// Remove the rule with this pattern; returns whether one was removed.
+    pub fn remove(&mut self, pattern: &str) -> bool {
+        let before = self.rules.len();
+        self.rules.retain(|r| r.pattern != pattern);
+        let changed = self.rules.len() != before;
+        if changed {
+            self.rebuild();
+        }
+        changed
+    }
+
+    /// Recompile the combined [`RegexSet`] from the current regex-engine rules. Falls
+    /// back to `None` (per-rule scanning) if there are no regex rules or the combined
+    /// program would be too large.
+    fn rebuild(&mut self) {
+        let mut pats = Vec::new();
+        let mut idx = Vec::new();
+        for (ri, r) in self.rules.iter().enumerate() {
+            if r.engine == "regex" {
+                pats.push(r.pattern.clone());
+                idx.push(ri);
+            }
+        }
+        self.set = if pats.is_empty() {
+            None
+        } else {
+            crate::regex::RegexSet::new(&pats).ok()
+        };
+        self.set_idx = idx;
+    }
+
+    /// The (action, reason, duration) of the first rule (in order) whose pattern matches
+    /// `text`. Regex rules are resolved from one combined-set scan; glob rules (and any
+    /// regex rule when the set failed to build) are matched by their own compiled matcher.
     fn hit(&self, text: &str) -> Option<(String, String, u64)> {
-        self.0
-            .iter()
-            .find(|f| f.matcher.is_match(text))
-            .map(|f| (f.action.clone(), f.reason.clone(), f.duration))
+        let matched = self
+            .set
+            .as_ref()
+            .map(|s| s.matches(text))
+            .unwrap_or_default();
+        for (ri, r) in self.rules.iter().enumerate() {
+            let is_hit = if r.engine == "regex" && self.set.is_some() {
+                matched.iter().any(|&si| self.set_idx[si] == ri)
+            } else {
+                r.matcher.is_match(text)
+            };
+            if is_hit {
+                return Some((r.action.clone(), r.reason.clone(), r.duration));
+            }
+        }
+        None
     }
 }
 
@@ -144,7 +209,8 @@ impl Command for FilterCmd {
                     .ext
                     .get::<Filters>()
                     .map(|f| {
-                        f.0.iter()
+                        f.rules()
+                            .iter()
                             .map(|r| {
                                 format!(
                                     "{} [{}] {} {} :{}",
@@ -168,11 +234,7 @@ impl Command for FilterCmd {
                     let removed = s
                         .ext
                         .get_mut::<Filters>()
-                        .map(|f| {
-                            let before = f.0.len();
-                            f.0.retain(|r| r.pattern != pattern);
-                            before != f.0.len()
-                        })
+                        .map(|f| f.remove(&pattern))
                         .unwrap_or(false);
                     let word = if removed { "removed" } else { "not found" };
                     s.send(
@@ -215,8 +277,7 @@ impl Command for FilterCmd {
                     // remove is not relayed — peers keep it until their own burst/change.
                     let wire = encode_filter(&filter);
                     let f = s.ext.get_or_insert_with::<Filters>(Filters::default);
-                    f.0.retain(|r| r.pattern != pattern);
-                    f.0.push(filter);
+                    f.upsert(filter);
                     s.propagate(&format!(":{} METADATA * filter :{}", s.sid, wire), None);
                     let m = s.trf(
                         "{0} added FILTER {1} (engine={2} action={3})",
@@ -302,10 +363,8 @@ pub fn encode_filter(f: &SpamFilter) -> String {
 pub fn apply_metadata(s: &mut Server, value: &str) {
     let engine = s.conf("filter_engine").unwrap_or("glob").to_string();
     if let Ok(f) = decode_filter(value, &engine) {
-        let pat = f.pattern.clone();
         let filters = s.ext.get_or_insert_with::<Filters>(Filters::default);
-        filters.0.retain(|r| r.pattern != pat);
-        filters.0.push(f);
+        filters.upsert(f);
     }
 }
 
@@ -343,7 +402,7 @@ mod tests {
     #[test]
     fn filter_matches_by_engine() {
         let mut filters = Filters::default();
-        filters.0.push(
+        filters.upsert(
             SpamFilter::new(
                 "*buy now*".into(),
                 "glob".into(),
@@ -353,7 +412,7 @@ mod tests {
             )
             .unwrap(),
         );
-        filters.0.push(
+        filters.upsert(
             SpamFilter::new(
                 "free.*money".into(),
                 "regex".into(),
@@ -387,5 +446,28 @@ mod tests {
             "x".into()
         )
         .is_err());
+    }
+
+    #[test]
+    fn combined_regexset_preserves_rule_order() {
+        let mut filters = Filters::default();
+        filters.upsert(
+            SpamFilter::new("a+".into(), "regex".into(), "block".into(), 0, "first".into()).unwrap(),
+        );
+        filters.upsert(
+            SpamFilter::new("b+".into(), "regex".into(), "kill".into(), 0, "second".into()).unwrap(),
+        );
+        filters.upsert(
+            SpamFilter::new("*ccc*".into(), "glob".into(), "gline".into(), 0, "third".into())
+                .unwrap(),
+        );
+        // matches only the 2nd regex rule → its action, resolved from the combined set
+        assert_eq!(filters.hit("zzz bbb").map(|(a, _, _)| a), Some("kill".into()));
+        // matches both regex rules → the first rule in order wins
+        assert_eq!(filters.hit("aaa bbb").map(|(a, _, _)| a), Some("block".into()));
+        assert_eq!(filters.hit("aaa").map(|(_, r, _)| r), Some("first".into()));
+        // matches only the interleaved glob rule
+        assert_eq!(filters.hit("xxcccxx").map(|(a, _, _)| a), Some("gline".into()));
+        assert!(filters.hit("only zeroes").is_none()); // no a, b, or ccc
     }
 }

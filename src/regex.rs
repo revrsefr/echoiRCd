@@ -63,6 +63,7 @@ enum Inst {
     Start,
     End,
     Match,
+    MatchN(usize), // accept for pattern `n` — used only by RegexSet's combined program
 }
 
 const MAX_DEPTH: usize = 200; // parser nesting guard
@@ -103,7 +104,7 @@ impl Regex {
         let mut gen = 1u32;
         let mut clist: Vec<usize> = Vec::new();
         let mut nlist: Vec<usize> = Vec::new();
-        self.add_thread(&mut clist, &mut seen, gen, 0, 0, n);
+        add_thread(&self.prog, &mut clist, &mut seen, gen, 0, 0, n);
         for pos in 0..=n {
             gen += 1;
             nlist.clear();
@@ -117,7 +118,7 @@ impl Regex {
                     _ => false, // epsilon insts never reach clist
                 };
                 if hit {
-                    self.add_thread(&mut nlist, &mut seen, gen, pc + 1, pos + 1, n);
+                    add_thread(&self.prog, &mut nlist, &mut seen, gen, pc + 1, pos + 1, n);
                 }
             }
             std::mem::swap(&mut clist, &mut nlist);
@@ -128,43 +129,155 @@ impl Regex {
         false
     }
 
-    /// Epsilon-closure: add `start` and everything reachable from it by
-    /// Split/Jmp/anchor transitions to `list`, deduped by `seen`/`gen`. Iterative so
-    /// a pathological pattern can't overflow the stack.
-    fn add_thread(
-        &self,
-        list: &mut Vec<usize>,
-        seen: &mut [u32],
-        gen: u32,
-        start: usize,
-        pos: usize,
-        n: usize,
-    ) {
-        let mut stack = vec![start];
-        while let Some(pc) = stack.pop() {
-            if seen[pc] == gen {
-                continue;
+}
+
+/// Epsilon-closure, shared by [`Regex`] and [`RegexSet`]: add `start` and everything
+/// reachable from it by Split/Jmp/anchor transitions to `list`, deduped by `seen`/`gen`.
+/// Iterative so a pathological pattern can't overflow the stack.
+fn add_thread(
+    prog: &[Inst],
+    list: &mut Vec<usize>,
+    seen: &mut [u32],
+    gen: u32,
+    start: usize,
+    pos: usize,
+    n: usize,
+) {
+    let mut stack = vec![start];
+    while let Some(pc) = stack.pop() {
+        if seen[pc] == gen {
+            continue;
+        }
+        seen[pc] = gen;
+        match &prog[pc] {
+            Inst::Jmp(x) => stack.push(*x),
+            Inst::Split(x, y) => {
+                stack.push(*y);
+                stack.push(*x);
             }
-            seen[pc] = gen;
-            match &self.prog[pc] {
-                Inst::Jmp(x) => stack.push(*x),
-                Inst::Split(x, y) => {
-                    stack.push(*y);
-                    stack.push(*x);
+            Inst::Start => {
+                if pos == 0 {
+                    stack.push(pc + 1);
                 }
-                Inst::Start => {
-                    if pos == 0 {
-                        stack.push(pc + 1);
-                    }
+            }
+            Inst::End => {
+                if pos == n {
+                    stack.push(pc + 1);
                 }
-                Inst::End => {
-                    if pos == n {
-                        stack.push(pc + 1);
-                    }
-                }
-                _ => list.push(pc), // Char/Any/Class/Match
+            }
+            _ => list.push(pc), // Char/Any/Class/Match/MatchN
+        }
+    }
+}
+
+/// Many patterns compiled into ONE Thompson NFA, scanned in a single linear pass:
+/// [`RegexSet::matches`] reports every pattern that matches, so testing N patterns costs
+/// one traversal of the text (and one set of scratch buffers) instead of N. Same
+/// linear-time, no-backtracking guarantee as [`Regex`]. The spam `filter` uses it to
+/// test all of its regex-engine rules against a message at once.
+pub struct RegexSet {
+    prog: Vec<Inst>,
+    starts: Vec<usize>, // entry pc of each pattern within `prog`
+    npat: usize,
+}
+
+/// Relocate one instruction of a sub-pattern placed at `base` in a combined program:
+/// jump/split targets shift by `base`, and the lone accept becomes this pattern's id.
+fn relocate(inst: Inst, base: usize, id: usize) -> Inst {
+    match inst {
+        Inst::Char(c) => Inst::Char(c),
+        Inst::Any => Inst::Any,
+        Inst::Class(items, neg) => Inst::Class(items, neg),
+        Inst::Split(x, y) => Inst::Split(x + base, y + base),
+        Inst::Jmp(x) => Inst::Jmp(x + base),
+        Inst::Start => Inst::Start,
+        Inst::End => Inst::End,
+        Inst::Match => Inst::MatchN(id),
+        Inst::MatchN(_) => Inst::MatchN(id), // a single Regex never emits MatchN
+    }
+}
+
+impl RegexSet {
+    /// Compile `patterns` into one combined NFA. Each pattern is parsed and compiled by
+    /// [`Regex::new`] (so a bad one is rejected here), then relocated into the shared
+    /// program with its own unanchored search and a per-pattern accept. Errors if the
+    /// combined program would exceed the size cap (the caller can then fall back to
+    /// scanning patterns individually).
+    pub fn new(patterns: &[String]) -> Result<RegexSet, String> {
+        let mut prog: Vec<Inst> = Vec::new();
+        let mut starts = Vec::with_capacity(patterns.len());
+        for (i, pat) in patterns.iter().enumerate() {
+            let re = Regex::new(pat)?;
+            let base = prog.len();
+            if base + re.prog.len() > MAX_PROG {
+                return Err("combined pattern set too large".into());
+            }
+            starts.push(base);
+            for inst in re.prog {
+                prog.push(relocate(inst, base, i));
             }
         }
+        Ok(RegexSet {
+            prog,
+            starts,
+            npat: patterns.len(),
+        })
+    }
+
+    /// The indices (ascending) of every pattern that matches `text`. One linear pass
+    /// over the text regardless of how many patterns there are.
+    pub fn matches(&self, text: &str) -> Vec<usize> {
+        let mut out = Vec::new();
+        if self.npat == 0 {
+            return out;
+        }
+        let chars: Vec<char> = text.chars().collect();
+        let n = chars.len();
+        let mut seen = vec![0u32; self.prog.len()];
+        let mut gen = 1u32;
+        let mut clist: Vec<usize> = Vec::new();
+        let mut nlist: Vec<usize> = Vec::new();
+        let mut hit = vec![false; self.npat];
+        let mut nhit = 0usize;
+        for &st in &self.starts {
+            add_thread(&self.prog, &mut clist, &mut seen, gen, st, 0, n);
+        }
+        for pos in 0..=n {
+            gen += 1;
+            nlist.clear();
+            for i in 0..clist.len() {
+                let pc = clist[i];
+                let advance = match &self.prog[pc] {
+                    Inst::MatchN(id) => {
+                        if !hit[*id] {
+                            hit[*id] = true;
+                            nhit += 1;
+                        }
+                        false
+                    }
+                    Inst::Char(c) => pos < n && chars[pos] == *c,
+                    Inst::Any => pos < n && chars[pos] != '\n',
+                    Inst::Class(items, neg) => pos < n && class_hit(items, *neg, chars[pos]),
+                    _ => false,
+                };
+                if advance {
+                    add_thread(&self.prog, &mut nlist, &mut seen, gen, pc + 1, pos + 1, n);
+                }
+            }
+            if nhit == self.npat {
+                break; // every pattern already matched — nothing more to learn
+            }
+            std::mem::swap(&mut clist, &mut nlist);
+            if pos == n {
+                break;
+            }
+        }
+        for (i, &h) in hit.iter().enumerate() {
+            if h {
+                out.push(i);
+            }
+        }
+        out
     }
 }
 
@@ -647,5 +760,37 @@ mod tests {
         let rx = Regex::new("^(a+)+$").unwrap();
         assert!(!rx.is_match(&("a".repeat(40) + "!")));
         assert!(rx.is_match(&"a".repeat(40)));
+    }
+
+    #[test]
+    fn regexset_reports_all_matching_patterns() {
+        let set = RegexSet::new(&[
+            "free.*money".to_string(),
+            "^spam".to_string(),
+            r"\d{4}".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(set.matches("get free money now"), vec![0]);
+        assert_eq!(set.matches("spam here 1234"), vec![1, 2]); // ^spam and \d{4}
+        assert_eq!(set.matches("1234 spam"), vec![2]); // ^ anchors — doesn't start with spam
+        assert_eq!(set.matches("nothing"), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn regexset_agrees_with_individual_regexes() {
+        // the combined set must report exactly the patterns their standalone Regexes match
+        let pats = vec![
+            "a+b".to_string(),
+            "^hel*o$".to_string(),
+            "[0-9]+".to_string(),
+            "(cat|dog)".to_string(),
+        ];
+        let set = RegexSet::new(&pats).unwrap();
+        let indiv: Vec<Regex> = pats.iter().map(|p| Regex::new(p).unwrap()).collect();
+        for text in ["aaab", "hello", "helo", "no digits 42", "a dog barks", "xyz", ""] {
+            let got = set.matches(text);
+            let want: Vec<usize> = (0..pats.len()).filter(|&i| indiv[i].is_match(text)).collect();
+            assert_eq!(got, want, "mismatch on {text:?}");
+        }
     }
 }
