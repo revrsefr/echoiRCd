@@ -485,6 +485,8 @@ impl Command for SetName {
             s.send(uid, line.clone());
         }
         s.notify_peers(uid, &line, |c| c.setname);
+        // propagate to linked servers so remote setname clients + WHOIS/WHO see it too
+        s.propagate_from_user(uid, &format!("SETNAME :{realname}"));
         CmdResult::Ok
     }
 }
