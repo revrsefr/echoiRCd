@@ -80,6 +80,7 @@ No parameter.
 | `+N` | no nick changes while joined | | `+U` | op-moderated (unprivileged msgs go to ops) |
 | `+C` | block CTCP | | `+D` | delay-join (hide JOIN until they speak) |
 | `+T` | block NOTICEs | | `+c` | reject formatting/colour |
+| `+E` | end-to-end encrypted — every message must carry the `+E2E <ciphertext>` envelope; the server relays it verbatim and holds no key | | | |
 
 Channel modes can also be set or queried by long name with the `PROP` command
 (e.g. `PROP #chan moderated=on`).

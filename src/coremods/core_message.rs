@@ -249,6 +249,27 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
                 return CmdResult::Fail;
             }
         }
+        // +E end-to-end encrypted — every message must arrive as the `+E2E <ciphertext>`
+        // envelope, so plaintext can never leak in. The server relays it verbatim, holds
+        // no key, and only enforces the envelope's presence; it can't (and shouldn't)
+        // validate the ciphertext. Applies to everyone, opers included.
+        let encrypted = s
+            .channels
+            .get(&key)
+            .map(|c| c.modes.encrypted)
+            .unwrap_or(false);
+        if encrypted && !text.starts_with("+E2E ") {
+            if !notice {
+                s.numeric(
+                    uid,
+                    ERR_CANNOTSENDTOCHAN,
+                    &format!(
+                        "{target} :Channel is end-to-end encrypted (+E) — your client must send the +E2E envelope"
+                    ),
+                );
+            }
+            return CmdResult::Fail;
+        }
         // +U opmoderated — an unprivileged user's message isn't blocked; it's routed
         // to channel ops only (below). It also overrides +m's block for that purpose.
         let op_only = s
@@ -408,7 +429,8 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             .get(&key)
             .map(|c| c.modes.censor)
             .unwrap_or(false);
-        if censor_on && !s.censor.is_empty() && !s.chanop_exempt(uid, &key, "censor") {
+        if censor_on && !encrypted && !s.censor.is_empty() && !s.chanop_exempt(uid, &key, "censor")
+        {
             match apply_censor(&body, &s.censor) {
                 Some(b) => body = b,
                 None => {
@@ -423,8 +445,9 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
                 }
             }
         }
-        // +B anticaps — reject a mostly-uppercase message (ops/opers exempt)
-        if !flood_exempt && !s.chanop_exempt(uid, &key, "anticaps") {
+        // +B anticaps — reject a mostly-uppercase message (ops/opers exempt; skipped on
+        // +E channels, where the body is base64 ciphertext, not human text)
+        if !encrypted && !flood_exempt && !s.chanop_exempt(uid, &key, "anticaps") {
             if let Some(pct) = s.channels.get(&key).and_then(|c| c.modes.anticaps) {
                 if caps_percent(&body).map(|p| p >= pct).unwrap_or(false) {
                     if !notice {

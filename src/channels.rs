@@ -316,8 +316,9 @@ pub struct ChanModes {
     pub delaymsg: Option<u32>,       // +d <secs> — new joiners can't speak for N secs
     pub repeat: Option<u32>,         // +K <n> — block a line repeated within your last n
     pub delayjoin: bool,             // +D — hide JOINs until the user speaks/reveals
-    pub registered: bool,            // +r — set by services on a registered channel
-                                     // (server/services-only; not user-settable)
+    pub encrypted: bool, // +E — end-to-end encrypted (server relays ciphertext, holds no key)
+    pub registered: bool, // +r — set by services on a registered channel
+                         // (server/services-only; not user-settable)
 }
 
 impl ChanModes {
@@ -346,6 +347,7 @@ impl ChanModes {
             'P' => self.permanent = on,
             'U' => self.opmoderated = on,
             'D' => self.delayjoin = on,
+            'E' => self.encrypted = on,
             'r' => self.registered = on,
             _ => {}
         }
@@ -378,6 +380,7 @@ impl ChanModes {
             (self.allowinvite, 'A'),
             (self.opmoderated, 'U'),
             (self.delayjoin, 'D'),
+            (self.encrypted, 'E'),
         ] {
             if on {
                 s.push(ch);
@@ -1651,6 +1654,18 @@ pub fn normalize_ban_mask(m: &str) -> String {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn encrypted_mode_roundtrips() {
+        let mut m = ChanModes::default();
+        assert!(!m.encrypted);
+        m.set_by_letter('E', true);
+        assert!(m.encrypted);
+        assert!(m.render(false).contains('E'));
+        m.set_by_letter('E', false);
+        assert!(!m.encrypted);
+        assert!(!m.render(false).contains('E'));
+    }
 
     #[test]
     fn glob_basic() {

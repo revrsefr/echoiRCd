@@ -170,6 +170,7 @@ define_caps! {
     "draft/account-registration" => acct_registration,
     "draft/json-log" => json_log,
     "draft/metrics" => metrics,
+    "echoircd/e2e" => e2e,
     "draft/extended-isupport" => ext_isupport,
     "reverse.im/filehost" => filehost,
     "draft/relaymsg" => relaymsg,
@@ -495,7 +496,7 @@ impl Server {
             uid,
             RPL_MYINFO,
             &format!(
-                "{} echoircd-{RELEASE} iowxsgBkDIHrRzWhc qaohvbeIklimnpstzCTcSNORMfjFLgGuBQAPJUdKXwD",
+                "{} echoircd-{RELEASE} iowxsgBkDIHrRzWhc qaohvbeIklimnpstzCTcSNORMfjFLgGuBQAPJUdKXwDE",
                 self.disp_name(uid)
             ),
         );

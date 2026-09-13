@@ -1175,7 +1175,7 @@ impl Server {
         let include_oper = self.conf_bool("operprefix", false) || self.conf_bool("ojoin", false);
         let prefix = crate::modules::customprefix::isupport(include_oper);
         let mut tokens: Vec<String> = format!(
-            "CHANTYPES=# PREFIX={prefix} CHANMODES=beIgXw,k,lfjFLHBJdK,ACDGMNOPQRSTUcimnprstuz EXTBAN=,aGAbcgjmnrsy ACCOUNTEXTBAN=a BOT=B WATCH={maxwatch} MONITOR={maxmon} SILENCE={maxsil} CALLERID=g WHOX CHATHISTORY={chathist} MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN={maxnick} CHANNELLEN={maxchan} MODES={maxmodes} NETWORK={}",
+            "CHANTYPES=# PREFIX={prefix} CHANMODES=beIgXw,k,lfjFLHBJdK,ACDEGMNOPQRSTUcimnprstuz EXTBAN=,aGAbcgjmnrsy ACCOUNTEXTBAN=a BOT=B WATCH={maxwatch} MONITOR={maxmon} SILENCE={maxsil} CALLERID=g WHOX CHATHISTORY={chathist} MSGREFTYPES=timestamp,msgid UTF8ONLY CASEMAPPING=ascii NICKLEN={maxnick} CHANNELLEN={maxchan} MODES={maxmodes} NETWORK={}",
             network
         )
         .split(' ')

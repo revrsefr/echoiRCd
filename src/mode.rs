@@ -103,6 +103,7 @@ static CHAN_MODES: &[&(dyn ChanMode + Sync)] = &[
     &REGMODERATED,
     &CENSOR,
     &AUDITORIUM,
+    &ENCRYPTED,
     &FILTER,
     &MSGFLOOD,
     &JOINFLOOD,
@@ -341,6 +342,13 @@ static CENSOR: Flag = Flag {
 static AUDITORIUM: Flag = Flag {
     ch: 'u',
     set: set_auditorium,
+};
+fn set_encrypted(m: &mut ChanModes, v: bool) {
+    m.encrypted = v;
+}
+static ENCRYPTED: Flag = Flag {
+    ch: 'E',
+    set: set_encrypted,
 };
 fn set_nokicks(m: &mut ChanModes, v: bool) {
     m.nokicks = v;
