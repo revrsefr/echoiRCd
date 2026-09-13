@@ -3601,6 +3601,96 @@ mod tests {
     }
 
     #[test]
+    fn svsmode_on_local_user_propagates_to_peers() {
+        use crate::config::Config;
+        use crate::extensible::Extensible;
+        use crate::users::{Caps, UserFlags};
+        use std::sync::atomic::AtomicU64;
+        use std::sync::{mpsc, Arc};
+        let (tx, _rx) = mpsc::sync_channel(65536);
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+
+        // a local user that services will re-mode via SVSMODE
+        let (utx, _urx) = mpsc::channel();
+        s.users.insert(
+            7,
+            User {
+                uid: 7,
+                uuid: "0AAAAAAAB".into(),
+                nick: "alice".into(),
+                ident: "a".into(),
+                realname: "a".into(),
+                host: "localhost".into(),
+                cloak: String::new(),
+                vhost: None,
+                secure: false,
+                certfp: None,
+                tls_info: None,
+                sni: None,
+                brand_server: None,
+                brand_network: None,
+                account: None,
+                signon: 0,
+                nick_ts: 0,
+                addr: "127.0.0.1:1".parse().unwrap(),
+                port: 6667,
+                registered: true,
+                dns_pending: false,
+                ident_pending: false,
+                auth_pending: false,
+                waitpong: None,
+                class: None,
+                pass: None,
+                deferred: Vec::new(),
+                cap: false,
+                cap_302: false,
+                caps: Caps::default(),
+                sasl_mech: None,
+                channels: HashSet::default(),
+                invited: HashSet::default(),
+                watch: Vec::new(),
+                monitor: Vec::new(),
+                silence: Vec::new(),
+                signore: Vec::new(),
+                accept: Vec::new(),
+                quitting: None,
+                flags: UserFlags::default(),
+                last_active: 0,
+                last_msg: 0,
+                ping_sent: false,
+                ext: Extensible::default(),
+                out: OutSink::Thread(utx),
+                sock: None,
+            },
+        );
+        s.uuid_local.insert("0AAAAAAAB".into(), 7);
+
+        // a registered peer link that must receive the propagated MODE
+        let (ltx, lrx) = mpsc::channel();
+        s.links.insert(
+            2,
+            Link {
+                uid: 2,
+                out: OutSink::Thread(ltx),
+                outbound: false,
+                registered: true,
+                sent_server: true,
+                sid: Some("42S".into()),
+                name: Some("peer.".into()),
+                bursting: false,
+                last_seen: 0,
+            },
+        );
+
+        crate::coremods::core_mode::svs_set_user_modes(&mut s, 7, "+B");
+        let lines: Vec<String> = std::iter::from_fn(|| lrx.try_recv().ok()).collect();
+        assert!(
+            lines.iter().any(|l| l == ":0AAAAAAAB MODE 0AAAAAAAB +B"),
+            "peer must receive the services-driven MODE, got {lines:?}"
+        );
+    }
+
+    #[test]
     fn apply_umode_string_toggles_letters() {
         let mut m = "iH".to_string();
         apply_umode_string(&mut m, "+B");

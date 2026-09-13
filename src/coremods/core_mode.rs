@@ -43,12 +43,14 @@ pub fn svs_set_user_modes(s: &mut Server, tuid: Uid, modestring: &str) {
     }
     s.mode_sudo = false;
     if !applied.is_empty() {
-        let nick = s
+        let (nick, uuid) = s
             .users
             .get(&tuid)
-            .map(|u| u.nick.clone())
+            .map(|u| (u.nick.clone(), u.uuid.clone()))
             .unwrap_or_default();
         s.send(tuid, format!(":{nick} MODE {nick} :{applied}"));
+        // propagate to peers so other servers + services track the services-driven change
+        s.propagate_from_user(tuid, &format!("MODE {uuid} {applied}"));
     }
 }
 
