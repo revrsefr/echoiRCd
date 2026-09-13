@@ -16,13 +16,18 @@ command path.
 The core runs one loop:
 
 ```text
-for ev in rx {          // rx is an mpsc channel fed by the I/O edge
+for ev in rx {          // rx is a bounded channel fed by the I/O edge
     handle_event(ev)    // Connect / Line / Disconnect / Tick / async results
 }
 ```
 
 Every state change funnels through this loop, so there is exactly one writer to
 the state graph and no data races are possible by construction.
+
+The channel is **bounded** (`core_queue_max`): if the core ever falls behind,
+producers on the I/O edge block instead of growing an unbounded backlog until the
+process runs out of memory. The core never enqueues to itself inline, so a full
+queue can slow producers but can never deadlock the loop.
 
 ### Why not an async runtime?
 
@@ -99,6 +104,27 @@ Scaling out to more machines is done by **linking servers** (see
 [linking](linking.md)), not by threading one server harder — the single core is
 the correct unit, and the network grows by adding nodes.
 
+### Outbound & background work
+
+The same event-channel discipline covers everything the core reaches *out* to, so
+a slow remote can never block it. Each runs on its own thread(s) and hands its
+result back to the core as an event; none can touch `Server` state directly:
+
+- **HTTP client** — a request runs on a bounded worker pool and returns as an
+  `HttpResult` event. It backs the connection-verification gates and the protocol
+  bridges (the Telegram and Matrix long-poll / send calls).
+- **Database pool** — a non-blocking PostgreSQL client. Queries are submitted to a
+  bounded queue and their rows come back as `SqlResult`; a panicking query is
+  isolated and the pool keeps serving.
+- **XMPP bridge** — a persistent TLS XML-stream client on its own thread. Inbound
+  group-chat lines arrive as `BridgeIn` events; outbound lines are handed to the
+  worker over a channel. Dropping that channel (a bridge reload) closes the stream
+  and ends the thread.
+
+A bridged message is injected through the same tagged send path a relayed message
+uses, which bypasses the outbound message hook, so a bridge can never feed its own
+output back into itself.
+
 ## Resilience
 
 A single-threaded core has an obvious risk: one slow or crashing thing could
@@ -109,11 +135,20 @@ freeze or kill everyone. Each of those failure modes is closed off:
   - **KDF password hashing** (bcrypt / pbkdf2) for `OPER`, `PASS` connect-class
     checks, `TITLE`, and `MKPASSWD` — a flood of auth attempts can't freeze the
     core.
-  - **DNS, ident, and HTTP** lookups.
+  - **DNS, ident, and HTTP** requests — the HTTP path also drives the connection
+    verification gates and the protocol bridges' Telegram/Matrix calls.
+  - **Database queries** on a non-blocking connection pool, and the **XMPP bridge**
+    on a dedicated stream thread.
   - **Disk snapshot writes** (reputation, channel metadata, X-lines) go through a
     coalescing background writer, so a slow or full disk never stalls the event
     loop. Writes are **atomic** (temp file + rename), so a crash mid-write can't
     leave a truncated file.
+- **A slow core can't exhaust memory.** The event channel is bounded
+  (`core_queue_max`); when the core falls behind, the I/O edge applies backpressure
+  instead of buffering without limit.
+- **Admission stays O(1).** Connection-class and per-IP clone limits are checked
+  against incremental counters, not by scanning every connected user on each
+  connect, so a reconnect storm (e.g. netsplit recovery) stays linear.
 - **One panic can't take down the server.** Each event is handled inside
   `catch_unwind`, and in the reactor each connection's reads/writes are isolated —
   a panic parsing one client's bytes drops *that* client and logs it, never the
@@ -128,6 +163,22 @@ freeze or kill everyone. Each of those failure modes is closed off:
 
 See [anti-abuse](anti-abuse.md) for how these combine with flood limits and
 kernel-level filtering.
+
+## Live binary upgrades
+
+A rebuilt binary is rolled out without ever closing the listening sockets. On
+`SIGUSR2` the server re-execs the new build and passes it the open listener file
+descriptors — plaintext, TLS, WebSocket, and server-link ports — which the new
+process **adopts by role** instead of re-binding. Listeners are bound with
+`SO_REUSEPORT`, so even the brief overlap between old and new can't fail with
+"address already in use", and there is no window in which a connecting client is
+refused.
+
+In-flight sessions are not migrated across the exec — the new process is a fresh
+address space, so existing clients reconnect — but because the listeners are
+handed over rather than rebound, a reconnect always lands on an open port. The two
+low-level file-descriptor operations this needs are the only place the daemon
+touches them; the crate itself stays `#![forbid(unsafe_code)]`.
 
 ## Memory safety
 
@@ -149,6 +200,7 @@ Safety is structural, not just a matter of avoiding raw pointers:
 | Setting | Effect |
 |---------|--------|
 | `io_threads` | Reactor workers; `0` = auto (one per core, capped). Raise for very high connection/packet rates. |
+| `core_queue_max` | Depth of the core's bounded event queue; the I/O edge backpressures when it fills (default 16384). |
 | `max_line` / `max_sendq` | Per-connection receive/send-queue caps (per-class overrides exist). |
 | `slow_command_ms` / `watchdog_ms` | Core-health visibility. |
 | `tls_handshake_timeout` | Reap stalled TLS handshakes. |
