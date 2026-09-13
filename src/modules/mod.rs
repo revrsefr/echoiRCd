@@ -12,6 +12,7 @@ pub mod autodrop;
 pub mod autoop;
 pub mod banredirect;
 pub mod blockamsg;
+pub mod masshighlight;
 pub mod bridge;
 pub mod chanlog;
 pub mod channames;
@@ -108,6 +109,7 @@ pub fn default_modules() -> Vec<Box<dyn Module>> {
         Box::new(restrictcommands::RestrictCommands),
         Box::new(restrictmsg::RestrictMsg),
         Box::new(blockamsg::BlockAmsg),
+        Box::new(masshighlight::MassHighlight),
         Box::new(connectban::ConnectBan),
         Box::new(securelist::SecureList),
         Box::new(hashident::HashIdent),

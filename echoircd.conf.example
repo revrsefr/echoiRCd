@@ -246,6 +246,10 @@ flood {
     # blockamsg_delay    3;    # same text to a different target list within N s = block
     # blockamsg_action   block;   # block | kill | gline | kline | zline
     # blockamsg_duration 900;  # ban seconds for a *line action
+
+    # --- masshighlight: block one message that pings too many channel members ---
+    # masshighlight      10;   # block a channel message mentioning > N distinct members
+                               # (0 = off; IRC opers and channel ops are exempt)
 }
 
 
