@@ -138,22 +138,22 @@ impl Module for ReputationMod {
         self.since_bump += t;
         self.since_expire += t;
         self.since_save += t;
-        // Scores only ever change in bump_scores / expire_old, so persist right
-        // after each: the on-disk table then always reflects the live one, and a
-        // restart (however frequent) reloads the current scores instead of
-        // reverting to whatever the coarse periodic timer last happened to write.
+        // Scores only change in bump_scores / expire_old. Persist once per tick when
+        // something actually changed (so a restart, however frequent, reloads the live
+        // scores) — not once per mutation, which double-wrote when both fired at once.
+        let mut dirty = false;
         if self.since_bump >= dur(s, "reputation_bumpinterval", 300) {
             self.since_bump = 0;
             bump_scores(s);
-            save(s);
+            dirty = true;
         }
         if self.since_expire >= dur(s, "reputation_expireinterval", 605) {
             self.since_expire = 0;
-            expire_old(s);
-            save(s);
+            dirty |= expire_old(s);
         }
-        // Backstop flush: guards any future mutation path that forgets to persist.
-        if self.since_save >= dur(s, "reputation_saveinterval", 902) {
+        // Save on any change, or on the periodic backstop (which also guards a future
+        // mutation path that forgets to flag dirty).
+        if dirty || self.since_save >= dur(s, "reputation_saveinterval", 902) {
             self.since_save = 0;
             save(s);
         }
@@ -182,25 +182,28 @@ fn bump_scores(s: &mut Server) {
     let store = s.ext.get_or_insert_with::<Reputation>(Reputation::default);
     for (ip, amt) in bumps {
         let e = store.0.entry(ip).or_default();
-        e.score = (e.score + amt).min(cap);
+        e.score = e.score.saturating_add(amt).min(cap);
         e.last_seen = n;
     }
 }
 
 /// Drop entries that have aged out under any matching `reputationexpire` rule.
-fn expire_old(s: &mut Server) {
+/// Returns whether any entry was removed, so the caller persists only on a change.
+fn expire_old(s: &mut Server) -> bool {
     let n = now();
     let rules = expire_rules(s);
     if let Some(store) = s.ext.get_mut::<Reputation>() {
+        let before = store.0.len();
         store.0.retain(|_, e| {
-            let expired = rules.iter().any(|&(score, age)| {
+            !rules.iter().any(|&(score, age)| {
                 age > 0
                     && n.saturating_sub(e.last_seen) > age
                     && (score == -1 || e.score <= score as u32)
-            });
-            !expired
+            })
         });
+        return store.0.len() != before;
     }
+    false
 }
 
 /// The reputation score of the (masked) address `uid` is connecting from.
@@ -215,13 +218,19 @@ pub fn score_of(s: &Server, uid: Uid) -> u32 {
         .unwrap_or(0)
 }
 
-/// The `y:` score extban: `y:<N` matches a score below N, `y:>N` above N.
-pub fn score_ban_match(s: &Server, uid: Uid, spec: &str) -> bool {
+/// Parse a `y:` score spec into `(greater_than, threshold)`: `>N`, `<N`, or a bare `N`
+/// (treated as `<N`). `None` if the number doesn't parse.
+fn parse_score_spec(spec: &str) -> Option<(bool, u32)> {
     let (gt, num) = match spec.strip_prefix('>') {
         Some(n) => (true, n),
         None => (false, spec.strip_prefix('<').unwrap_or(spec)),
     };
-    let Ok(threshold) = num.trim().parse::<u32>() else {
+    num.trim().parse::<u32>().ok().map(|t| (gt, t))
+}
+
+/// The `y:` score extban: `y:<N` matches a score below N, `y:>N` above N.
+pub fn score_ban_match(s: &Server, uid: Uid, spec: &str) -> bool {
+    let Some((gt, threshold)) = parse_score_spec(spec) else {
         return false;
     };
     let score = score_of(s, uid);
@@ -337,10 +346,12 @@ pub fn save(s: &Server) {
         );
         return;
     }
+    use std::fmt::Write as _;
     let mut out = String::new();
     if let Some(r) = s.ext.get::<Reputation>() {
+        out.reserve(r.0.len() * 48);
         for (ip, e) in &r.0 {
-            out.push_str(&format!("{ip} {} {}\n", e.score, e.last_seen));
+            let _ = writeln!(out, "{ip} {} {}", e.score, e.last_seen);
         }
     }
     crate::database::persist_save(s, "reputation", &db_path(s), out);
@@ -497,5 +508,33 @@ mod tests {
             !in_active_channel(&s, 1, 3),
             "2 total members must not satisfy minchanmembers=3"
         );
+    }
+
+    #[test]
+    fn mask_ip_prefixes() {
+        use std::str::FromStr;
+        let v4 = IpAddr::from_str("203.0.113.45").unwrap();
+        assert_eq!(
+            mask_ip(v4, 24, 64),
+            IpAddr::from_str("203.0.113.0").unwrap()
+        );
+        assert_eq!(mask_ip(v4, 32, 64), v4); // exact
+        assert_eq!(mask_ip(v4, 0, 64), IpAddr::from_str("0.0.0.0").unwrap()); // wildcard
+        let v6 = IpAddr::from_str("2001:db8:abcd:1234:5:6:7:8").unwrap();
+        assert_eq!(
+            mask_ip(v6, 32, 64),
+            IpAddr::from_str("2001:db8:abcd:1234::").unwrap()
+        );
+        assert_eq!(mask_ip(v6, 32, 128), v6); // exact
+    }
+
+    #[test]
+    fn score_spec_parsing() {
+        assert_eq!(parse_score_spec(">5"), Some((true, 5)));
+        assert_eq!(parse_score_spec("<5"), Some((false, 5)));
+        assert_eq!(parse_score_spec("5"), Some((false, 5))); // bare = less-than
+        assert_eq!(parse_score_spec("  7 "), Some((false, 7)));
+        assert_eq!(parse_score_spec("abc"), None);
+        assert_eq!(parse_score_spec(">"), None);
     }
 }
