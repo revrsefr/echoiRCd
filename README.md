@@ -16,9 +16,10 @@ echoIRCd is a full IRC + IRCv3 server. A single lock-free **core thread** owns a
 state; a **pool of epoll reactor threads** (one per core) drives the connections
 around it — TLS crypto and all — with no async runtime. It ships **100+ commands**,
 the **complete channel & user mode set**, **30+ IRCv3 capabilities**,
-server-to-server linking, a services interface, TLS, WebSocket, GeoIP, layered
-anti-spam, a Prometheus metrics endpoint, and a JSON-RPC control plane — with every
-operational limit exposed as a config key.
+server-to-server linking, a services interface, in-core bridges to Telegram, Matrix
+and XMPP, a native non-blocking PostgreSQL layer, TLS, WebSocket, GeoIP, layered
+anti-spam, zero-downtime binary upgrades, a Prometheus metrics endpoint, and a
+JSON-RPC control plane — with every operational limit exposed as a config key.
 
 ## Features
 
@@ -34,22 +35,37 @@ operational limit exposed as a config key.
   8291), SASL (PLAIN/EXTERNAL/SCRAM-SHA-256), standard-replies, and
   `WATCH`/`MONITOR`/`SILENCE`/caller-id.
 - **Operators** — `OPER`/`KILL`/`WALLOPS`/`GLOBOPS`, the `SA*`/`CHG*`/`SET*`
-  override toolbox, x-lines (`K`/`G`/`Z`/`E`/`SHUN`/`QLINE`/`CBAN`/`RLINE`)
-  persisted to disk, a **type/class privilege model** (per-type commands, named
-  privileges like `users/auspex`/`channels/override`, and usermode/chanmode
-  allowlists — each `*`/`-` tunable), staff prefix (`operprefix`/`OJOIN`), oper
-  levels, rank-gated `hidelist`/`hidemode`, and a reload-safe `REHASH`.
+  override toolbox, `CLEARMODE`, x-lines
+  (`K`/`G`/`Z`/`E`/`SHUN`/`QLINE`/`CBAN`/`RLINE`/`JUPE`) persisted to disk, a
+  **type/class privilege model** (per-type commands, named privileges like
+  `users/auspex`/`channels/override`, and usermode/chanmode allowlists — each
+  `*`/`-` tunable), staff prefix (`operprefix`/`OJOIN`), oper levels, rank-gated
+  `hidelist`/`hidemode`, and a reload-safe `REHASH`.
 - **Services & accounts** — SASL PLAIN/EXTERNAL relayed over the link, the `SVS*` /
   `ENCAP` / `METADATA` interface, account-gated modes, and optional ircd-side
   account registration (`REGISTER`/`VERIFY`).
 - **Server-to-server linking** — `UID`/`FJOIN` netburst, cross-server users and
   channels, multi-hop routing, TS-based nick-collision handling, and clean
   netsplit/rejoin.
+- **Protocol bridges** — bridge a channel to **Telegram**, **Matrix** or **XMPP**
+  from inside the daemon, with no external appservice: a remote sender appears
+  either as a spoofed source (`relay` mode) or as a real virtual member visible in
+  `WHO`/`NAMES` (`puppet` mode), and routes are added or reloaded live with the
+  `BRIDGE` command.
+- **Database** — a native, non-blocking PostgreSQL client with named connection
+  pools on an off-core worker pool. Reputation, x-lines, read-markers, permanent
+  channels and web-push subscriptions can persist to relational tables, and a
+  read-only `/SQL` console gives network admins query access over IRC.
 - **Security & anti-spam** — TLS with client-cert fingerprints, keyed host
-  cloaking, DNSBL, per-IP connection/message flood limits, mixed-script & random
-  (drone) detection, CAPTCHA / PONG-cookie / arithmetic gates, and DCC filtering.
+  cloaking, DNSBL, per-IP connection/message flood limits, a target-change throttle,
+  per-address **reputation** scoring (the `y:` score extban, `REPUTATION` command),
+  an AWAY throttle, mixed-script & random (drone) detection, CAPTCHA / PONG-cookie /
+  arithmetic gates, and DCC filtering.
 - **Transports** — plaintext, TLS (OpenSSL or rustls backend), a native WebSocket
   layer (`ws://` / `wss://`), and the PROXY protocol (v1/v2) behind a load balancer.
+- **Zero-downtime upgrades** — `SIGUSR2` re-execs a freshly built binary and hands
+  over every listener (plaintext, TLS, WebSocket and server links) across the exec,
+  so rolling out a build never drops the listening sockets or leaves a rebind gap.
 - **GeoIP** — a MaxMind `.mmdb` reader with a `G:<cc>` geoban, `GEOIP` command, and
   a WHOIS country line.
 - **Localization** — a server-wide message locale: `locale fr` renders every
@@ -57,13 +73,14 @@ operational limit exposed as a config key.
   protocol tokens, IDs, user data and the S2S wire stay canonical. Ships **French**
   and **Spanish**, English is a zero-cost passthrough, and it switches live on
   `REHASH` — with no per-message cost on the broadcast hot path.
-- **Control & observability** — a token-authenticated JSON-RPC plane over HTTP, and
-  an optional OpenMetrics/Prometheus endpoint.
+- **Control & observability** — a token-authenticated JSON-RPC plane over HTTP, an
+  optional OpenMetrics/Prometheus endpoint, and `draft/metrics`: the same counters
+  and gauges delivered as JSON over IRC (the `METRICS` command / capability).
 
 ## Quick start
 
 ```sh
-git clone https://git.devtronic.pro/fedserv/echoIRCd
+git clone https://git.devtronic.pro/echo/echoIRCd
 cd echoIRCd
 cargo build --release
 cp echoircd.conf.example echoircd.conf     # edit: servername, cloak_key, TLS paths
@@ -116,7 +133,8 @@ with the one-liner in the example config.
 
 A single **core thread** owns every `User` and `Channel`, so command and module
 code is ordinary single-threaded logic over `&mut Server` — no `Arc<Mutex<…>>`
-anywhere. The I/O edge feeds it events over channels:
+anywhere. The I/O edge feeds it events over a **bounded channel** — under load,
+producers apply backpressure rather than growing an unbounded queue:
 
 - **A pool of `mio` epoll reactors** drives client sockets — an acceptor
   round-robins each connection onto a worker (one per core by default), and each
@@ -124,10 +142,13 @@ anywhere. The I/O edge feeds it events over channels:
   in-thread. Socket work and crypto spread across cores while the state core stays
   single-threaded and lock-free. (Proxied TLS and server links keep a thread each;
   there are few of them.)
-- **Resilience is built in.** Slow work (KDF hashing, DNS, disk snapshots) runs off
-  the core so a flood can't freeze it; each event and each connection's I/O is
-  panic-isolated so one bad client can't crash the server; a watchdog flags a stuck
-  core; and half-open/stalled connections are reaped on a timer.
+- **Resilience is built in.** Slow or blocking work — KDF hashing, DNS, disk
+  snapshots, database queries, outbound HTTP (the protocol bridges and verification
+  gates) and the XMPP bridge's stream — runs off the core, so a flood or a slow
+  endpoint can't freeze it; each event and each connection's I/O is panic-isolated so
+  one bad client can't crash the server; a watchdog flags a stuck core; half-open or
+  stalled connections are reaped on a timer; and a rebuild rolls out live —
+  `SIGUSR2` re-execs and inherits the listening sockets with no rebind gap.
 
 **Why a raw reactor and not async?** IRC is one large shared mutable graph, and
 almost every command mutates it and then broadcasts. With one thread owning all of
@@ -168,8 +189,8 @@ Quick connect: `ircs://irc.devtronic.pro:6697/%23echoiRCd`
 
 ## Links
 
-- **Repository** — <https://git.devtronic.pro/fedserv/echoIRCd>
-- **Issues** — <https://git.devtronic.pro/fedserv/echoIRCd/issues>
+- **Repository** — <https://git.devtronic.pro/echo/echoIRCd>
+- **Issues** — <https://git.devtronic.pro/echo/echoIRCd/issues>
 - **Documentation** — [`docs/`](docs/)
 - **Config reference** — [`echoircd.conf.example`](echoircd.conf.example)
 
