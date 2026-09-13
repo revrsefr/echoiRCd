@@ -791,6 +791,7 @@ impl Ircd {
                 self.server
                     .announce("The server is rehashing its configuration.");
                 self.server.apply_config(fresh);
+                crate::modules::connclass::rebuild(&mut self.server); // reconcile clone counters
                 self.server.announce("Server configuration reloaded.");
                 eprintln!("server configuration is reloaded.");
             }

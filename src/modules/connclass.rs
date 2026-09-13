@@ -20,6 +20,7 @@
 //! global limits apply; set `connectclass_required = yes` to refuse clients that
 //! match no allow class.
 
+use std::collections::HashMap;
 use std::net::IpAddr;
 
 use crate::channels::glob_match;
@@ -316,32 +317,151 @@ fn pick(
     Pick::None
 }
 
-/// Local users currently in class `name` (excluding `uid`).
+/// Incremental connection counters so admission is O(1) instead of an O(N) scan of
+/// every user on each connect. Local users only; the remote half of a global check
+/// still reads `remote_users` (small). Kept in sync by [`count_connect`] /
+/// [`count_disconnect`] / [`set_class`] / [`change_ip`]; [`rebuild`] reconciles on rehash.
+#[derive(Default)]
+struct CloneCounts {
+    per_ip: HashMap<IpAddr, u32>,    // local connections per source IP
+    per_class: HashMap<String, u32>, // local users per class
+    per_ip_class: HashMap<(IpAddr, String), u32>, // local users per (IP, class)
+}
+
+fn counts(s: &mut Server) -> &mut CloneCounts {
+    s.ext
+        .get_or_insert_with::<CloneCounts>(CloneCounts::default)
+}
+fn inc<K: std::hash::Hash + Eq>(m: &mut HashMap<K, u32>, k: K) {
+    *m.entry(k).or_insert(0) += 1;
+}
+fn dec<K: std::hash::Hash + Eq>(m: &mut HashMap<K, u32>, k: &K) {
+    if let Some(v) = m.get_mut(k) {
+        *v -= 1;
+        if *v == 0 {
+            m.remove(k);
+        }
+    }
+}
+
+/// A local connection from `ip` was added (from add_conn / mint_puppet).
+pub fn count_connect(s: &mut Server, ip: IpAddr) {
+    inc(&mut counts(s).per_ip, ip);
+}
+
+/// A local connection left (from remove_user), with its class if it had one.
+pub fn count_disconnect(s: &mut Server, ip: IpAddr, class: Option<&str>) {
+    let c = counts(s);
+    dec(&mut c.per_ip, &ip);
+    if let Some(name) = class {
+        dec(&mut c.per_class, &name.to_string());
+        dec(&mut c.per_ip_class, &(ip, name.to_string()));
+    }
+}
+
+/// Assign/reassign a local user's class, keeping the counters in sync. Use this instead
+/// of writing `u.class` directly.
+pub fn set_class(s: &mut Server, uid: Uid, name: String) {
+    let Some((ip, old)) = s.users.get(&uid).map(|u| (u.addr.ip(), u.class.clone())) else {
+        return;
+    };
+    if old.as_deref() == Some(name.as_str()) {
+        return; // unchanged
+    }
+    {
+        let c = counts(s);
+        if let Some(o) = &old {
+            dec(&mut c.per_class, o);
+            dec(&mut c.per_ip_class, &(ip, o.clone()));
+        }
+        inc(&mut c.per_class, name.clone());
+        inc(&mut c.per_ip_class, (ip, name.clone()));
+    }
+    if let Some(u) = s.users.get_mut(&uid) {
+        u.class = Some(name);
+    }
+}
+
+/// A local user's source IP changed (WEBIRC) — move its counts across.
+pub fn change_ip(s: &mut Server, uid: Uid, old: IpAddr, new: IpAddr) {
+    if old == new {
+        return;
+    }
+    let class = s.users.get(&uid).and_then(|u| u.class.clone());
+    let c = counts(s);
+    dec(&mut c.per_ip, &old);
+    inc(&mut c.per_ip, new);
+    if let Some(cl) = class {
+        dec(&mut c.per_ip_class, &(old, cl.clone()));
+        inc(&mut c.per_ip_class, (new, cl));
+    }
+}
+
+/// Rebuild every counter from `users` — the authoritative reconciliation, run on rehash
+/// so any drift self-heals.
+pub fn rebuild(s: &mut Server) {
+    let mut per_ip: HashMap<IpAddr, u32> = HashMap::new();
+    let mut per_class: HashMap<String, u32> = HashMap::new();
+    let mut per_ip_class: HashMap<(IpAddr, String), u32> = HashMap::new();
+    for u in s.users.values() {
+        let ip = u.addr.ip();
+        inc(&mut per_ip, ip);
+        if let Some(cl) = &u.class {
+            inc(&mut per_class, cl.clone());
+            inc(&mut per_ip_class, (ip, cl.clone()));
+        }
+    }
+    let c = counts(s);
+    c.per_ip = per_ip;
+    c.per_class = per_class;
+    c.per_ip_class = per_ip_class;
+}
+
+/// Local users in class `name`, excluding `uid` (O(1) via the counters).
 fn class_count(s: &Server, name: &str, uid: Uid) -> usize {
-    s.users
-        .iter()
-        .filter(|(&k, u)| k != uid && u.class.as_deref() == Some(name))
-        .count()
+    let base = s
+        .ext
+        .get::<CloneCounts>()
+        .and_then(|c| c.per_class.get(name))
+        .copied()
+        .unwrap_or(0) as usize;
+    let self_in = s.users.get(&uid).and_then(|u| u.class.as_deref()) == Some(name);
+    base.saturating_sub(self_in as usize)
 }
 
-/// Local connections from `ip` in class `name` (excluding `uid`).
-fn local_clones(s: &Server, ip: &str, name: &str, uid: Uid) -> usize {
-    s.users
-        .iter()
-        .filter(|(&k, u)| {
-            k != uid && u.addr.ip().to_string() == ip && u.class.as_deref() == Some(name)
-        })
-        .count()
-}
-
-/// Connections from `ip` across the whole network (local + remote), excluding `uid`.
-fn global_clones(s: &Server, ip: &str, uid: Uid) -> usize {
-    let local = s
+/// Local connections from `ip` in class `name`, excluding `uid` (O(1)).
+fn local_clones(s: &Server, ip: IpAddr, name: &str, uid: Uid) -> usize {
+    let base = s
+        .ext
+        .get::<CloneCounts>()
+        .and_then(|c| c.per_ip_class.get(&(ip, name.to_string())))
+        .copied()
+        .unwrap_or(0) as usize;
+    let self_in = s
         .users
-        .iter()
-        .filter(|(&k, u)| k != uid && u.addr.ip().to_string() == ip)
-        .count();
-    let remote = s.remote_users.values().filter(|ru| ru.ip == ip).count();
+        .get(&uid)
+        .map(|u| u.addr.ip() == ip && u.class.as_deref() == Some(name))
+        .unwrap_or(false);
+    base.saturating_sub(self_in as usize)
+}
+
+/// Connections from `ip` across the network — local counter + a (small) remote scan,
+/// excluding `uid` (O(1) local).
+fn global_clones(s: &Server, ip: IpAddr, uid: Uid) -> usize {
+    let base = s
+        .ext
+        .get::<CloneCounts>()
+        .and_then(|c| c.per_ip.get(&ip))
+        .copied()
+        .unwrap_or(0) as usize;
+    let self_in = s
+        .users
+        .get(&uid)
+        .map(|u| u.addr.ip() == ip)
+        .unwrap_or(false);
+    let local = base.saturating_sub(self_in as usize);
+    let ip_s = ip.to_string();
+    let remote = s.remote_users.values().filter(|ru| ru.ip == ip_s).count();
     local + remote
 }
 
@@ -349,9 +469,10 @@ fn global_clones(s: &Server, ip: &str, uid: Uid) -> usize {
 /// if the connection must be rejected (a deny class or a per-IP/per-class cap);
 /// otherwise sets the class on the user and returns `None`. Called from `add_conn`.
 pub fn assign(s: &mut Server, uid: Uid) -> Option<String> {
-    let (ip, secure, has_cert, port) = {
+    let (ipa, ip, secure, has_cert, port) = {
         let u = s.users.get(&uid)?;
         (
+            u.addr.ip(),
             u.addr.ip().to_string(),
             u.secure,
             u.certfp.is_some(),
@@ -381,20 +502,18 @@ pub fn assign(s: &mut Server, uid: Uid) -> Option<String> {
         }
     };
     if let Some(max) = class.localmax {
-        if local_clones(s, &ip, &class.name, uid) >= max {
+        if local_clones(s, ipa, &class.name, uid) >= max {
             warn(s, "local clone limit");
             return Some("Too many connections from your address".to_string());
         }
     }
     if let Some(max) = class.globalmax {
-        if global_clones(s, &ip, uid) >= max {
+        if global_clones(s, ipa, uid) >= max {
             warn(s, "global clone limit");
             return Some("Too many global connections from your address".to_string());
         }
     }
-    if let Some(u) = s.users.get_mut(&uid) {
-        u.class = Some(class.name);
-    }
+    set_class(s, uid, class.name);
     None
 }
 
@@ -413,8 +532,9 @@ pub enum AuthOutcome {
 /// required client cert, verify the class password, and apply on-connect modes. A KDF
 /// password is verified off the core thread ([`AuthOutcome::Pending`]).
 pub fn on_register(s: &mut Server, uid: Uid) -> AuthOutcome {
-    let Some((ip, host, secure, has_cert, port, sent)) = s.users.get(&uid).map(|u| {
+    let Some((ipa, ip, host, secure, has_cert, port, sent)) = s.users.get(&uid).map(|u| {
         (
+            u.addr.ip(),
             u.addr.ip().to_string(),
             u.host.clone(),
             u.secure,
@@ -430,11 +550,7 @@ pub fn on_register(s: &mut Server, uid: Uid) -> AuthOutcome {
         Pick::Deny(name) => {
             return AuthOutcome::Reject(format!("Connection class {name} denies your address"));
         }
-        Pick::Class(c) => {
-            if let Some(u) = s.users.get_mut(&uid) {
-                u.class = Some(c.name);
-            }
-        }
+        Pick::Class(c) => set_class(s, uid, c.name),
         Pick::None => {} // keep whatever was assigned at connect
     }
     let Some(class) = s
@@ -448,12 +564,12 @@ pub fn on_register(s: &mut Server, uid: Uid) -> AuthOutcome {
     // enforce per-IP clone caps here too: a class matched only by a host mask isn't
     // picked at connect, so `assign` never got to check them
     if let Some(max) = class.localmax {
-        if local_clones(s, &ip, &class.name, uid) >= max {
+        if local_clones(s, ipa, &class.name, uid) >= max {
             return AuthOutcome::Reject("Too many connections from your address".into());
         }
     }
     if let Some(max) = class.globalmax {
-        if global_clones(s, &ip, uid) >= max {
+        if global_clones(s, ipa, uid) >= max {
             return AuthOutcome::Reject("Too many connections from your address".into());
         }
     }

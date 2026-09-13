@@ -118,12 +118,17 @@ impl Command for WebIrc {
             return CmdResult::Fail;
         };
         let newip = ip.parse::<IpAddr>().ok();
+        let old_ip = s.users.get(&uid).map(|u| u.addr.ip());
         if let Some(u) = s.users.get_mut(&uid) {
             u.flags.via_webirc = true; // securitygroups: webirc criterion
             u.host = host.clone();
             if let Some(a) = newip {
                 u.addr = SocketAddr::new(a, u.addr.port());
             }
+        }
+        // keep the per-IP clone counter keyed to the real address, not the gateway's
+        if let (Some(o), Some(a)) = (old_ip, newip) {
+            crate::modules::connclass::change_ip(s, uid, o, a);
         }
         s.notice_star(uid, &format!("WEBIRC identity accepted via {gw}"));
         CmdResult::Ok

@@ -547,9 +547,10 @@ impl Server {
         );
 
         crate::connguard::note_connect(self);
-        // global unregistered-connection cap — refuse once the held/pending pool is
-        // full, so a bot flood behind the human-verification gate can't fill the
-        // class limit and lock real users out. Loopback (web/services/tests) exempt.
+        crate::modules::connclass::count_connect(self, ip); // per-IP clone counter
+                                                            // global unregistered-connection cap — refuse once the held/pending pool is
+                                                            // full, so a bot flood behind the human-verification gate can't fill the
+                                                            // class limit and lock real users out. Loopback (web/services/tests) exempt.
         if crate::connguard::over_cap(self) && !is_local_ip(ip) {
             let m = self.trf(
                 "Closing link: (Server is busy — please try again shortly)",
@@ -977,6 +978,7 @@ impl Server {
             },
         );
         self.nick_index.insert(nick.to_ascii_lowercase(), uid);
+        crate::modules::connclass::count_connect(self, addr.ip()); // balances remove_user
         self.introduce_to_links(uid);
         uid
     }
@@ -1030,6 +1032,7 @@ impl Server {
         let Some(user) = self.users.remove(&uid) else {
             return;
         };
+        crate::modules::connclass::count_disconnect(self, user.addr.ip(), user.class.as_deref());
         if !user.registered {
             crate::connguard::note_removed_unreg(self); // it left before registering
         }
