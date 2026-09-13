@@ -2,7 +2,9 @@
 //! by AND-ed criteria: host masks, TLS, account (any, or specific names), oper, bot,
 //! webirc, real name, connect class, listener port, TLS cert fingerprint, origin ASN,
 //! GeoIP country, and reputation score range. Groups drive the `g:` matching extban,
-//! the `SECURITYGROUPS` command, and a WHOIS line.
+//! the `SECURITYGROUPS` command, and a WHOIS line. Remote users (living on another
+//! server) are matched for WHOIS / SECURITYGROUPS on the criteria that survive S2S
+//! propagation; enforcing `g:` on a user's own actions is that user's home server's job.
 
 use crate::channels::glob_match;
 use crate::command::{CmdResult, Command};
@@ -252,6 +254,69 @@ fn matches(s: &Server, uid: Uid, g: &SecGroup) -> bool {
     true
 }
 
+/// Does a *remote* user (living on another server) match group `g`? Only the criteria
+/// that survive S2S propagation are checked — mask, account (any or specific names),
+/// oper, bot, real name, origin ASN and GeoIP country. Connection-local criteria (TLS,
+/// WebIRC, connect class, listener port, cert fingerprint, reputation score) can't be
+/// verified across a link, so a group that requires one never lists a remote user.
+fn matches_remote(s: &Server, ru: &crate::link::RemoteUser, g: &SecGroup) -> bool {
+    if g.tls != Tri::Ignore
+        || g.webirc != Tri::Ignore
+        || !g.classes.is_empty()
+        || !g.ports.is_empty()
+        || !g.certfps.is_empty()
+        || g.score_min.is_some()
+        || g.score_max.is_some()
+    {
+        return false;
+    }
+    let host_form = format!("{}!{}@{}", ru.nick, ru.ident, ru.host);
+    let ip_form = format!("{}!{}@{}", ru.nick, ru.ident, ru.ip);
+    let mask_hit = |m: &str| glob_match(m, &host_form) || glob_match(m, &ip_form);
+    if g.exclude_masks.iter().any(|m| mask_hit(m)) {
+        return false;
+    }
+    if !g.masks.is_empty() && !g.masks.iter().any(|m| mask_hit(m)) {
+        return false;
+    }
+    if g.exclude_realnames.iter().any(|m| glob_match(m, &ru.realname)) {
+        return false;
+    }
+    if !g.realnames.is_empty() && !g.realnames.iter().any(|m| glob_match(m, &ru.realname)) {
+        return false;
+    }
+    if !tri_ok(g.account, ru.account.is_some())
+        || !tri_ok(g.oper, ru.modes.contains('o'))
+        || !tri_ok(g.bot, ru.modes.contains('B'))
+    {
+        return false;
+    }
+    if !g.accounts.is_empty()
+        && !ru
+            .account
+            .as_deref()
+            .is_some_and(|a| g.accounts.iter().any(|m| glob_match(m, a)))
+    {
+        return false;
+    }
+    if !g.asn.is_empty() || !g.countries.is_empty() {
+        let Ok(ip) = ru.ip.parse::<std::net::IpAddr>() else {
+            return false;
+        };
+        if !g.asn.is_empty() && !crate::modules::asn::lookup(s, ip).is_some_and(|a| g.asn.contains(&a))
+        {
+            return false;
+        }
+        if !g.countries.is_empty()
+            && !crate::modules::geoip::lookup(s, ip)
+                .is_some_and(|c| g.countries.split(',').any(|w| w.eq_ignore_ascii_case(&c.iso)))
+        {
+            return false;
+        }
+    }
+    true
+}
+
 /// Whether `uid` is a member of the named security group (case-insensitive).
 pub fn in_group(s: &Server, uid: Uid, name: &str) -> bool {
     with_groups(s, |groups| {
@@ -272,6 +337,20 @@ pub fn user_groups(s: &Server, uid: Uid, include_private: bool) -> Vec<String> {
     })
 }
 
+/// The groups a *remote* user (by uuid) is in — for WHOIS / SECURITYGROUPS on a user
+/// who lives on another server (only public ones unless `include_private`). This is our
+/// server's view per its own config; enforcement stays with the user's home server.
+pub fn remote_groups(s: &Server, uuid: &str, include_private: bool) -> Vec<String> {
+    with_groups(s, |groups| match s.remote_users.get(uuid) {
+        Some(ru) => groups
+            .iter()
+            .filter(|g| (include_private || g.public) && matches_remote(s, ru, g))
+            .map(|g| g.name.clone())
+            .collect(),
+        None => Vec::new(),
+    })
+}
+
 pub fn commands() -> Vec<Box<dyn Command>> {
     vec![Box::new(SecGroupsCmd)]
 }
@@ -284,33 +363,36 @@ impl Command for SecGroupsCmd {
         "SECURITYGROUPS"
     }
     fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
-        let tuid = match params.first() {
-            Some(n) => match s.find_nick(n) {
-                Some(t) => t,
-                None => {
+        let asker_oper = s.is_oper(uid);
+        // resolve the target to (nick, groups) — local user, remote user, or self
+        let (tnick, groups) = match params.first() {
+            None => {
+                let n = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
+                (n, user_groups(s, uid, true))
+            }
+            Some(n) => {
+                if let Some(t) = s.find_nick(n) {
+                    let tnick = s.users.get(&t).map(|u| u.nick.clone()).unwrap_or_default();
+                    (tnick, user_groups(s, t, t == uid || asker_oper))
+                } else if let Some((uuid, _)) = s.find_remote(n) {
+                    let tnick = s
+                        .remote_users
+                        .get(&uuid)
+                        .map(|r| r.nick.clone())
+                        .unwrap_or_default();
+                    (tnick, remote_groups(s, &uuid, asker_oper))
+                } else {
                     s.numeric(uid, ERR_NOSUCHNICK, &format!("{n} :No such nick/channel"));
                     return CmdResult::Fail;
                 }
-            },
-            None => uid,
+            }
         };
-        let include_private = tuid == uid || s.is_oper(uid);
-        let groups = user_groups(s, tuid, include_private);
         let list = if groups.is_empty() {
             "none".to_string()
         } else {
             groups.join(", ")
         };
-        let (tnick, anick) = (
-            s.users
-                .get(&tuid)
-                .map(|u| u.nick.clone())
-                .unwrap_or_default(),
-            s.users
-                .get(&uid)
-                .map(|u| u.nick.clone())
-                .unwrap_or_default(),
-        );
+        let anick = s.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
         let m = s.trf(
             "{0} is in security groups: {1}",
             &[tnick.as_str(), list.as_str()],
@@ -426,5 +508,63 @@ mod tests {
             ..base.clone()
         };
         assert!(!matches(&s, 7, &vetoed), "exclude-realname vetoes");
+    }
+
+    #[test]
+    fn remote_user_matches_knowable_criteria_only() {
+        use crate::link::RemoteUser;
+        let s = srv_with_user(); // GeoIP db unloaded, so no country/asn criteria here
+        let ru = RemoteUser {
+            uuid: "42SB00000".into(),
+            nick: "bob".into(),
+            ident: "b".into(),
+            host: "trusted.host".into(),
+            realname: "Helper Bot".into(),
+            account: Some("bob".into()),
+            ip: "1.2.3.4".into(),
+            modes: "Bo".into(), // bot + oper
+            sid: "42S".into(),
+            via: 1,
+            nick_ts: 0,
+            away: None,
+        };
+        let base = SecGroup {
+            name: "t".into(),
+            masks: vec!["*@trusted.host".into()],
+            account: Tri::Yes,
+            oper: Tri::Yes,
+            bot: Tri::Yes,
+            realnames: vec!["*bot*".into()],
+            accounts: vec!["bo?".into()],
+            ..Default::default()
+        };
+        assert!(
+            matches_remote(&s, &ru, &base),
+            "propagated criteria match a remote user"
+        );
+
+        // criteria that can't be verified across a link → never match a remote user
+        let tls_req = SecGroup {
+            tls: Tri::Yes,
+            ..base.clone()
+        };
+        assert!(!matches_remote(&s, &ru, &tls_req), "tls unverifiable remotely");
+        let class_req = SecGroup {
+            classes: vec!["main".into()],
+            ..base.clone()
+        };
+        assert!(
+            !matches_remote(&s, &ru, &class_req),
+            "connect class unverifiable remotely"
+        );
+
+        let wrong_acct = SecGroup {
+            accounts: vec!["alice".into()],
+            ..base.clone()
+        };
+        assert!(
+            !matches_remote(&s, &ru, &wrong_acct),
+            "wrong account name fails"
+        );
     }
 }

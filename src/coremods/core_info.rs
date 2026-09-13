@@ -164,6 +164,16 @@ impl Command for Whois {
                             &format!("{} :is using modes +{}", ru.nick, ru.modes),
                         );
                     }
+                    // security groups this server's config places them in (opers see
+                    // private ones too); enforcement of `g:` stays with the home server
+                    let sg = crate::modules::securitygroups::remote_groups(s, &uuid, s.is_oper(uid));
+                    if !sg.is_empty() {
+                        s.numeric(
+                            uid,
+                            RPL_WHOISSPECIAL,
+                            &format!(":is in security groups: {}", sg.join(", ")),
+                        );
+                    }
                     s.numeric(
                         uid,
                         RPL_ENDOFWHOIS,
