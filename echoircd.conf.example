@@ -493,13 +493,20 @@ restrictions {
 #     reputationexpire          "2 1h"; # score<=2 decays after 1h (repeatable; * = any)
 #     reputationexpire          "* 90d";
 # }
-# security groups — use as an extban: MODE #c +b g:<name>. criteria: public tls
-# insecure account unregistered oper exclude-oper bot webirc mask=<glob>
-# exclude=<glob> scoremin=<n> scoremax=<n> asn=<n[,n]> (asn needs geoip_asn_database).
+# security groups — use as an extban: MODE #c +b g:<name>. criteria (all AND-ed):
+# public tls insecure account unregistered oper exclude-oper bot webirc
+# mask=<glob> exclude=<glob> realname=<glob> exclude-realname=<glob>
+# accountname=<glob[,glob]> class=<name[,name]> port=<n[,n]> certfp=<fp[,fp]>
+# country=<cc[,cc]> asn=<n[,n]> scoremin=<n> scoremax=<n>
+# (asn/country need geoip_asn_database / geoip_database). realname/account globs
+# use wildcards for spaces.
 # securitygroups {
 #     securitygroup "trusted account tls public";
 #     securitygroup "newbies scoremax=10 public";
-#     securitygroup "myisp   asn=3215 public";   # members whose origin AS is 3215
+#     securitygroup "myisp   asn=3215 public";        # members whose origin AS is 3215
+#     securitygroup "staff   accountname=admin,root oper public";
+#     securitygroup "securebots bot certfp=a1b2c3 class=bots";
+#     securitygroup "eu      country=FR,DE,ES public"; # by GeoIP country
 # }
 
 

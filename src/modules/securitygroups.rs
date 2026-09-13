@@ -1,7 +1,8 @@
 //! Named security groups. A `securitygroup` config line defines a named set of users
-//! by AND-ed criteria (host masks, TLS, account, oper, bot, webirc, origin ASN, reputation score
-//! range). Groups drive the `g:` matching extban, the `SECURITYGROUPS` command, and a
-//! WHOIS line.
+//! by AND-ed criteria: host masks, TLS, account (any, or specific names), oper, bot,
+//! webirc, real name, connect class, listener port, TLS cert fingerprint, origin ASN,
+//! GeoIP country, and reputation score range. Groups drive the `g:` matching extban,
+//! the `SECURITYGROUPS` command, and a WHOIS line.
 
 use crate::channels::glob_match;
 use crate::command::{CmdResult, Command};
@@ -33,6 +34,13 @@ struct SecGroup {
     score_min: Option<u32>,
     score_max: Option<u32>,
     asn: Vec<u32>,
+    realnames: Vec<String>,
+    exclude_realnames: Vec<String>,
+    classes: Vec<String>,
+    ports: Vec<u16>,
+    certfps: Vec<String>,
+    accounts: Vec<String>,
+    countries: String, // comma-joined ISO country codes, matched via geoip
 }
 
 /// Parse the `securitygroup = <name> [criteria…]` config lines into groups.
@@ -110,6 +118,36 @@ fn parse_groups(s: &Server) -> Vec<SecGroup> {
                 ("scoremin", Some(n)) => g.score_min = n.parse().ok(),
                 ("scoremax", Some(n)) => g.score_max = n.parse().ok(),
                 ("asn", Some(a)) => g.asn.extend(crate::modules::asn::parse_list(a)),
+                // real name (GECOS) globs; wildcards stand in for spaces
+                ("realname", Some(m)) | ("gecos", Some(m)) => g.realnames.push(m.to_string()),
+                ("exclude-realname", Some(m)) | ("exclude-gecos", Some(m)) => {
+                    g.exclude_realnames.push(m.to_string())
+                }
+                // connect class name(s)
+                ("class", Some(c)) | ("connectclass", Some(c)) => g
+                    .classes
+                    .extend(c.split(',').filter(|x| !x.is_empty()).map(str::to_string)),
+                // listener port(s) the client connected to
+                ("port", Some(p)) => g
+                    .ports
+                    .extend(p.split(',').filter_map(|x| x.parse::<u16>().ok())),
+                // TLS client-cert fingerprint(s)
+                ("certfp", Some(f)) | ("fingerprint", Some(f)) => g.certfps.extend(
+                    f.split(',')
+                        .filter(|x| !x.is_empty())
+                        .map(|x| x.to_ascii_lowercase()),
+                ),
+                // specific account name(s) — globs; `account`/`registered` stays the boolean
+                ("accountname", Some(a)) | ("acct", Some(a)) => g
+                    .accounts
+                    .extend(a.split(',').filter(|x| !x.is_empty()).map(str::to_string)),
+                // GeoIP country code(s)
+                ("country", Some(c)) | ("cc", Some(c)) | ("geo", Some(c)) => {
+                    if !g.countries.is_empty() {
+                        g.countries.push(',');
+                    }
+                    g.countries.push_str(&c.to_ascii_uppercase());
+                }
                 _ => {}
             }
         }
@@ -167,6 +205,48 @@ fn matches(s: &Server, uid: Uid, g: &SecGroup) -> bool {
         }
     }
     if !g.asn.is_empty() && !crate::modules::asn::user_in(s, uid, &g.asn) {
+        return false;
+    }
+    // real name globs: an exclude match vetoes; positive globs require one to match
+    if g.exclude_realnames.iter().any(|m| glob_match(m, &u.realname)) {
+        return false;
+    }
+    if !g.realnames.is_empty() && !g.realnames.iter().any(|m| glob_match(m, &u.realname)) {
+        return false;
+    }
+    // connect class name
+    if !g.classes.is_empty()
+        && !u
+            .class
+            .as_deref()
+            .is_some_and(|c| g.classes.iter().any(|x| x.eq_ignore_ascii_case(c)))
+    {
+        return false;
+    }
+    // listener port the client connected to
+    if !g.ports.is_empty() && !g.ports.contains(&u.port) {
+        return false;
+    }
+    // TLS client-cert fingerprint
+    if !g.certfps.is_empty()
+        && !u
+            .certfp
+            .as_deref()
+            .is_some_and(|fp| g.certfps.iter().any(|x| x.eq_ignore_ascii_case(fp)))
+    {
+        return false;
+    }
+    // specific account name(s), glob (case-insensitive)
+    if !g.accounts.is_empty()
+        && !u
+            .account
+            .as_deref()
+            .is_some_and(|a| g.accounts.iter().any(|m| glob_match(m, a)))
+    {
+        return false;
+    }
+    // GeoIP country
+    if !g.countries.is_empty() && !crate::modules::geoip::geoban_match(s, uid, &g.countries) {
         return false;
     }
     true
@@ -237,5 +317,114 @@ impl Command for SecGroupsCmd {
         );
         s.send(uid, format!(":{} NOTICE {anick} :{m}", s.name));
         CmdResult::Ok
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::extensible::Extensible;
+    use crate::map::HashSet;
+    use crate::socketengine::OutSink;
+    use crate::users::{Caps, User, UserFlags};
+    use std::sync::atomic::AtomicU64;
+    use std::sync::{mpsc, Arc};
+
+    fn srv_with_user() -> Server {
+        let (tx, _rx) = mpsc::sync_channel(1024);
+        let mut s = Server::new(Config::default(), tx, Arc::new(AtomicU64::new(1)));
+        let (utx, _urx) = mpsc::channel();
+        s.users.insert(
+            7,
+            User {
+                uid: 7,
+                uuid: "0AAAAAAAB".into(),
+                nick: "alice".into(),
+                ident: "a".into(),
+                realname: "Cool Bot Client".into(),
+                host: "localhost".into(),
+                cloak: String::new(),
+                vhost: None,
+                secure: true,
+                certfp: Some("ABCDEF0123".into()),
+                tls_info: None,
+                sni: None,
+                brand_server: None,
+                brand_network: None,
+                account: Some("alice".into()),
+                signon: 0,
+                nick_ts: 0,
+                addr: "127.0.0.1:1".parse().unwrap(),
+                port: 6697,
+                registered: true,
+                dns_pending: false,
+                ident_pending: false,
+                auth_pending: false,
+                waitpong: None,
+                class: Some("trusted".into()),
+                pass: None,
+                deferred: Vec::new(),
+                cap: false,
+                cap_302: false,
+                caps: Caps::default(),
+                sasl_mech: None,
+                channels: HashSet::default(),
+                invited: HashSet::default(),
+                watch: Vec::new(),
+                monitor: Vec::new(),
+                silence: Vec::new(),
+                signore: Vec::new(),
+                accept: Vec::new(),
+                quitting: None,
+                flags: UserFlags::default(),
+                last_active: 0,
+                last_msg: 0,
+                ping_sent: false,
+                ext: Extensible::default(),
+                out: OutSink::Thread(utx),
+                sock: None,
+            },
+        );
+        s
+    }
+
+    #[test]
+    fn new_criteria_match_and_veto() {
+        let s = srv_with_user();
+        let base = SecGroup {
+            name: "t".into(),
+            realnames: vec!["*bot*".into()],
+            classes: vec!["trusted".into()],
+            ports: vec![6697],
+            certfps: vec!["abcdef0123".into()], // case-insensitive vs the user's mixed-case fp
+            accounts: vec!["ali*".into()],      // glob
+            ..Default::default()
+        };
+        assert!(matches(&s, 7, &base), "all new criteria satisfied");
+
+        let wrong_port = SecGroup {
+            ports: vec![6667],
+            ..base.clone()
+        };
+        assert!(!matches(&s, 7, &wrong_port), "wrong port fails");
+
+        let wrong_class = SecGroup {
+            classes: vec!["main".into()],
+            ..base.clone()
+        };
+        assert!(!matches(&s, 7, &wrong_class), "wrong connect class fails");
+
+        let wrong_acct = SecGroup {
+            accounts: vec!["bob".into()],
+            ..base.clone()
+        };
+        assert!(!matches(&s, 7, &wrong_acct), "wrong account fails");
+
+        let vetoed = SecGroup {
+            exclude_realnames: vec!["*bot*".into()],
+            ..base.clone()
+        };
+        assert!(!matches(&s, 7, &vetoed), "exclude-realname vetoes");
     }
 }
