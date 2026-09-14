@@ -1,6 +1,6 @@
 [package]
 name = "echoircd"
-version = "5.0.2"
+version = "5.0.3"
 edition = "2021"
 description = "A small, dependency-light IRC daemon in Rust with a modular command/mode/module API."
 license = "MIT"
