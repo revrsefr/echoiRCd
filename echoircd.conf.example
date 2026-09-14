@@ -82,6 +82,8 @@ oper {
     password    "CHANGE_THIS_PASSWORD";
     type        netadmin;
     # fingerprint "<sha256-cert-fp>";   # require this TLS client cert too (2FA)
+    # rsakey      "/etc/echoircd/admin.pub";  # RSA public key for `CHALLENGE` login
+                                              # (no password needed to cross the wire)
     # level       0;                     # operlevel (KILL protection tiers)
 }
 

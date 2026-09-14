@@ -29,6 +29,8 @@ fn is_oper_option(tok: &str) -> bool {
         || tok.starts_with("fp=")
         || tok.starts_with("certfp=")
         || tok.starts_with("type=")
+        || tok.starts_with("rsakey=")
+        || tok.starts_with("key=")
 }
 
 /// A server-link block: how to authenticate a peer named `name` (and, if
@@ -54,6 +56,7 @@ pub struct OperBlock {
     pub level: u32,
     pub fingerprint: Option<String>,
     pub oper_type: Option<String>,
+    pub rsa_key: Option<String>, // path to a PEM RSA public key for CHALLENGE login
 }
 
 /// Per-SNI branding: a client that connected via `host` (TLS SNI) is shown
@@ -324,14 +327,19 @@ impl Config {
                                 b.fingerprint = Some(fp.to_ascii_lowercase());
                             } else if let Some(t) = tok.strip_prefix("type=") {
                                 b.oper_type = Some(t.to_string());
+                            } else if let Some(k) = tok
+                                .strip_prefix("rsakey=")
+                                .or_else(|| tok.strip_prefix("key="))
+                            {
+                                b.rsa_key = Some(k.to_string());
                             } else if let Ok(l) = tok.parse::<u32>() {
                                 b.level = l;
                             }
                         }
                         // A block with no credential at all (no password, no cert
-                        // fingerprint) would let anyone oper up — refuse it, as the
-                        // old parser did by requiring a password token.
-                        if !b.password.is_empty() || b.fingerprint.is_some() {
+                        // fingerprint, no RSA key) would let anyone oper up — refuse it,
+                        // as the old parser did by requiring a password token.
+                        if !b.password.is_empty() || b.fingerprint.is_some() || b.rsa_key.is_some() {
                             c.opers.push(b);
                         }
                     }
@@ -716,6 +724,10 @@ fn emit_block(out: &mut String, name: &str, fields: &[(String, String)]) {
                 if let Some(t) = get("type") {
                     line.push_str(" type=");
                     line.push_str(t);
+                }
+                if let Some(k) = get("rsakey").or_else(|| get("key")) {
+                    line.push_str(" rsakey=");
+                    line.push_str(k);
                 }
                 if let Some(l) = get("level") {
                     line.push(' ');

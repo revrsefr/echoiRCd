@@ -14,6 +14,7 @@ use crate::Uid;
 pub fn commands() -> Vec<Box<dyn Command>> {
     vec![
         Box::new(Oper),
+        Box::new(Challenge),
         Box::new(Kill),
         Box::new(Wallops),
         Box::new(SvsLogin),
@@ -191,6 +192,153 @@ impl Command for Oper {
             CmdResult::Fail
         }
     }
+}
+
+/// A pending `CHALLENGE`: the `base64(SHA1(secret))` we expect the client to return, the
+/// oper name it was issued for, and when — held on the user's session between the two
+/// CHALLENGE steps.
+struct RsaChallenge {
+    name: String,
+    expected: String,
+    at: u64,
+}
+
+/// CHALLENGE — RSA public-key operator login (ratbox/charybdis style), so an oper's
+/// secret never crosses the wire. `CHALLENGE <name>` returns a fresh random secret
+/// encrypted to the oper's configured public key (numeric 386, terminated by 387); the
+/// client decrypts it with their private key and replies `CHALLENGE +<base64 SHA1 of the
+/// secret>`. A new 32-byte secret per attempt makes it sniff- and replay-proof; works
+/// even over a plaintext link.
+struct Challenge;
+impl Command for Challenge {
+    fn name(&self) -> &'static str {
+        "CHALLENGE"
+    }
+    fn min_params(&self) -> usize {
+        1
+    }
+    fn handle(&self, s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
+        // second step: `CHALLENGE +<response>`
+        if let Some(resp) = params[0].strip_prefix('+') {
+            return challenge_response(s, uid, resp);
+        }
+        // first step: `CHALLENGE <opername>` — issue an encrypted challenge
+        let name = params[0].clone();
+        let Some(block) = s
+            .opers
+            .iter()
+            .find(|o| o.name == name && o.rsa_key.is_some())
+            .cloned()
+        else {
+            s.numeric(
+                uid,
+                ERR_PASSWDMISMATCH,
+                ":CHALLENGE is not available for that name",
+            );
+            return CmdResult::Fail;
+        };
+        let path = block.rsa_key.unwrap();
+        let pem = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(_) => {
+                s.snotice_c(
+                    'o',
+                    &format!("CHALLENGE for {name}: cannot read key file {path}"),
+                );
+                s.numeric(uid, ERR_PASSWDMISMATCH, ":CHALLENGE key unavailable");
+                return CmdResult::Fail;
+            }
+        };
+        let Some((expected, challenge)) = make_challenge(&pem) else {
+            s.snotice_c('o', &format!("CHALLENGE for {name}: invalid public key"));
+            s.numeric(uid, ERR_PASSWDMISMATCH, ":CHALLENGE key unavailable");
+            return CmdResult::Fail;
+        };
+        if let Some(u) = s.users.get_mut(&uid) {
+            u.ext.set(RsaChallenge {
+                name,
+                expected,
+                at: now(),
+            });
+        }
+        for chunk in challenge.as_bytes().chunks(300) {
+            s.numeric(
+                uid,
+                RPL_RSACHALLENGE2,
+                &format!(":{}", String::from_utf8_lossy(chunk)),
+            );
+        }
+        s.numeric(uid, RPL_ENDOFRSACHALLENGE2, ":End of CHALLENGE");
+        CmdResult::Ok
+    }
+}
+
+/// Build a CHALLENGE for a PEM RSA public key. Returns `(expected, challenge)` where
+/// `expected` = `base64(SHA1(secret))` the client must return and `challenge` =
+/// `base64(OAEP-encrypt(secret))` to send. A fresh 32-byte secret each call. `None` on
+/// any key-parse or crypto error.
+fn make_challenge(pem: &[u8]) -> Option<(String, String)> {
+    let rsa = openssl::rsa::Rsa::public_key_from_pem(pem)
+        .or_else(|_| openssl::rsa::Rsa::public_key_from_pem_pkcs1(pem))
+        .ok()?;
+    let mut secret = [0u8; 32];
+    openssl::rand::rand_bytes(&mut secret).ok()?;
+    let digest = openssl::hash::hash(openssl::hash::MessageDigest::sha1(), &secret).ok()?;
+    let expected = openssl::base64::encode_block(&digest);
+    let mut ct = vec![0u8; rsa.size() as usize];
+    let n = rsa
+        .public_encrypt(&secret, &mut ct, openssl::rsa::Padding::PKCS1_OAEP)
+        .ok()?;
+    Some((expected, openssl::base64::encode_block(&ct[..n])))
+}
+
+/// Verify a `CHALLENGE +<response>` against the pending secret and, on a match, oper up
+/// through the same path as a successful OPER.
+fn challenge_response(s: &mut Server, uid: Uid, resp: &str) -> CmdResult {
+    let Some(pending) = s.users.get_mut(&uid).and_then(|u| u.ext.take::<RsaChallenge>()) else {
+        s.numeric(uid, ERR_PASSWDMISMATCH, ":No CHALLENGE in progress");
+        return CmdResult::Fail;
+    };
+    if now().saturating_sub(pending.at) > 60 {
+        s.numeric(uid, ERR_PASSWDMISMATCH, ":CHALLENGE timed out");
+        return CmdResult::Fail;
+    }
+    // constant-time compare of the base64 digests
+    let ok = resp.len() == pending.expected.len()
+        && openssl::memcmp::eq(resp.as_bytes(), pending.expected.as_bytes());
+    if !ok {
+        s.snotice_c('o', &format!("Failed CHALLENGE for {}", pending.name));
+        s.numeric(uid, ERR_PASSWDMISMATCH, ":Password incorrect");
+        return CmdResult::Fail;
+    }
+    // the block must still exist with a key; honour a `fp=` requirement if present
+    let Some(block) = s
+        .opers
+        .iter()
+        .find(|o| o.name == pending.name && o.rsa_key.is_some())
+        .cloned()
+    else {
+        s.numeric(uid, ERR_PASSWDMISMATCH, ":Password incorrect");
+        return CmdResult::Fail;
+    };
+    if let Some(want_fp) = &block.fingerprint {
+        let user_fp = s.users.get(&uid).and_then(|u| u.certfp.clone());
+        if !user_fp
+            .as_deref()
+            .is_some_and(|f| f.eq_ignore_ascii_case(want_fp))
+        {
+            s.numeric(
+                uid,
+                ERR_PASSWDMISMATCH,
+                ":Password incorrect (a matching TLS client certificate is required)",
+            );
+            return CmdResult::Fail;
+        }
+    }
+    s.oper_up(uid);
+    crate::modules::operlevels::set(s, uid, block.level);
+    crate::modules::opertypes::apply(s, uid, block.oper_type.as_deref());
+    CmdResult::Ok
 }
 
 struct Kill;
@@ -1682,5 +1830,35 @@ impl Command for AllTime {
         let msg = format!("ALLTIME: {} {}", s.name, iso_time(now()));
         onotice(s, uid, &msg);
         CmdResult::Ok
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::make_challenge;
+
+    #[test]
+    fn challenge_crypto_round_trips() {
+        // server side: a keypair, and a challenge issued to its public key
+        let key = openssl::rsa::Rsa::generate(2048).unwrap();
+        let pub_pem = key.public_key_to_pem().unwrap();
+        let (expected, challenge_b64) = make_challenge(&pub_pem).unwrap();
+
+        // client side: decrypt with the private key, recover the secret, and respond
+        let ct = openssl::base64::decode_block(&challenge_b64).unwrap();
+        let mut buf = vec![0u8; key.size() as usize];
+        let n = key
+            .private_decrypt(&ct, &mut buf, openssl::rsa::Padding::PKCS1_OAEP)
+            .unwrap();
+        let digest = openssl::hash::hash(openssl::hash::MessageDigest::sha1(), &buf[..n]).unwrap();
+        let response = openssl::base64::encode_block(&digest);
+        assert_eq!(response, expected, "client response must equal server's expected");
+
+        // a fresh secret per challenge
+        let (expected2, _) = make_challenge(&pub_pem).unwrap();
+        assert_ne!(expected, expected2, "secret must be regenerated each challenge");
+
+        // a non-key is refused, not panicked on
+        assert!(make_challenge(b"not a key").is_none());
     }
 }
