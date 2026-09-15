@@ -8,6 +8,8 @@
 [![Language: Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org)
 [![IRCv3](https://img.shields.io/badge/IRCv3-supported-blueviolet.svg)](https://ircv3.net)
 
+**Website & documentation: [echoircd.org](https://echoircd.org)** · [docs](https://echoircd.org/docs) · [FAQ](https://echoircd.org/docs/faq) · live network `irc.echoircd.org` (+6697 TLS)
+
 </div>
 
 ## About
