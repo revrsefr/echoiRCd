@@ -38,6 +38,7 @@ pub mod database;
 pub mod extensible;
 pub mod help;
 pub mod http;
+pub mod ldap;
 pub mod i18n;
 pub mod ircd;
 pub mod link;

@@ -151,6 +151,44 @@ impl Command for Oper {
                 return CmdResult::Fail;
             }
         }
+        // LDAP bind: verify the supplied password against a directory (off the core
+        // thread; the result arrives as OperAuth) instead of a local hash. The block's
+        // DN template has `%s` replaced with the oper name.
+        if let Some(dn_tmpl) = &block.ldap_dn {
+            let server = s.conf("ldap_server").unwrap_or("").to_string();
+            if server.is_empty() {
+                s.snotice_c(
+                    'o',
+                    &format!("Failed OPER for {name}: ldap_server is not configured"),
+                );
+                s.numeric(uid, ERR_PASSWDMISMATCH, ":Password incorrect");
+                return CmdResult::Fail;
+            }
+            let dn = dn_tmpl.replace("%s", &name);
+            let verify = s.conf_bool("ldap_tls_verify", true);
+            let (ot, pw) = (otype.clone(), pass.clone());
+            let queued = s.spawn_crypto(move || {
+                let ok = crate::ldap::simple_bind(
+                    &server,
+                    &dn,
+                    &pw,
+                    verify,
+                    std::time::Duration::from_secs(5),
+                )
+                .unwrap_or(false);
+                crate::ircd::Event::OperAuth {
+                    uid,
+                    ok,
+                    level,
+                    oper_type: ot,
+                }
+            });
+            if !queued {
+                s.numeric(uid, ERR_PASSWDMISMATCH, ":Too many auth attempts, try again");
+                return CmdResult::Fail;
+            }
+            return CmdResult::Ok; // pending; oper-up happens when the bind returns
+        }
         // `password = *` means cert-only: the fingerprint above is the whole check.
         if hash == "*" {
             s.oper_up(uid);

@@ -84,6 +84,9 @@ oper {
     # fingerprint "<sha256-cert-fp>";   # require this TLS client cert too (2FA)
     # rsakey      "/etc/echoircd/admin.pub";  # RSA public key for `CHALLENGE` login
                                               # (no password needed to cross the wire)
+    # ldapdn      "uid=%s,ou=people,dc=example,dc=com";  # verify the OPER password by
+                                              # binding this DN to LDAP (%s = oper name)
+                                              # instead of a local hash; needs ldap_server
     # level       0;                     # operlevel (KILL protection tiers)
 }
 
@@ -324,6 +327,9 @@ opers {
     # ojoin             yes;  # /OJOIN <#chan> — join as network staff with `!`
     # ojoin_op          yes;  # also grant channel op on OJOIN (default yes)
     # oper_svslogin     yes;  # allow services to SVSLOGIN opers to an oper block
+    # --- ldapoper: verify oper passwords against an LDAP directory (per-block ldapdn=) ---
+    # ldap_server       "ldaps://ldap.example.com";  # ldap:// or ldaps:// [host:port]
+    # ldap_tls_verify   yes;  # verify the ldaps:// server cert/hostname (default yes)
     # maphide           yes;  # hide LINKS / MAP from non-opers
     # hideservices      yes;  # hide U-lined services from MAP/LINKS/STATS for non-opers
     # rline_matchonnickchange yes;  # re-check /RLINE regex bans on nick change
