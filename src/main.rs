@@ -170,6 +170,12 @@ fn main() {
         let cfgpath = args.next().unwrap_or_else(|| "echoircd.conf".to_string());
         std::process::exit(checkconfig_cli(&cfgpath));
     }
+    // `echoircd version` (or `--version`/`-V`) prints the build string and exits —
+    // WITHOUT booting a daemon (a bare unknown arg is treated as a config path below).
+    if matches!(first.as_deref(), Some("version" | "--version" | "-V")) {
+        println!("{}", echoircd::server::version_comment());
+        std::process::exit(0);
+    }
     let path = first.unwrap_or_else(|| "echoircd.conf".to_string());
     let cfg = Config::load(&path);
 

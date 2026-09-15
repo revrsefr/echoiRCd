@@ -463,7 +463,23 @@ fn read_name(msg: &[u8], mut pos: usize, jumps: u32) -> Option<(String, usize)> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use std::net::{Ipv4Addr, Ipv6Addr};
+
+    proptest! {
+        // The DNS reply parsers eat untrusted network data — spoofable, and for DNSBL the
+        // queried nameserver is attacker-adjacent. Pointer compression is a classic parser
+        // loop/DoS, so no byte string may panic or hang them (the `jumps` cap bounds loops).
+        #[test]
+        fn dns_parsers_never_panic(
+            bytes in prop::collection::vec(any::<u8>(), 0..600),
+            id in any::<u16>(),
+        ) {
+            let _ = parse_a_reply(&bytes, id);
+            let _ = parse_ptr_reply(&bytes, id);
+            let _ = parse_srv_reply(&bytes, id);
+        }
+    }
 
     #[test]
     fn reverse_names() {
