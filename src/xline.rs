@@ -416,6 +416,10 @@ impl Server {
         self.snotice_c('x', &m);
         self.save_xlines();
         self.enforce_xlines();
+        // redis event bus: announce the new ban/exemption (no-op when redis is off)
+        if crate::redis::active(self) {
+            crate::redis::publish_event(self, &["xline", kind.tag(), mask, setter, reason]);
+        }
     }
 
     /// Remove an x-line by kind + mask; announces it (snomask +x, like the add) —

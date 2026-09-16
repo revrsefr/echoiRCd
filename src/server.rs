@@ -1040,6 +1040,11 @@ impl Server {
         if !user.registered {
             crate::connguard::note_removed_unreg(self); // it left before registering
         }
+        // redis event bus: announce the departure (registered clients only)
+        if user.registered && crate::redis::active(self) {
+            let nick = user.nick.clone();
+            crate::redis::publish_event(self, &["quit", nick.as_str(), reason]);
+        }
         // the departing user's own accept list vanishes with them — drop its nicks
         // from the reverse count
         for n in &user.accept {

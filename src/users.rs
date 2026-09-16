@@ -581,6 +581,17 @@ impl Server {
         }
         self.watch_notify_online(&nick); // tell WATCH/MONITOR watchers
         self.events.push_back(Hook::Connect(uid));
+        // redis event bus: announce the new client (no-op when redis is off)
+        if crate::redis::active(self) {
+            let who = self
+                .users
+                .get(&uid)
+                .map(|u| (u.ident.clone(), u.host_display().to_string(), u.addr.ip().to_string()));
+            if let Some((id, host, ip)) = who {
+                let mask = format!("{id}@{host}");
+                crate::redis::publish_event(self, &["connect", nick.as_str(), mask.as_str(), ip.as_str()]);
+            }
+        }
         // conn_join: auto-join configured channels (comma/space separated, repeatable)
         let chans: Vec<String> = self
             .conf_all("autojoin")
