@@ -1,4 +1,5 @@
-//! IRC numeric replies (RFC 1459/2812 subset) used by the core.
+//! IRC numeric replies for the modern IRC protocol (modern.ircdocs.horse, which
+//! consolidates RFC 1459/2812) used by the core.
 
 pub const RPL_MAP: u16 = 6;
 pub const RPL_MAPEND: u16 = 7;

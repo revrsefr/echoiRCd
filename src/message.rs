@@ -1,4 +1,5 @@
-//! IRC line parsing (RFC 1459 + IRCv3 message tags). One line in → an optional
+//! IRC line parsing for the modern IRC protocol (modern.ircdocs.horse) + IRCv3
+//! message tags. One line in → an optional
 //! [`Message`] out. Client-only tags (the `+`-prefixed ones) are captured so
 //! TAGMSG / PRIVMSG can relay them onward; server tags from clients are dropped.
 

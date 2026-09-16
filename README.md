@@ -14,7 +14,10 @@
 
 ## About
 
-echoIRCd is a full IRC + IRCv3 server. A single lock-free **core thread** owns all
+echoIRCd is a full IRC + IRCv3 server. It implements the **modern IRC protocol** —
+the living specification at [modern.ircdocs.horse](https://modern.ircdocs.horse), which
+consolidates and supersedes the historical RFCs 1459 and 2812 — with 30+ IRCv3
+capabilities layered on top. A single lock-free **core thread** owns all
 state; a **pool of epoll reactor threads** (one per core) drives the connections
 around it — TLS crypto and all — with no async runtime. It ships **100+ commands**,
 the **complete channel & user mode set**, **30+ IRCv3 capabilities**,
