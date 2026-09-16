@@ -50,10 +50,9 @@ impl Command for Help {
         if body.is_empty() {
             s.numeric(
                 uid,
-                RPL_HELPSTART,
-                &format!("{head} :No help available for that topic"),
+                ERR_HELPNOTFOUND,
+                &format!("{head} :No help available on that topic"),
             );
-            s.numeric(uid, RPL_ENDOFHELP, &format!("{head} :End of /HELP"));
             return CmdResult::Ok;
         }
         s.numeric(uid, RPL_HELPSTART, &format!("{head} :{} help", s.name));

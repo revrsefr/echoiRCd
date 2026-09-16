@@ -116,6 +116,7 @@ pub const RPL_ENDOFMODLIST: u16 = 703; // /MODULES terminator
 pub const RPL_HELPSTART: u16 = 704; // /HELP first line
 pub const RPL_HELPTXT: u16 = 705; // /HELP body line
 pub const RPL_ENDOFHELP: u16 = 706; // /HELP terminator
+pub const ERR_HELPNOTFOUND: u16 = 524; // no help available for that topic
 pub const RPL_WHOISSECURE: u16 = 671; // "is using a secure connection" (sslinfo)
 pub const RPL_WHOISCERTFP: u16 = 276; // "has client certificate fingerprint <fp>"
 pub const RPL_HOSTHIDDEN: u16 = 396; // "is now your displayed host" (cloak on/off)
