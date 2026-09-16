@@ -160,6 +160,7 @@ pub const ERR_INVITEONLYCHAN: u16 = 473;
 pub const ERR_BADCHANNELKEY: u16 = 475;
 pub const ERR_BANLISTFULL: u16 = 478; // +b/+e/+I list at its per-channel cap
 pub const ERR_CHANOPRIVSNEEDED: u16 = 482;
+pub const ERR_CANTKILLSERVER: u16 = 483; // KILL was aimed at a server, not a user
 pub const RPL_RSACHALLENGE2: u16 = 386; // CHALLENGE: a chunk of the encrypted challenge
 pub const RPL_ENDOFRSACHALLENGE2: u16 = 387; // CHALLENGE: end of the encrypted challenge
 pub const ERR_SECUREONLYCHAN: u16 = 489; // can't join a +z channel without TLS

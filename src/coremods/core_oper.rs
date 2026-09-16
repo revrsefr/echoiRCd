@@ -422,6 +422,12 @@ impl Command for Kill {
                 s.route_kill(&killer_uuid, &uuid, &format!("{killer} ({reason})"));
                 return CmdResult::Ok;
             }
+            if target.eq_ignore_ascii_case(&s.name)
+                || s.servers.values().any(|sv| sv.name.eq_ignore_ascii_case(target))
+            {
+                s.numeric(uid, ERR_CANTKILLSERVER, ":You can't KILL a server");
+                return CmdResult::Fail;
+            }
             s.numeric(
                 uid,
                 ERR_NOSUCHNICK,
