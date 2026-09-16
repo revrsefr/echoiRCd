@@ -90,6 +90,12 @@ pub const ERR_TOOMANYCHANNELS: u16 = 405;
 pub const ERR_NOPRIVILEGES: u16 = 481;
 pub const ERR_UMODEUNKNOWNFLAG: u16 = 501;
 pub const RPL_LUSERCLIENT: u16 = 251;
+pub const RPL_LUSEROP: u16 = 252; // operators online
+pub const RPL_LUSERUNKNOWN: u16 = 253; // unregistered connections
+pub const RPL_LUSERCHANNELS: u16 = 254; // channels formed
+pub const RPL_LUSERME: u16 = 255; // "I have X clients and Y servers"
+pub const RPL_LOCALUSERS: u16 = 265; // current/max local users
+pub const RPL_GLOBALUSERS: u16 = 266; // current/max global users
 
 pub const RPL_WHOISUSER: u16 = 311;
 pub const RPL_WHOISSERVER: u16 = 312;

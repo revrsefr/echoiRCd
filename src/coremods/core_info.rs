@@ -703,11 +703,7 @@ impl Command for Lusers {
         "LUSERS"
     }
     fn handle(&self, s: &mut Server, uid: Uid, _params: &[String]) -> CmdResult {
-        s.numeric(
-            uid,
-            RPL_LUSERCLIENT,
-            &format!(":There are {} users on 1 server", s.users.len()),
-        );
+        s.send_lusers(uid);
         CmdResult::Ok
     }
 }

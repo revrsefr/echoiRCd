@@ -306,6 +306,66 @@ impl Server {
         self.users.get(&uid).map(|u| u.flags.oper).unwrap_or(false)
     }
 
+    /// Emit the full LUSERS block (251–255, 265, 266). Called on registration and by LUSERS.
+    pub fn send_lusers(&mut self, uid: Uid) {
+        let global = self.users.values().filter(|u| u.registered).count();
+        let invisible = self
+            .users
+            .values()
+            .filter(|u| u.registered && u.flags.invisible)
+            .count();
+        let opers = self
+            .users
+            .values()
+            .filter(|u| u.registered && u.flags.oper)
+            .count();
+        let unknown = self.users.values().filter(|u| !u.registered).count();
+        let local = self
+            .users
+            .values()
+            .filter(|u| u.registered && u.sock.is_some())
+            .count();
+        let channels = self.channels.len();
+        let servers = self.servers.len();
+        self.max_local = self.max_local.max(local);
+        self.max_global = self.max_global.max(global);
+
+        let (g, inv, ns) = (
+            global.to_string(),
+            invisible.to_string(),
+            (servers + 1).to_string(),
+        );
+        let m = self.trf(
+            "There are {0} users and {1} invisible on {2} servers",
+            &[g.as_str(), inv.as_str(), ns.as_str()],
+        );
+        self.numeric(uid, RPL_LUSERCLIENT, &format!(":{m}"));
+
+        let o = opers.to_string();
+        let m = self.trf("{0} :operator(s) online", &[o.as_str()]);
+        self.numeric(uid, RPL_LUSEROP, &m);
+
+        let uk = unknown.to_string();
+        let m = self.trf("{0} :unknown connection(s)", &[uk.as_str()]);
+        self.numeric(uid, RPL_LUSERUNKNOWN, &m);
+
+        let ch = channels.to_string();
+        let m = self.trf("{0} :channels formed", &[ch.as_str()]);
+        self.numeric(uid, RPL_LUSERCHANNELS, &m);
+
+        let (lc, sv) = (local.to_string(), servers.to_string());
+        let m = self.trf("I have {0} clients and {1} servers", &[lc.as_str(), sv.as_str()]);
+        self.numeric(uid, RPL_LUSERME, &format!(":{m}"));
+
+        let (l, ml) = (local.to_string(), self.max_local.to_string());
+        let m = self.trf("Current local users {0}, max {1}", &[l.as_str(), ml.as_str()]);
+        self.numeric(uid, RPL_LOCALUSERS, &format!("{l} {ml} :{m}"));
+
+        let (gg, mg) = (global.to_string(), self.max_global.to_string());
+        let m = self.trf("Current global users {0}, max {1}", &[gg.as_str(), mg.as_str()]);
+        self.numeric(uid, RPL_GLOBALUSERS, &format!("{gg} {mg} :{m}"));
+    }
+
     /// Whether the user `uid` is servprotected (+k) — a service that must not be
     /// KILLed / KICKed / SA-commanded.
     pub fn uid_servprotected(&self, uid: Uid) -> bool {
@@ -508,9 +568,7 @@ impl Server {
             .map(|u| u.caps.ext_isupport && u.caps.batch)
             .unwrap_or(false);
         self.send_isupport(uid, batched);
-        let count = self.users.len().to_string();
-        let lusers = self.trf("There are {0} users on 1 server", &[count.as_str()]);
-        self.numeric(uid, RPL_LUSERCLIENT, &format!(":{lusers}"));
+        self.send_lusers(uid);
         self.send_motd(uid);
         // connbanner: NOTICE lines to every connecting client
         for line in self.conf_all("connbanner").to_vec() {

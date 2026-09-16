@@ -175,6 +175,8 @@ pub struct Server {
     pub name: String,
     pub network: String,
     pub created: u64,
+    pub max_local: usize,  // peak concurrent local users (RPL_LOCALUSERS)
+    pub max_global: usize, // peak concurrent network users (RPL_GLOBALUSERS)
     pub motd: Vec<String>,
     pub users: HashMap<Uid, User>,
     pub nick_index: HashMap<String, Uid>,   // lower nick -> uid
@@ -281,6 +283,8 @@ impl Server {
             name: cfg.servername,
             network: cfg.network,
             created: now(),
+            max_local: 0,
+            max_global: 0,
             motd: cfg.motd,
             users: HashMap::default(),
             nick_index: HashMap::default(),
