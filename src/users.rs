@@ -323,7 +323,7 @@ impl Server {
         let local = self
             .users
             .values()
-            .filter(|u| u.registered && u.sock.is_some())
+            .filter(|u| u.registered && u.uuid.starts_with(self.sid.as_str()))
             .count();
         let channels = self.channels.len();
         let servers = self.servers.len();
