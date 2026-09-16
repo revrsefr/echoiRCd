@@ -175,14 +175,16 @@ impl Module for RestrictCommands {
             return ModResult::Passthru;
         }
 
-        let (nick, reason) = (
-            srv.users
-                .get(&uid)
-                .map(|u| u.nick.clone())
-                .unwrap_or_default(),
-            r.reason.clone(),
+        // Deferred: reply RPL_TRYAGAIN (263) with the remaining wait so clients retry.
+        let remaining = r.connectdelay.saturating_sub(now().saturating_sub(signon));
+        srv.numeric(
+            uid,
+            crate::numeric::RPL_TRYAGAIN,
+            &format!(
+                "{} :Please wait {remaining} seconds and try again — {}",
+                r.command, r.reason
+            ),
         );
-        srv.send(uid, format!(":{} NOTICE {nick} :*** {reason}", srv.name));
         ModResult::Deny
     }
 }

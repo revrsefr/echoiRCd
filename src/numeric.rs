@@ -13,6 +13,7 @@ pub const RPL_ADMINME: u16 = 256;
 pub const RPL_ADMINLOC1: u16 = 257;
 pub const RPL_ADMINLOC2: u16 = 258;
 pub const RPL_ADMINEMAIL: u16 = 259;
+pub const RPL_TRYAGAIN: u16 = 263; // command deferred/throttled — "<command> :<info>", wait and retry
 pub const RPL_USERHOST: u16 = 302;
 pub const RPL_ISON: u16 = 303;
 pub const RPL_WHOISIDLE: u16 = 317;
