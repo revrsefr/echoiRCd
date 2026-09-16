@@ -124,11 +124,12 @@ impl Command for Knock {
             .cloned()
             .unwrap_or_else(|| "requesting an invite".to_string());
         let who = s.users[&uid].prefix();
-        let m = s.trf(
-            "[Knock] {0} is knocking: {1}",
-            &[who.as_str(), reason.as_str()],
+        let m = s.trf("is knocking: {0}", &[reason.as_str()]);
+        s.to_channel(
+            &key,
+            &format!(":{} {:03} {chan} {who} :{m}", s.name, RPL_KNOCK),
+            None,
         );
-        s.to_channel(&key, &format!(":{} NOTICE {chan} :{m}", s.name), None);
         s.numeric(
             uid,
             RPL_KNOCKDLVR,
