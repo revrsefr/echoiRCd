@@ -403,6 +403,14 @@ impl Server {
         self.send(uid, format!(":{} MODE {nick} :+os", self.name));
         let m = self.trf("{0} is now an IRC operator", &[nick.as_str()]);
         self.snotice_c('o', &m);
+        if crate::redis::active(self) {
+            let mask = self
+                .users
+                .get(&uid)
+                .map(|u| format!("{}@{}", u.ident, u.host_display()))
+                .unwrap_or_default();
+            crate::redis::publish_event(self, &["oper", nick.as_str(), mask.as_str()]);
+        }
         // operprefix: give this oper the ! prefix in every channel they're already in
         crate::modules::operprefix::grant_all(self, uid);
         // opermodes: extra umodes on oper-up
@@ -515,6 +523,9 @@ impl Server {
             // WATCH/MONITOR: the old nick is now gone, the new one is here
             self.watch_notify_offline(&old);
             self.watch_notify_online(newnick);
+            if crate::redis::active(self) {
+                crate::redis::publish_event(self, &["nick", old.as_str(), newnick]);
+            }
         }
         self.propagate_nick(uid, newnick); // tell linked servers
     }

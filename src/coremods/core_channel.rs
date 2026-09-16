@@ -631,6 +631,13 @@ impl Command for Kick {
                     crate::modules::chathistory::record_event(s, &key, &kline);
                     s.to_channel(&key, &kline, None);
                     s.propagate_kick(uid, chan, victim, &reason);
+                    if crate::redis::active(s) {
+                        let by = s.users[&uid].nick.clone();
+                        crate::redis::publish_event(
+                            s,
+                            &["kick", chan.as_str(), vnick.as_str(), by.as_str(), reason.as_str()],
+                        );
+                    }
                     if let Some(ch) = s.channels.get_mut(&key) {
                         ch.rmembers.remove(&vuuid);
                     }
@@ -688,6 +695,13 @@ impl Command for Kick {
         crate::modules::chathistory::record_event(s, &key, &kickline);
         s.to_channel(&key, &kickline, None);
         s.propagate_kick(uid, chan, victim, &reason); // tell links
+        if crate::redis::active(s) {
+            let by = s.users[&uid].nick.clone();
+            crate::redis::publish_event(
+                s,
+                &["kick", chan.as_str(), victim.as_str(), by.as_str(), reason.as_str()],
+            );
+        }
         if let Some(ch) = s.channels.get_mut(&key) {
             ch.members.remove(&tuid);
             if ch.modes.kicknorejoin.is_some() {

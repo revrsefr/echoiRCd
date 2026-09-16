@@ -907,10 +907,26 @@ impl Ircd {
                     for m in &mut self.modules {
                         m.on_join(&mut self.server, uid, &chan);
                     }
+                    if crate::redis::active(&self.server) {
+                        if let Some(nick) = self.server.users.get(&uid).map(|u| u.nick.clone()) {
+                            crate::redis::publish_event(
+                                &mut self.server,
+                                &["join", nick.as_str(), chan.as_str()],
+                            );
+                        }
+                    }
                 }
                 Hook::Part(uid, chan, reason) => {
                     for m in &mut self.modules {
                         m.on_part(&mut self.server, uid, &chan, &reason);
+                    }
+                    if crate::redis::active(&self.server) {
+                        if let Some(nick) = self.server.users.get(&uid).map(|u| u.nick.clone()) {
+                            crate::redis::publish_event(
+                                &mut self.server,
+                                &["part", nick.as_str(), chan.as_str(), reason.as_str()],
+                            );
+                        }
                     }
                 }
                 Hook::Quit(uid, reason) => {
