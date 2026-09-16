@@ -297,16 +297,6 @@ impl Command for Whois {
         if let Some(away) = s.users.get(&tuid).and_then(|u| u.flags.away.clone()) {
             s.numeric(uid, RPL_AWAY, &format!("{nick} :{away}"));
         }
-        if bot {
-            s.numeric(uid, RPL_WHOISBOT, &format!("{nick} :is a bot"));
-        }
-        if !(hide && crate::modules::hidewhois::hide_server(s)) {
-            s.numeric(
-                uid,
-                RPL_WHOISSERVER,
-                &format!("{nick} {} :echoIRCd", s.name),
-            );
-        }
         // +I hides the channel list from everyone but the user themselves + users/auspex
         if !chans.is_empty() && (is_self || asker_auspex_u || !hidechans) {
             // fold across multiple 319 lines so a user in many channels stays under 512
@@ -326,6 +316,13 @@ impl Command for Whois {
             if !line.is_empty() {
                 s.numeric(uid, RPL_WHOISCHANNELS, &format!("{nick} :{line}"));
             }
+        }
+        if !(hide && crate::modules::hidewhois::hide_server(s)) {
+            s.numeric(
+                uid,
+                RPL_WHOISSERVER,
+                &format!("{nick} {} :echoIRCd", s.name),
+            );
         }
         // 313: is an IRC Operator (hidden by +H unless the asker is an oper). The
         // oper type sets capabilities, not this line — a custom title (e.g. "is a
@@ -455,6 +452,9 @@ impl Command for Whois {
                 RPL_WHOISCERTFP,
                 &format!("{nick} :has client certificate fingerprint {fp}"),
             );
+        }
+        if bot {
+            s.numeric(uid, RPL_WHOISBOT, &format!("{nick} :is a bot"));
         }
         // 317: idle time + signon time (hidewhois may suppress it)
         if !(hide && crate::modules::hidewhois::hide_idle(s)) {
