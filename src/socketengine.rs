@@ -949,6 +949,7 @@ fn read_conn(
                         }
                         if c.rbuf.len() > c.recvq {
                             c.rbuf.clear(); // overlong line with no newline: drop it
+                            let _ = core.send(Event::LineTooLong { uid: c.uid });
                         }
                     }
                     // fairness + memory bound: after MAX_READ_PER_TURN bytes stop and
@@ -1255,6 +1256,7 @@ fn reader_loop(stream: TcpStream, uid: Uid, core: SyncSender<Event>, max_line: u
             Ok(0) => break, // EOF
             Ok(_) => {
                 if line.len() > max_line {
+                    let _ = core.send(Event::LineTooLong { uid });
                     continue;
                 }
                 let l = line.trim_end_matches(['\r', '\n']);
@@ -1393,6 +1395,7 @@ fn tls_conn(
                 }
                 if acc.len() > max_line {
                     acc.clear(); // overlong line with no newline: drop it
+                    let _ = core.send(Event::LineTooLong { uid });
                 }
             }
             Err(e)

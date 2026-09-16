@@ -396,6 +396,11 @@ impl Command for Whois {
                 RPL_WHOISHOST,
                 &format!("{nick} :is connecting from {ident}@{realhost} {realip}"),
             );
+            s.numeric(
+                uid,
+                RPL_WHOISACTUALLY,
+                &format!("{nick} {realip} :is actually using host"),
+            );
         }
         // 307: identified to a registered account (carries the +r registered umode)
         if account.is_some() {

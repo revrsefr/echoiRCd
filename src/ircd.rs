@@ -42,6 +42,11 @@ pub enum Event {
         uid: Uid,
         line: String,
     },
+    /// A client sent a line longer than we'll buffer; it was dropped at the I/O edge.
+    /// The core answers ERR_INPUTTOOLONG (417) so the client knows to resend shorter.
+    LineTooLong {
+        uid: Uid,
+    },
     Disconnect {
         uid: Uid,
     },
@@ -160,6 +165,7 @@ fn write_event_label(ev: &Event, out: &mut String) {
             }
         }
         Event::Line { line, .. } => push_verb(line, out),
+        Event::LineTooLong { .. } => out.push_str("line too long"),
         Event::Disconnect { .. } => out.push_str("disconnect"),
         Event::ResolvedHost { .. } => out.push_str("DNS/DNSBL result"),
         Event::Ident { .. } => out.push_str("ident result"),
@@ -320,6 +326,16 @@ impl Ircd {
                     }
                 } else {
                     self.on_line(uid, &line);
+                }
+            }
+            Event::LineTooLong { uid } => {
+                // only clients get 417; links never overflow (we control their traffic)
+                if !self.server.links.contains_key(&uid) {
+                    self.server.numeric(
+                        uid,
+                        crate::numeric::ERR_INPUTTOOLONG,
+                        ":Input line was too long",
+                    );
                 }
             }
             Event::Disconnect { uid } => {

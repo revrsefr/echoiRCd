@@ -148,8 +148,8 @@ impl Module for OperTypes {
         }
         srv.numeric(
             uid,
-            crate::numeric::ERR_NOPRIVILEGES,
-            &format!(":Permission denied — your \x02{title}\x02 oper type may not use {up}"),
+            crate::numeric::ERR_NOPRIVS,
+            &format!("{up} :Permission denied — your \x02{title}\x02 oper type may not use {up}"),
         );
         ModResult::Deny
     }
