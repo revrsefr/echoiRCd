@@ -19,7 +19,7 @@
 
 pub mod resp;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufReader, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::mpsc::SyncSender;
@@ -57,6 +57,24 @@ struct State {
     queue_max: usize,
     pending: HashMap<u64, Callback>,
     next_id: u64,
+    event_channel: String,          // cached bus channel (no per-event conf lookup)
+    events: Option<HashSet<String>>, // allow-set of event categories; None = all
+}
+
+/// Parse `redis_events` into an allow-set of event categories (`connect`, `join`, …).
+/// Unset, empty, or `*` means publish every category.
+fn event_filter(srv: &Server) -> Option<HashSet<String>> {
+    let raw = srv.conf("redis_events")?;
+    let raw = raw.trim();
+    if raw.is_empty() || raw == "*" {
+        return None;
+    }
+    let set: HashSet<String> = raw
+        .split([',', ' '])
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_ascii_lowercase())
+        .collect();
+    (!set.is_empty()).then_some(set)
 }
 
 /// Read `redis_*` config. Returns `None` (subsystem disabled) unless `redis_host` is set.
@@ -100,11 +118,18 @@ pub fn init(srv: &mut Server) {
         cfg.db,
         !cfg.password.is_empty()
     );
+    let event_channel = srv
+        .conf("redis_event_channel")
+        .unwrap_or("echoircd:events")
+        .to_string();
+    let events = event_filter(srv);
     srv.ext.set(State {
         queue,
         queue_max,
         pending: HashMap::new(),
         next_id: 1,
+        event_channel,
+        events,
     });
     // A one-shot PING confirms reachability at boot; the reply is logged when the loop runs.
     cmd(srv, &["PING"], |_srv, r| match r {
@@ -257,16 +282,23 @@ pub fn active(srv: &Server) -> bool {
 }
 
 /// Publish a tab-separated event line to the configured bus channel
-/// (`redis_event_channel`, default `echoircd:events`). A no-op — with no config read or
-/// allocation — when Redis is inactive, so callers on hot paths pay nothing when it's off.
+/// (`redis_event_channel`, default `echoircd:events`). The event category is `fields[0]`;
+/// if `redis_events` names an allow-set, categories outside it are skipped at the source.
+/// A no-op — with no allocation — when Redis is inactive, so callers on hot paths pay
+/// nothing when it's off.
 pub fn publish_event(srv: &mut Server, fields: &[&str]) {
-    if !active(srv) {
-        return;
-    }
-    let channel = srv
-        .conf("redis_event_channel")
-        .unwrap_or("echoircd:events")
-        .to_string();
+    let channel = {
+        let Some(st) = srv.ext.get::<State>() else {
+            return;
+        };
+        if let Some(allow) = &st.events {
+            match fields.first() {
+                Some(kind) if allow.contains(*kind) => {}
+                _ => return, // category filtered out by redis_events
+            }
+        }
+        st.event_channel.clone()
+    };
     publish(srv, &channel, &fields.join("\t"));
 }
 

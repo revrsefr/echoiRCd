@@ -594,6 +594,10 @@ redis {
     # redis_timeout  30;            # seconds a single command read may stall before failing
     # redis_queue_max 1024;         # backpressure: max queued commands before new ones are refused (min 16)
     # redis_event_channel "echoircd:events";  # pub/sub channel for the live event bus
+    # redis_events   "*";           # which event categories reach the bus (* = all). To trim
+    #                               # volume, list only what you want, e.g.
+    #                               # "connect quit oper kick xline" (drops join/part/nick).
+    #                               # Categories: connect quit nick join part kick oper xline
 }
 
 # SQL console — the oper command /SQL, for network administrators only (privilege
