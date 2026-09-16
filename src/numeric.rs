@@ -159,6 +159,7 @@ pub const ERR_INVALIDMODEPARAM: u16 = 696; // a mode was given an invalid parame
 pub const ERR_INVITEONLYCHAN: u16 = 473;
 pub const ERR_BADCHANNELKEY: u16 = 475;
 pub const ERR_BANLISTFULL: u16 = 478; // +b/+e/+I list at its per-channel cap
+pub const ERR_BADCHANNAME: u16 = 479; // JOIN to a syntactically invalid channel name
 pub const ERR_CHANOPRIVSNEEDED: u16 = 482;
 pub const ERR_CANTKILLSERVER: u16 = 483; // KILL was aimed at a server, not a user
 pub const RPL_RSACHALLENGE2: u16 = 386; // CHALLENGE: a chunk of the encrypted challenge

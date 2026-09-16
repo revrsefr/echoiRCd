@@ -722,7 +722,7 @@ impl Server {
     /// then broadcast JOIN and send TOPIC + NAMES. Queues the join hook.
     pub fn join(&mut self, uid: Uid, name: &str, key_arg: Option<&str>) {
         if !valid_chan(name, self.conf_num("maxchannel", 50usize)) {
-            self.numeric(uid, ERR_NOSUCHCHANNEL, &format!("{name} :No such channel"));
+            self.numeric(uid, ERR_BADCHANNAME, &format!("{name} :Invalid channel name"));
             return;
         }
         let key = name.to_ascii_lowercase();
