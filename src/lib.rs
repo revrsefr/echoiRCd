@@ -35,6 +35,7 @@ pub mod config;
 pub mod connguard;
 pub mod coremods;
 pub mod database;
+pub mod redis;
 pub mod extensible;
 pub mod help;
 pub mod http;

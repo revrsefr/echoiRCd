@@ -580,6 +580,22 @@ database {
     # provider "id=auth host=db.internal database=webapp user=app pass=\"p w\" pool=2";
 }
 
+# Native, non-blocking Redis client — the ephemeral / pub-sub companion to the pgsql
+# store (cache, counters with TTL, and a real-time event bus for the webpanel / Orbit /
+# external bots). Same off-core discipline; RESP2 wire, no unsafe. Redis is never the
+# source of truth (durable state stays in pgsql / services). Inert unless redis_host is set.
+redis {
+    # redis_host     "127.0.0.1";   # enable the subsystem by setting this
+    # redis_port     6379;
+    # redis_password "";            # (alias: redis_pass) — empty = no AUTH
+    # redis_db       0;             # SELECT database index
+    # redis_pool     2;             # worker connections / concurrent commands (1..16)
+    # redis_connect_timeout 5;      # seconds to wait for a connection
+    # redis_timeout  30;            # seconds a single command read may stall before failing
+    # redis_queue_max 1024;         # backpressure: max queued commands before new ones are refused (min 16)
+    # redis_event_channel "echoircd:events";  # pub/sub channel for the live event bus
+}
+
 # SQL console — the oper command /SQL, for network administrators only (privilege
 # servers/sql, held by netadmin). Read-only by default; runs off-core. See /SQL HELP.
 sqlquery

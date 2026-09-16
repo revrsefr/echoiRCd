@@ -114,6 +114,11 @@ pub enum Event {
         id: u64,
         result: crate::database::SqlResult,
     },
+    /// A Redis command finished on a worker thread — deliver it to its callback.
+    RedisResult {
+        id: u64,
+        result: crate::redis::RedisResult,
+    },
     /// A message arrived on a persistent bridge worker (e.g. the XMPP client), to be
     /// injected into the IRC `channel` from `sender`. Keyed by channel so it survives
     /// a bridge reload (indices don't).
@@ -180,6 +185,7 @@ fn write_event_label(ev: &Event, out: &mut String) {
             let _ = write!(out, "RPC {method}");
         }
         Event::SqlResult { .. } => out.push_str("SQL result"),
+        Event::RedisResult { .. } => out.push_str("Redis result"),
         Event::BridgeIn { channel, .. } => {
             let _ = write!(out, "bridge message -> {channel}");
         }
@@ -218,6 +224,7 @@ impl Ircd {
     ) -> Ircd {
         let mut server = Server::new(cfg, event_tx, conn_counter);
         crate::database::init(&mut server); // DB pool + central store — before the loads below
+        crate::redis::init(&mut server); // Redis pool (cache / counters / event bus) — inert unless redis_host set
         server.load_xlines(); // restore persisted bans
         crate::modules::metadata::load(&mut server); // restore channel metadata
         crate::modules::reputation::load(&mut server); // restore per-IP reputation
@@ -471,6 +478,9 @@ impl Ircd {
             }
             Event::SqlResult { id, result } => {
                 crate::database::on_result(&mut self.server, id, result)
+            }
+            Event::RedisResult { id, result } => {
+                crate::redis::on_result(&mut self.server, id, result)
             }
             Event::BridgeIn {
                 channel,
