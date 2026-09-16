@@ -576,21 +576,16 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
             && !s.users.get(&uid).map(|u| u.secure).unwrap_or(false)
         {
             if !notice {
-                let (tn, sn) = (
-                    s.users
-                        .get(&tuid)
-                        .map(|u| u.nick.clone())
-                        .unwrap_or_default(),
-                    s.users
-                        .get(&uid)
-                        .map(|u| u.nick.clone())
-                        .unwrap_or_default(),
+                let tn = s
+                    .users
+                    .get(&tuid)
+                    .map(|u| u.nick.clone())
+                    .unwrap_or_default();
+                s.numeric(
+                    uid,
+                    ERR_CANTSENDTOUSER,
+                    &format!("{tn} :You must use a TLS connection to message this user (+z)"),
                 );
-                let m = s.trf(
-                    "Cannot message {0}: a TLS connection is required (+z)",
-                    &[tn.as_str()],
-                );
-                s.send(uid, format!(":{} NOTICE {sn} :{m}", s.name));
             }
             return CmdResult::Fail;
         }
