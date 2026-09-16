@@ -354,6 +354,14 @@ impl Command for Authenticate {
             );
             return CmdResult::Fail;
         }
+        if s.is_logged_in(uid) {
+            s.numeric(
+                uid,
+                ERR_SASLALREADY,
+                ":You have already authenticated using SASL",
+            );
+            return CmdResult::Fail;
+        }
         let arg = &params[0];
         let mech = s.users.get(&uid).and_then(|u| u.sasl_mech.clone());
         // SASL is relayed to a linked services server (see `Server::sasl_relay`);

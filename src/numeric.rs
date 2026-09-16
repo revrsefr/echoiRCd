@@ -191,4 +191,5 @@ pub const RPL_SASLSUCCESS: u16 = 903;
 pub const ERR_SASLFAIL: u16 = 904;
 pub const ERR_SASLTOOLONG: u16 = 905;
 pub const ERR_SASLABORTED: u16 = 906;
+pub const ERR_SASLALREADY: u16 = 907; // already authenticated via SASL
 pub const RPL_SASLMECHS: u16 = 908;
