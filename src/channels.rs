@@ -1047,7 +1047,10 @@ impl Server {
         }
         if let Some(t) = self.channels[&key].topic.as_ref() {
             let text = t.text.clone();
+            let setter = t.setter.clone();
+            let ts = t.ts;
             self.numeric(uid, RPL_TOPIC, &format!("{name} :{text}"));
+            self.numeric(uid, RPL_TOPICWHOTIME, &format!("{name} {setter} {ts}"));
         }
         // no-implicit-names: a client that negotiated the cap doesn't want the
         // automatic NAMES burst after JOIN (it asks with NAMES when it needs it).
@@ -1198,7 +1201,10 @@ impl Server {
         self.send(m, joinline);
         if let Some(t) = self.channels.get(newkey).and_then(|c| c.topic.as_ref()) {
             let text = t.text.clone();
+            let setter = t.setter.clone();
+            let ts = t.ts;
             self.numeric(m, RPL_TOPIC, &format!("{newname} :{text}"));
+            self.numeric(m, RPL_TOPICWHOTIME, &format!("{newname} {setter} {ts}"));
         }
         self.send_names(m, newkey);
     }

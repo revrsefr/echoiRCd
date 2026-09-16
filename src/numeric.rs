@@ -123,6 +123,7 @@ pub const RPL_CHANNELMODEIS: u16 = 324;
 pub const RPL_CREATIONTIME: u16 = 329;
 pub const RPL_NOTOPIC: u16 = 331;
 pub const RPL_TOPIC: u16 = 332;
+pub const RPL_TOPICWHOTIME: u16 = 333; // who set the topic and when
 pub const RPL_WHOREPLY: u16 = 352;
 pub const RPL_WHOSPCRPL: u16 = 354; // WHOX: field-selected WHO reply
 pub const RPL_KEYVALUE: u16 = 761; // draft/metadata-2: <target> <key> <vis> :<value>

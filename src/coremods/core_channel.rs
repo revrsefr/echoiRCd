@@ -724,7 +724,10 @@ impl Command for TopicCmd {
             match s.channels[&key].topic.as_ref() {
                 Some(t) => {
                     let text = t.text.clone();
+                    let setter = t.setter.clone();
+                    let ts = t.ts;
                     s.numeric(uid, RPL_TOPIC, &format!("{target} :{text}"));
+                    s.numeric(uid, RPL_TOPICWHOTIME, &format!("{target} {setter} {ts}"));
                 }
                 None => s.numeric(uid, RPL_NOTOPIC, &format!("{target} :No topic is set")),
             }
