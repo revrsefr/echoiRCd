@@ -155,6 +155,7 @@ pub const ERR_USERNOTINCHANNEL: u16 = 441;
 pub const ERR_NOTONCHANNEL: u16 = 442;
 pub const ERR_CHANNELISFULL: u16 = 471;
 pub const ERR_UNKNOWNMODE: u16 = 472;
+pub const ERR_INVALIDMODEPARAM: u16 = 696; // a mode was given an invalid parameter
 pub const ERR_INVITEONLYCHAN: u16 = 473;
 pub const ERR_BADCHANNELKEY: u16 = 475;
 pub const ERR_BANLISTFULL: u16 = 478; // +b/+e/+I list at its per-channel cap

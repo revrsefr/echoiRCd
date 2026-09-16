@@ -34,6 +34,10 @@ pub trait ChanMode: Sync {
     fn is_list(&self) -> bool {
         false
     }
+    /// A prefix/status mode (+o/+v/…): excluded from the 696 invalid-param check.
+    fn is_prefix(&self) -> bool {
+        false
+    }
     /// Apply `+`/`-` to channel `key` (display name `chan`) on behalf of `uid`.
     fn apply(
         &self,
@@ -151,6 +155,9 @@ static VOICE: Prefix = Prefix {
 };
 
 impl ChanMode for Prefix {
+    fn is_prefix(&self) -> bool {
+        true
+    }
     fn letter(&self) -> char {
         self.ch
     }

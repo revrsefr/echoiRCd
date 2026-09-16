@@ -154,12 +154,26 @@ pub fn apply_mode(s: &mut Server, uid: Uid, params: &[String]) -> CmdResult {
         } else {
             None
         };
-        if let Applied::Yes(echo) = handler.apply(s, target, &key, uid, adding, param.as_deref()) {
-            emit(&mut applied, &mut last, sign, c);
-            changes.push((sign, c, echo.clone()));
-            if let Some(p) = echo {
-                echoed.push(p);
+        match handler.apply(s, target, &key, uid, adding, param.as_deref()) {
+            Applied::Yes(echo) => {
+                emit(&mut applied, &mut last, sign, c);
+                changes.push((sign, c, echo.clone()));
+                if let Some(p) = echo {
+                    echoed.push(p);
+                }
             }
+            // a value-param mode that consumed a param but didn't apply it → bad param
+            Applied::No
+                if adding && param.is_some() && !handler.is_list() && !handler.is_prefix() =>
+            {
+                let p = param.as_deref().unwrap_or("");
+                s.numeric(
+                    uid,
+                    ERR_INVALIDMODEPARAM,
+                    &format!("{target} {c} {p} :Invalid mode parameter"),
+                );
+            }
+            Applied::No => {}
         }
     }
     if !applied.is_empty() {
