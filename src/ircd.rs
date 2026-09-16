@@ -711,9 +711,7 @@ impl Ircd {
             (u.ident.clone(), u.host.clone(), u.addr.ip().to_string())
         };
         if let Some(reason) = self.server.matched_xline(&ident, &host, &ip) {
-            let m = self.server.trf("Closing link: ({0})", &[reason.as_str()]);
-            self.server.send(uid, format!("ERROR :{m}"));
-            self.server.remove_user(uid, &reason);
+            self.server.refuse_banned(uid, &reason);
             return;
         }
         // ident: apply a confirmed username (dropping `~`) and enforce requireident
@@ -736,9 +734,7 @@ impl Ircd {
             )
         };
         if let Some(reason) = rl {
-            let m = self.server.trf("Closing link: ({0})", &[reason.as_str()]);
-            self.server.send(uid, format!("ERROR :{m}"));
-            self.server.remove_user(uid, &reason);
+            self.server.refuse_banned(uid, &reason);
             return;
         }
         // connectclass: verify the class password and apply its on-connect modes.

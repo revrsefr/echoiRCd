@@ -86,6 +86,7 @@ pub const RPL_ISUPPORT: u16 = 5;
 pub const RPL_UMODEIS: u16 = 221;
 pub const RPL_YOUREOPER: u16 = 381;
 pub const ERR_PASSWDMISMATCH: u16 = 464;
+pub const ERR_YOUREBANNEDCREEP: u16 = 465; // refused: banned (K/G/Z/R-line, DNSBL)
 pub const ERR_TOOMANYCHANNELS: u16 = 405;
 pub const ERR_NOPRIVILEGES: u16 = 481;
 pub const ERR_UMODEUNKNOWNFLAG: u16 = 501;

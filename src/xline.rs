@@ -356,9 +356,7 @@ impl Server {
             .map(|(&uid, _)| uid)
             .collect();
         for uid in victims {
-            let m = self.trf("Closing link: (R-lined: {0})", &[reason]);
-            self.send(uid, format!("ERROR :{m}"));
-            self.remove_user(uid, &format!("R-lined: {reason}"));
+            self.refuse_banned(uid, &format!("R-lined: {reason}"));
         }
     }
 
@@ -461,6 +459,14 @@ impl Server {
         removed
     }
 
+    /// Refuse a banned user: ERR_YOUREBANNEDCREEP (465), then ERROR + close.
+    pub fn refuse_banned(&mut self, uid: Uid, reason: &str) {
+        self.numeric(uid, crate::numeric::ERR_YOUREBANNEDCREEP, &format!(":{reason}"));
+        let m = self.trf("Closing link: ({0})", &[reason]);
+        self.send(uid, format!("ERROR :{m}"));
+        self.remove_user(uid, reason);
+    }
+
     /// Kill every connected local user that now matches an active x-line.
     pub fn enforce_xlines(&mut self) {
         let candidates: Vec<(Uid, String, String, String)> = self
@@ -483,9 +489,7 @@ impl Server {
             })
             .collect();
         for (uid, reason) in victims {
-            let m = self.trf("Closing link: ({0})", &[reason.as_str()]);
-            self.send(uid, format!("ERROR :{m}"));
-            self.remove_user(uid, &reason);
+            self.refuse_banned(uid, &reason);
         }
     }
 

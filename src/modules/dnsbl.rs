@@ -266,9 +266,7 @@ fn act(s: &mut Server, uid: Uid, domain: &str, reply: Ipv4Addr) {
     if closes {
         // pre-registration users aren't caught by add_xline's enforce sweep, so close
         // this connection explicitly (the ERROR flushes before the socket).
-        let m = s.trf("Closing link: ({0})", &[reason.as_str()]);
-        s.send(uid, format!("ERROR :{m}"));
-        s.remove_user(uid, &reason);
+        s.refuse_banned(uid, &reason);
     }
 }
 
