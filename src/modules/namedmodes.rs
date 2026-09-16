@@ -7,7 +7,7 @@
 use crate::command::{CmdResult, Command};
 use crate::coremods::core_mode::apply_mode;
 use crate::mode::chan_mode;
-use crate::numeric::ERR_NOSUCHCHANNEL;
+use crate::numeric::{ERR_NOSUCHCHANNEL, RPL_ENDOFPROPLIST, RPL_PROPLIST};
 use crate::server::Server;
 use crate::Uid;
 
@@ -94,25 +94,32 @@ impl Command for Prop {
         // no changes → list the modes currently set, by name
         if params.len() < 2 {
             let rendered = s.channels[&key].modes.render(s.is_member(uid, &key));
-            let letters = rendered
-                .trim_start_matches(['+', '-'])
-                .split(' ')
-                .next()
-                .unwrap_or("");
-            let names: Vec<&str> = letters.chars().filter_map(letter_to_name).collect();
-            let nick = s
-                .users
-                .get(&uid)
-                .map(|u| u.nick.clone())
-                .unwrap_or_default();
-            s.send(
-                uid,
-                format!(
-                    ":{} NOTICE {nick} :{target} modes: {} ({rendered})",
-                    s.name,
-                    names.join(" ")
-                ),
-            );
+            let body = rendered.trim_start_matches(['+', '-']);
+            let mut fields = body.split(' ');
+            let letters = fields.next().unwrap_or("").to_string();
+            let vals: Vec<String> = fields.map(str::to_string).collect();
+            let mut vi = 0;
+            for ch in letters.chars() {
+                let Some(name) = letter_to_name(ch) else {
+                    continue;
+                };
+                let has_val = crate::mode::chan_mode(ch)
+                    .map(|m| m.wants_param(true))
+                    .unwrap_or(false);
+                let v = if has_val {
+                    let got = vals.get(vi).cloned().unwrap_or_default();
+                    vi += 1;
+                    got
+                } else {
+                    String::new()
+                };
+                if v.is_empty() {
+                    s.numeric(uid, RPL_PROPLIST, &format!("{target} {name}"));
+                } else {
+                    s.numeric(uid, RPL_PROPLIST, &format!("{target} {name} {v}"));
+                }
+            }
+            s.numeric(uid, RPL_ENDOFPROPLIST, &format!("{target} :End of mode list"));
             return CmdResult::Ok;
         }
         // translate `+name [value] -name …` into a MODE string + ordered args, then
