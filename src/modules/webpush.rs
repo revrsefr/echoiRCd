@@ -431,6 +431,9 @@ impl Module for WebPush {
     fn name(&self) -> &'static str {
         "webpush"
     }
+    fn description(&self) -> &'static str {
+        "draft/webpush: Web Push (RFC 8291/8292) alerts for PMs/highlights while away"
+    }
 
     fn on_pre_message(&mut self, s: &mut Server, uid: Uid, target: &str, text: &str) -> ModResult {
         // Fire pushes as a side effect; never affect delivery of the message itself.

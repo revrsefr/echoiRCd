@@ -127,6 +127,9 @@ impl Module for Filter {
     fn name(&self) -> &'static str {
         "filter"
     }
+    fn description(&self) -> &'static str {
+        "Oper-configured glob spam/word filters on messages, with per-hit actions (FILTER)"
+    }
     fn on_pre_message(&mut self, s: &mut Server, uid: Uid, _target: &str, text: &str) -> ModResult {
         let Some((action, reason, duration)) = s.ext.get::<Filters>().and_then(|f| f.hit(text))
         else {

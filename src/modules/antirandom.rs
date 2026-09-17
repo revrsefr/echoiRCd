@@ -109,6 +109,9 @@ impl Module for AntiRandom {
     fn name(&self) -> &'static str {
         "antirandom"
     }
+    fn description(&self) -> &'static str {
+        "Detects spam drones by scoring random-looking nick/ident/realname"
+    }
 
     fn on_user_register(&mut self, srv: &mut Server, uid: Uid) -> ModResult {
         if !srv.conf_bool("antirandom", false) {

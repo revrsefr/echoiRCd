@@ -359,6 +359,9 @@ impl Module for PermChannels {
     fn name(&self) -> &'static str {
         "permchannels"
     }
+    fn description(&self) -> &'static str {
+        "Persists +P permanent channels (modes, topic, bans) across restarts"
+    }
 
     fn on_post_command(&mut self, srv: &mut Server, _uid: Uid, cmd: &str) {
         // Persist promptly when a command could have changed a permanent channel's

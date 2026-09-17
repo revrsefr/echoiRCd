@@ -87,6 +87,9 @@ impl Module for ReCaptcha {
     fn name(&self) -> &'static str {
         "recaptcha"
     }
+    fn description(&self) -> &'static str {
+        "Gates registration behind a reCAPTCHA (IP-bound token via CAPTCHA)"
+    }
     fn on_user_quit(&mut self, s: &mut Server, uid: Uid, _reason: &str) {
         if let Some(v) = s.ext.get_mut::<Verified>() {
             v.0.remove(&uid);

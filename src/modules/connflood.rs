@@ -59,6 +59,9 @@ impl Module for ConnFlood {
     fn name(&self) -> &'static str {
         "connflood"
     }
+    fn description(&self) -> &'static str {
+        "Refuses connections from an IP opening too many too fast"
+    }
     fn on_tick(&mut self, s: &mut Server) {
         let Some((_, secs)) = cfg(s) else {
             return;

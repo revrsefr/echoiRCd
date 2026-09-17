@@ -116,6 +116,9 @@ impl Module for Bridge {
     fn name(&self) -> &'static str {
         "bridge"
     }
+    fn description(&self) -> &'static str {
+        "In-core channel bridges to Telegram, Matrix and XMPP (no external bouncer)"
+    }
 
     /// IRC → remote: forward a local user's channel message to the mapped network.
     fn on_pre_message(

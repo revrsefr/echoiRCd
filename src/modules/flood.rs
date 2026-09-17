@@ -26,6 +26,9 @@ impl Module for Flood {
     fn name(&self) -> &'static str {
         "flood"
     }
+    fn description(&self) -> &'static str {
+        "Per-user message-rate flood limit (opers exempt; per-class overridable)"
+    }
 
     fn on_pre_message(
         &mut self,

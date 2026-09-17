@@ -90,6 +90,9 @@ impl Module for FileHost {
     fn name(&self) -> &'static str {
         "filehost"
     }
+    fn description(&self) -> &'static str {
+        "Advertises a file-host and issues signed upload links to logged-in users"
+    }
 
     fn on_pre_message(
         &mut self,

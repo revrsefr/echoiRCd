@@ -11,6 +11,9 @@ impl Module for Snoop {
     fn name(&self) -> &'static str {
         "snoop"
     }
+    fn description(&self) -> &'static str {
+        "Logs client connects, joins and quits to the server log"
+    }
     fn on_user_connect(&mut self, srv: &mut Server, uid: Uid) {
         // `conf_bool`/`snotice_c` are `&self`, so we can hold the `&User` borrow and
         // reference its fields directly instead of cloning them out.

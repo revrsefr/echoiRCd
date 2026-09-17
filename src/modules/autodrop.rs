@@ -25,6 +25,9 @@ impl Module for AutoDrop {
     fn name(&self) -> &'static str {
         "autodrop"
     }
+    fn description(&self) -> &'static str {
+        "Silently drops unregistered clients that send configured junk (e.g. HTTP scanners)"
+    }
 
     fn on_pre_command(
         &mut self,

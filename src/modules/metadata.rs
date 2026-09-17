@@ -32,6 +32,9 @@ impl Module for Metadata {
     fn name(&self) -> &'static str {
         "metadata"
     }
+    fn description(&self) -> &'static str {
+        "IRCv3 draft/metadata-2: key/value metadata on users and channels"
+    }
     fn on_user_quit(&mut self, s: &mut Server, uid: Uid, _reason: &str) {
         if let Some(st) = s.ext.get_mut::<MetaStore>() {
             st.0.remove(&format!("u{uid}"));

@@ -71,6 +71,9 @@ impl Module for SecureList {
     fn name(&self) -> &'static str {
         "securelist"
     }
+    fn description(&self) -> &'static str {
+        "Delays /LIST for freshly-connected users (defeats LIST-spam bots)"
+    }
 
     fn on_pre_command(
         &mut self,

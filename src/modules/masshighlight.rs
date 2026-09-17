@@ -56,6 +56,9 @@ impl Module for MassHighlight {
     fn name(&self) -> &'static str {
         "masshighlight"
     }
+    fn description(&self) -> &'static str {
+        "Blocks a channel message that mass-highlights too many members"
+    }
     fn on_pre_message(&mut self, s: &mut Server, uid: Uid, target: &str, text: &str) -> ModResult {
         let limit = s.conf_num("masshighlight", 0usize);
         if limit == 0 || !target.starts_with('#') {

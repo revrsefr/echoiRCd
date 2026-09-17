@@ -276,8 +276,8 @@ impl Command for Modules {
             );
             return CmdResult::Fail;
         }
-        for name in crate::modules::module_names() {
-            s.numeric(uid, RPL_MODLIST, &format!("{name} :loaded"));
+        for (name, desc) in crate::modules::module_list() {
+            s.numeric(uid, RPL_MODLIST, &format!("{name} :{desc}"));
         }
         s.numeric(uid, RPL_ENDOFMODLIST, ":End of MODULES list");
         CmdResult::Ok

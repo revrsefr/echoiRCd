@@ -20,6 +20,9 @@ impl Module for MetricsLog {
     fn name(&self) -> &'static str {
         "metricslog"
     }
+    fn description(&self) -> &'static str {
+        "draft/metrics cap + METRICS command: server counters/gauges as JSON over IRC"
+    }
 
     /// Push the snapshot to subscribed opers every `metrics_push_interval` seconds
     /// (0 disables the push; the `METRICS` command still works).

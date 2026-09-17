@@ -122,6 +122,9 @@ impl Module for Multiline {
     fn name(&self) -> &'static str {
         "multiline"
     }
+    fn description(&self) -> &'static str {
+        "IRCv3 draft/multiline: reassembles long messages sent as a batch"
+    }
     fn on_user_quit(&mut self, s: &mut Server, uid: Uid, _reason: &str) {
         if let Some(m) = s.ext.get_mut::<Mline>() {
             m.0.remove(&uid);

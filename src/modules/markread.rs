@@ -168,6 +168,9 @@ impl Module for MarkRead {
     fn name(&self) -> &'static str {
         "markread"
     }
+    fn description(&self) -> &'static str {
+        "IRCv3 draft/read-marker: per-conversation last-read markers (account-shared)"
+    }
     fn on_user_quit(&mut self, s: &mut Server, uid: Uid, _reason: &str) {
         if let Some(m) = s.ext.get_mut::<ReadMarkers>() {
             m.0.remove(&format!("~{uid}"));

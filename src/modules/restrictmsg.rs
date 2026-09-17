@@ -14,6 +14,9 @@ impl Module for RestrictMsg {
     fn name(&self) -> &'static str {
         "restrictmsg"
     }
+    fn description(&self) -> &'static str {
+        "Blocks user-to-user private messages (opers, services and bots stay reachable)"
+    }
 
     fn on_pre_message(
         &mut self,

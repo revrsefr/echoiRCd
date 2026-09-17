@@ -145,6 +145,14 @@ pub fn module_names() -> Vec<String> {
         .collect()
 }
 
+/// `(name, description)` for every module loaded at boot — drives `/MODULES`.
+pub fn module_list() -> Vec<(String, String)> {
+    default_modules()
+        .iter()
+        .map(|m| (m.name().to_string(), m.description().to_string()))
+        .collect()
+}
+
 /// Commands contributed by modules (chained into the core command table), so a
 /// module that adds a command keeps it in its own file.
 pub fn module_commands() -> Vec<Box<dyn Command>> {

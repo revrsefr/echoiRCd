@@ -20,6 +20,9 @@ impl Module for EventPlayback {
     fn name(&self) -> &'static str {
         "event-playback"
     }
+    fn description(&self) -> &'static str {
+        "draft/event-playback: replays channel events (join/part/mode/…) in history"
+    }
 
     fn on_join(&mut self, srv: &mut Server, uid: Uid, chan: &str) {
         let Some(prefix) = srv.users.get(&uid).map(|u| u.prefix()) else {

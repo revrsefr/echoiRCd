@@ -133,6 +133,9 @@ impl Module for ReputationMod {
     fn name(&self) -> &'static str {
         "reputation"
     }
+    fn description(&self) -> &'static str {
+        "Per-address reputation scoring that grows with well-behaved uptime"
+    }
     fn on_tick(&mut self, s: &mut Server) {
         let t = crate::server::TICK_SECS;
         self.since_bump += t;

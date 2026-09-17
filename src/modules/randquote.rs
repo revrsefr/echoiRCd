@@ -25,6 +25,9 @@ impl Module for RandQuote {
     fn name(&self) -> &'static str {
         "randquote"
     }
+    fn description(&self) -> &'static str {
+        "Greets each connecting user with a random configured quote"
+    }
 
     fn on_user_connect(&mut self, srv: &mut Server, uid: Uid) {
         let quotes = srv.conf_all("randquote");

@@ -235,6 +235,9 @@ impl Module for AntiMixedUtf8 {
     fn name(&self) -> &'static str {
         "antimixedutf8"
     }
+    fn description(&self) -> &'static str {
+        "Blocks messages mixing Unicode scripts within words (confusable-glyph spam)"
+    }
 
     fn on_pre_message(
         &mut self,

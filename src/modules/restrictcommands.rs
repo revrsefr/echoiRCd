@@ -109,6 +109,9 @@ impl Module for RestrictCommands {
     fn name(&self) -> &'static str {
         "restrictcommands"
     }
+    fn description(&self) -> &'static str {
+        "Holds back configured commands from new/unregistered users (with exemptions)"
+    }
 
     fn on_pre_command(
         &mut self,

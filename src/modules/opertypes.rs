@@ -125,6 +125,9 @@ impl Module for OperTypes {
     fn name(&self) -> &'static str {
         "opertypes"
     }
+    fn description(&self) -> &'static str {
+        "Oper classes and named types (capability bundles, auto modes, WHOIS title)"
+    }
     fn on_pre_command(
         &mut self,
         srv: &mut Server,

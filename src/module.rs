@@ -35,6 +35,11 @@ pub enum Hook {
 pub trait Module: Send {
     fn name(&self) -> &'static str;
 
+    /// One-line summary of what the module does, shown in `/MODULES`.
+    fn description(&self) -> &'static str {
+        ""
+    }
+
     // --- pre-hooks (can Deny) ------------------------------------------------
 
     /// Last gate before a client finishes registration. `Deny` refuses the link.

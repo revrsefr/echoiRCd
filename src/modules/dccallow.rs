@@ -73,6 +73,9 @@ impl Module for DccAllow {
     fn name(&self) -> &'static str {
         "dccallow"
     }
+    fn description(&self) -> &'static str {
+        "Blocks DCC SEND/CHAT by filename glob unless allowed via /DCCALLOW"
+    }
 
     fn on_pre_message(&mut self, s: &mut Server, uid: Uid, target: &str, text: &str) -> ModResult {
         let Some(dcc) = parse_dcc(text) else {

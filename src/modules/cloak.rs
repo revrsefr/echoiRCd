@@ -30,6 +30,9 @@ impl Module for Cloak {
     fn name(&self) -> &'static str {
         "cloak"
     }
+    fn description(&self) -> &'static str {
+        "Keyed hostname masking via user mode +x (requires cloak_key)"
+    }
 
     /// Compute the cloak once, at connect, and cloak the user by default (+x).
     fn on_user_connect(&mut self, srv: &mut Server, uid: Uid) {

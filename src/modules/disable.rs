@@ -21,6 +21,9 @@ impl Module for Disable {
     fn name(&self) -> &'static str {
         "disable"
     }
+    fn description(&self) -> &'static str {
+        "Refuses configured commands to ordinary users (opers bypass)"
+    }
 
     fn on_pre_command(
         &mut self,

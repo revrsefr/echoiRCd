@@ -17,6 +17,9 @@ impl Module for TargetLimit {
     fn name(&self) -> &'static str {
         "targetlimit"
     }
+    fn description(&self) -> &'static str {
+        "Throttles how many distinct message targets a user hits in a burst"
+    }
 
     fn on_pre_message(
         &mut self,

@@ -78,6 +78,9 @@ impl Module for CloudflareChallenge {
     fn name(&self) -> &'static str {
         "cloudflare_challenge"
     }
+    fn description(&self) -> &'static str {
+        "Gates registration behind a challenge JWT (VERIFYCHALLENGE token)"
+    }
     fn on_user_quit(&mut self, s: &mut Server, uid: Uid, _reason: &str) {
         if let Some(p) = s.ext.get_mut::<Passed>() {
             p.0.remove(&uid);

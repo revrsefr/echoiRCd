@@ -23,6 +23,9 @@ impl Module for IrcCloudTags {
     fn name(&self) -> &'static str {
         "irccloudtags"
     }
+    fn description(&self) -> &'static str {
+        "Validates IRCCloud client-only message tags (reactions, edits, attachments)"
+    }
 
     fn on_pre_command(
         &mut self,

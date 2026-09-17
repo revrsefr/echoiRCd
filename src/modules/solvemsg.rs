@@ -29,6 +29,9 @@ impl Module for SolveMsg {
     fn name(&self) -> &'static str {
         "solvemsg"
     }
+    fn description(&self) -> &'static str {
+        "Requires unknown users to answer a math question before their PMs deliver"
+    }
 
     fn on_pre_message(&mut self, s: &mut Server, uid: Uid, target: &str, text: &str) -> ModResult {
         if !s.conf_bool("solvemsg", false) {

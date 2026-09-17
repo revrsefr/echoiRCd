@@ -150,6 +150,9 @@ impl Module for ChatHistoryGc {
     fn name(&self) -> &'static str {
         "chathistory"
     }
+    fn description(&self) -> &'static str {
+        "IRCv3 draft/chathistory + message-redaction: replayable per-conversation backlog"
+    }
     fn on_tick(&mut self, s: &mut Server) {
         let maxage = s.conf_num("chathistory_maxage", 604800u64);
         if maxage == 0 {

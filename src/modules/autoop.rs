@@ -14,6 +14,9 @@ impl Module for AutoOp {
     fn name(&self) -> &'static str {
         "autoop"
     }
+    fn description(&self) -> &'static str {
+        "Channel +w list: auto-grants a status prefix to matching users on join"
+    }
 
     fn on_join(&mut self, s: &mut Server, uid: Uid, chan: &str) {
         let key = chan.to_ascii_lowercase();

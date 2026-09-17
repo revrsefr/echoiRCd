@@ -136,6 +136,9 @@ impl Module for ConnectBan {
     fn name(&self) -> &'static str {
         "connectban"
     }
+    fn description(&self) -> &'static str {
+        "Z-lines an IP range that opens too many connections"
+    }
     fn on_tick(&mut self, s: &mut Server) {
         if !s.conf_bool("connectban", false) {
             return;

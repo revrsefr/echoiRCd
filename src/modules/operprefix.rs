@@ -92,6 +92,9 @@ impl Module for OperPrefix {
     fn name(&self) -> &'static str {
         "operprefix"
     }
+    fn description(&self) -> &'static str {
+        "Gives IRC opers a distinct ! prefix (mode +y) in every channel"
+    }
     fn on_join(&mut self, s: &mut Server, uid: Uid, chan: &str) {
         join_grant(s, uid, &chan.to_ascii_lowercase());
     }

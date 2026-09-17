@@ -11,6 +11,9 @@ impl Module for MapHide {
     fn name(&self) -> &'static str {
         "maphide"
     }
+    fn description(&self) -> &'static str {
+        "Hides LINKS/MAP from non-opers (network-topology privacy)"
+    }
 
     fn on_pre_command(
         &mut self,

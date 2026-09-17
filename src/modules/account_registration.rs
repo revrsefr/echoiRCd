@@ -39,6 +39,9 @@ impl Module for AcctRegGc {
     fn name(&self) -> &'static str {
         "account_registration"
     }
+    fn description(&self) -> &'static str {
+        "IRCv3 draft/account-registration (REGISTER/VERIFY) bridged to an HTTP accounts API"
+    }
     fn on_tick(&mut self, s: &mut Server) {
         let window = s.conf_num("acctregister_ratetime", 3600u64);
         let n = now();

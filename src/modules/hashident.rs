@@ -38,6 +38,9 @@ impl Module for HashIdent {
     fn name(&self) -> &'static str {
         "hashident"
     }
+    fn description(&self) -> &'static str {
+        "Replaces ident with a stable opaque token derived from the client IP"
+    }
 
     fn on_user_connect(&mut self, srv: &mut Server, uid: Uid) {
         if !srv.conf_bool("hashident", false) {
