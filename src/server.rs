@@ -581,6 +581,11 @@ impl Server {
             return;
         }
 
+        // jumpserver — redirect a new (non-loopback) connection when a target is set
+        if crate::modules::jumpserver::redirect(self, uid, ip) {
+            return;
+        }
+
         // connectban — z-line an IP range that opens too many connections (see modules::connectban)
         crate::modules::connectban::on_connect(self, ip);
 

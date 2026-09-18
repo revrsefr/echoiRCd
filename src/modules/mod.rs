@@ -48,6 +48,7 @@ pub mod hidewhois;
 pub mod ident;
 pub mod irccloudtags;
 pub mod jsonlog;
+pub mod jumpserver;
 pub mod jwt;
 pub mod lockserv;
 pub mod log_json;
@@ -186,6 +187,7 @@ pub fn extra_module_list() -> Vec<(&'static str, &'static str)> {
         ("hidewhois", "Hides sensitive WHOIS lines (server, idle, secure) from ordinary users"),
         ("ident", "Optional RFC 1413 ident lookups on connect"),
         ("jsonlog", "draft/json-log cap — an oper's server notices delivered as structured JSON"),
+        ("jumpserver", "JUMPSERVER — redirect new connections to another server (RPL_REDIR)"),
         ("lockserv", "LOCKSERV/UNLOCKSERV — stop and resume new local connections"),
         ("log_json", "Appends the log/snotice stream to a file as JSON lines (JSONL)"),
         ("metrics", "Optional Prometheus/OpenMetrics HTTP endpoint"),
@@ -260,5 +262,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(userip::commands())
         .chain(modenotice::commands())
         .chain(lockserv::commands())
+        .chain(jumpserver::commands())
         .collect()
 }
