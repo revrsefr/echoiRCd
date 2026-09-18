@@ -832,6 +832,21 @@ impl ChanMode for ListMode {
                 return Applied::No;
             }
         }
+        // classban (C:) may be limited to opers with `classban_operonly`
+        if adding
+            && matches!(self.kind, ListKind::Ban)
+            && mask.starts_with("C:")
+            && !s.mode_sudo
+            && s.conf_bool("classban_operonly", false)
+            && !s.is_oper(uid)
+        {
+            s.numeric(
+                uid,
+                ERR_CHANOPRIVSNEEDED,
+                &format!("{chan} :Only operators may set a class ban (C:)"),
+            );
+            return Applied::No;
+        }
         let mask = if self.kind.normalizes() {
             normalize_ban_mask(mask)
         } else {

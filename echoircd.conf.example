@@ -308,6 +308,8 @@ connections {
 #     connectclass "byasn   allow=* asn=3215,16276";  # only these origin ASNs (needs geoip_asn_database)
 #     connectclass "eu      allow=* country=FR,DE,GB"; # only these GeoIP countries (needs geoip_database)
 #     connectclass_required yes;   # refuse clients that match no allow class (default no)
+# class ban: MODE #chan +b C:<class-glob> bans users by their connect class name.
+# classban_operonly yes;         # only opers may set a C: class ban (default no)
 # }
 
 

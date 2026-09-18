@@ -18,6 +18,7 @@ pub mod chanlog;
 pub mod channames;
 pub mod channelban;
 pub mod chathistory;
+pub mod classban;
 pub mod clearmode;
 pub mod cloak;
 pub mod clones;
@@ -171,6 +172,7 @@ pub fn extra_module_list() -> Vec<(&'static str, &'static str)> {
         ("chanlog", "Mirrors the oper server-notice (snotice) stream into a channel"),
         ("channames", "Restricts which characters may appear in new channel names"),
         ("channelban", "j: extban — match/ban a user by another channel they are in"),
+        ("classban", "C: extban — match/ban a user by their connect class name"),
         ("clearmode", "CLEARMODE — strip all channel modes and the +b/+e/+I lists at once"),
         ("clones", "CLONES — list local IPs with multiple connections (clone floods)"),
         ("connclass", "Connection classes — match clients by IP/host, apply per-class limits"),
