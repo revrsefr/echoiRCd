@@ -295,7 +295,7 @@ connections {
 #     clients by IP/host mask (glob OR CIDR) + optional TLS/port; first match
 #     wins, else the global limits apply. One quoted value string per class:
 #       allow=<mask[,mask]> deny=yes parent=<name> requiressl=yes|trusted
-#       password=<pw> hash=<algo> port=<p[,p]> asn=<n[,n]> localmax=<n> globalmax=<n>
+#       password=<pw> hash=<algo> port=<p[,p]> asn=<n[,n]> country=<cc[,cc]> localmax=<n> globalmax=<n>
 #       limit=<n> maxchans=<n> pingfreq=<s> timeout=<s> modes=<+modes>
 #       recvq=<bytes> softsendq=<bytes> hardsendq=<bytes> fakelag=no
 #       penaltythreshold=<n> commandrate=<s> useident=yes requireident=yes
@@ -306,6 +306,7 @@ connections {
 #     connectclass "vpn     allow=* parent=trusted localmax=2 maxchans=20 modes=+ix";
 #     connectclass "banned  allow=1.2.3.0/24 deny=yes";
 #     connectclass "byasn   allow=* asn=3215,16276";  # only these origin ASNs (needs geoip_asn_database)
+#     connectclass "eu      allow=* country=FR,DE,GB"; # only these GeoIP countries (needs geoip_database)
 #     connectclass_required yes;   # refuse clients that match no allow class (default no)
 # }
 

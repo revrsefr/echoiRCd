@@ -37,6 +37,7 @@ pub struct ConnClass {
     pub password: Option<String>, // PASS credential (plain or hashed; verify auto-detects)
     pub ports: Vec<u16>,    // restrict to these listener ports (empty = any)
     pub asn: Vec<u32>,      // restrict to these origin AS numbers (empty = any)
+    pub countries: Vec<String>, // restrict to these GeoIP country codes (empty = any; geoclass)
     pub localmax: Option<usize>, // max local connections per IP in this class
     pub globalmax: Option<usize>, // max network-wide connections per IP
     pub limit: Option<usize>, // max total local users in this class
@@ -80,6 +81,9 @@ fn apply(c: &mut ConnClass, k: &str, v: &str) {
             .ports
             .extend(list(v).filter_map(|p| p.parse::<u16>().ok())),
         "asn" => c.asn.extend(crate::modules::asn::parse_list(v)),
+        "country" | "countries" => c
+            .countries
+            .extend(list(v).map(|x| x.to_ascii_uppercase())),
         "localmax" => c.localmax = v.parse().ok(),
         "globalmax" => c.globalmax = v.parse().ok(),
         "limit" => c.limit = v.parse().ok(),
@@ -295,6 +299,18 @@ fn pick(
         }
         if !c.asn.is_empty() && !asn.is_some_and(|a| c.asn.contains(&a)) {
             continue;
+        }
+        // geoclass — restrict the class to clients from listed GeoIP countries. With
+        // geoip off (or an unknown IP) a country-gated class simply never matches.
+        if !c.countries.is_empty() {
+            let cc = ip
+                .parse::<std::net::IpAddr>()
+                .ok()
+                .and_then(|a| crate::modules::geoip::lookup(s, a))
+                .map(|country| country.iso.to_ascii_uppercase());
+            if !cc.map(|cc| c.countries.contains(&cc)).unwrap_or(false) {
+                continue;
+            }
         }
         if c.deny {
             return Pick::Deny(c.name);
