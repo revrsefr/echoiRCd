@@ -711,6 +711,9 @@ modules {
 #   wsguard_min_headers  6;        # a browser handshake has at least this many headers
 #   wsguard_tools        "websocat";  # extra User-Agent substrings marking a tool (repeatable)
 #   wsguard_exempt_origin "https://chat.x";  # Origin globs never scored (repeatable)
+#   wsguard_exempt_ip    "10.0.0.0/8";  # IPs/ranges never z-lined in zline mode (repeatable).
+#                                       # loopback and every ws_proxyranges entry are ALWAYS
+#                                       # exempt from the ban, so zline can't take out the proxy.
 #   # per-signal weights (defaults shown): wsguard_w_no_ua 3, w_nonbrowser_ua 2,
 #   #   w_tool_ua 5, w_no_origin 1, w_no_extensions 2, w_no_accept_encoding 1,
 #   #   w_no_accept_language 1, w_bad_version 3, w_few_headers 2

@@ -187,7 +187,7 @@ pub fn on_fake(s: &mut Server, ip: IpAddr, reason: String, ban: bool) {
         &[ip_s.as_str(), reason.as_str()],
     );
     s.snotice_c('c', &m);
-    if ban {
+    if ban && !ban_exempt(s, ip, &ip_s) {
         let dur = s.conf_num("wsguard_zline_duration", 3600u64);
         s.add_xline(
             XKind::Zline,
@@ -197,6 +197,22 @@ pub fn on_fake(s: &mut Server, ip: IpAddr, reason: String, ban: bool) {
             &format!("fake WebSocket: {reason}"),
         );
     }
+}
+
+/// Never z-line loopback, a configured WS reverse proxy (`ws_proxyranges`), or an
+/// admin-exempted range (`wsguard_exempt_ip`). A fake reported as one of these means
+/// the real client IP wasn't forwarded, so banning it would take out the proxy / local
+/// infrastructure rather than the abuser. The detection is still reported either way.
+fn ban_exempt(s: &Server, ip: IpAddr, ip_s: &str) -> bool {
+    if ip.is_loopback() {
+        return true;
+    }
+    let listed = |key: &str| {
+        s.conf_all(key)
+            .iter()
+            .any(|r| crate::modules::connclass::ip_matches(r, ip_s))
+    };
+    listed("ws_proxyranges") || listed("wsguard_exempt_ip")
 }
 
 #[cfg(test)]
