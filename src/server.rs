@@ -573,6 +573,14 @@ impl Server {
             return;
         }
 
+        // lockserv — refuse a new (non-loopback) connection when the server is locked
+        if crate::modules::lockserv::blocked(self, ip) {
+            let m = self.trf("Closing link: (Server is not accepting new connections)", &[]);
+            self.send(uid, format!("ERROR :{m}"));
+            self.remove_user(uid, "Server locked");
+            return;
+        }
+
         // connectban — z-line an IP range that opens too many connections (see modules::connectban)
         crate::modules::connectban::on_connect(self, ip);
 
