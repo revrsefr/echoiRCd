@@ -1406,7 +1406,7 @@ impl Server {
         change_remote
     }
 
-    /// Remote-vs-remote nick collision (TS6, mirrors InspIRCd `DoCollision`). An
+    /// Remote-vs-remote nick collision, resolved by TS6 timestamp arbitration. An
     /// existing remote user (`existing_uuid`) already holds the nick the incoming
     /// remote user (`remote_uuid`, on server `remote_sid`) wants. Force-rename the
     /// loser to its UUID: the existing one right here + a network-wide SAVE broadcast;
