@@ -699,3 +699,18 @@ modules {
 #     ws_ping_interval      60;    # seconds between WebSocket keepalive pings
 #     ws_timeout            120;   # drop after this many seconds of silence
 # }
+#
+# wsguard — flag WebSocket handshakes that don't look like a real browser (terminal
+# tools like websocat/wscat/curl, or bare bots). Scores the request headers a browser
+# is forced to send (Origin, real User-Agent, Sec-WebSocket-Extensions, Accept-*) and
+# acts on a threshold. A determined bot can forge every header, so this catches the
+# lazy fakes and raises the cost — it is not proof of a browser. Off by default.
+#   wsguard              report;   # off | report (snotice only) | reject (refuse) | zline
+#   wsguard_threshold    5;        # score at which a handshake is flagged
+#   wsguard_zline_duration 3600;   # seconds to z-line for, in zline mode
+#   wsguard_min_headers  6;        # a browser handshake has at least this many headers
+#   wsguard_tools        "websocat";  # extra User-Agent substrings marking a tool (repeatable)
+#   wsguard_exempt_origin "https://chat.x";  # Origin globs never scored (repeatable)
+#   # per-signal weights (defaults shown): wsguard_w_no_ua 3, w_nonbrowser_ua 2,
+#   #   w_tool_ua 5, w_no_origin 1, w_no_extensions 2, w_no_accept_encoding 1,
+#   #   w_no_accept_language 1, w_bad_version 3, w_few_headers 2

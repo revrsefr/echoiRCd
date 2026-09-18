@@ -72,6 +72,7 @@ pub struct WsConfig {
     default_mode: DefaultMode,  // frame mode when no subprotocol is negotiated
     allow_missing_origin: bool, // accept clients that send no Origin header
     native_ping: bool,          // ping via WebSocket frames (else rely on IRC PING)
+    wsguard: crate::modules::wsguard::WsGuardCfg, // fake-WebSocket handshake scoring
 }
 
 /// A stream the WS session can drive — implemented for a plaintext `TcpStream`
@@ -170,6 +171,7 @@ pub fn maybe_start(
         native_ping: get("ws_nativeping")
             .map(crate::config::yesish)
             .unwrap_or(true),
+        wsguard: crate::modules::wsguard::read(cfg),
     };
 
     if let Some(bind) = get("bind_ws") {
@@ -314,7 +316,7 @@ fn ws_session<S: WsStream>(
     let addr = crate::socketengine::normalize_addr(addr);
     // --- HTTP Upgrade handshake (bounded by the handshake timeout) ---
     let _ = stream.set_read_timeout(Some(cfg.handshake_timeout));
-    let hs = match do_handshake(&mut stream, &cfg, addr.ip()) {
+    let hs = match do_handshake(&mut stream, &cfg, addr.ip(), &core) {
         Ok(h) => h,
         Err(_) => {
             let _ = shutdown.shutdown(Shutdown::Both);
@@ -584,6 +586,7 @@ fn do_handshake<S: WsStream>(
     stream: &mut S,
     cfg: &WsConfig,
     peer: IpAddr,
+    core: &SyncSender<Event>,
 ) -> io::Result<Handshake> {
     // read headers (bounded)
     let mut buf = Vec::new();
@@ -672,6 +675,19 @@ fn do_handshake<S: WsStream>(
                     .and_then(|xff| xff.split(',').next().and_then(|s| s.trim().parse().ok()))
             });
         secure = hdr("x-forwarded-proto").is_some_and(|v| v.eq_ignore_ascii_case("https"));
+    }
+
+    // fake-WebSocket guard: score the handshake for browser authenticity. A flagged
+    // connection is reported to the opers; `reject`/`zline` also refuse it here (before
+    // the 101), so it never becomes a user.
+    if let Some(reason) = crate::modules::wsguard::assess(&head, &cfg.wsguard) {
+        let ip = real_ip.unwrap_or(peer);
+        let ban = cfg.wsguard.mode == crate::modules::wsguard::Mode::Zline;
+        let _ = core.send(Event::WsFake { ip, reason, ban });
+        if cfg.wsguard.mode != crate::modules::wsguard::Mode::Report {
+            let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+            return Err(io::Error::other("fake websocket rejected"));
+        }
     }
 
     // 101 response
@@ -819,8 +835,10 @@ mod tests {
             default_mode: DefaultMode::Text,
             allow_missing_origin: false,
             native_ping: true,
+            wsguard: crate::modules::wsguard::read(&crate::config::Config::default()),
         };
-        let hs = do_handshake(&mut s, &cfg, IpAddr::V4(Ipv4Addr::LOCALHOST)).expect("handshake");
+        let (tx, _rx) = std::sync::mpsc::sync_channel::<Event>(1);
+        let hs = do_handshake(&mut s, &cfg, IpAddr::V4(Ipv4Addr::LOCALHOST), &tx).expect("handshake");
         assert_eq!(
             hs.real_ip,
             Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 77))),

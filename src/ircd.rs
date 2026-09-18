@@ -119,6 +119,12 @@ pub enum Event {
         id: u64,
         result: crate::redis::RedisResult,
     },
+    /// A WebSocket handshake looked non-browser (wsguard) — report it on the core.
+    WsFake {
+        ip: std::net::IpAddr,
+        reason: String,
+        ban: bool,
+    },
     /// A message arrived on a persistent bridge worker (e.g. the XMPP client), to be
     /// injected into the IRC `channel` from `sender`. Keyed by channel so it survives
     /// a bridge reload (indices don't).
@@ -186,6 +192,7 @@ fn write_event_label(ev: &Event, out: &mut String) {
         }
         Event::SqlResult { .. } => out.push_str("SQL result"),
         Event::RedisResult { .. } => out.push_str("Redis result"),
+        Event::WsFake { .. } => out.push_str("WsFake"),
         Event::BridgeIn { channel, .. } => {
             let _ = write!(out, "bridge message -> {channel}");
         }
@@ -481,6 +488,9 @@ impl Ircd {
             }
             Event::RedisResult { id, result } => {
                 crate::redis::on_result(&mut self.server, id, result)
+            }
+            Event::WsFake { ip, reason, ban } => {
+                crate::modules::wsguard::on_fake(&mut self.server, ip, reason, ban)
             }
             Event::BridgeIn {
                 channel,

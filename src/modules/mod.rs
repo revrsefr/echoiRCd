@@ -95,6 +95,7 @@ pub mod userip;
 pub mod verify_common;
 pub mod webpush;
 pub mod whoisport;
+pub mod wsguard;
 pub mod xlinetools;
 
 use crate::command::Command;
@@ -217,6 +218,7 @@ pub fn extra_module_list() -> Vec<(&'static str, &'static str)> {
         ("tline", "TLINE — report how many connected users a K/G/Z-line mask would hit"),
         ("userip", "USERIP — show a user's ident and real IP (RPL_USERIP)"),
         ("whoisport", "Shows opers, in WHOIS, which listener port the target connected to"),
+        ("wsguard", "Flags non-browser (fake) WebSocket handshakes — tools/bots vs real browsers"),
         ("xlinetools", "XSEARCH/XCOUNT/XREMOVE/XCOPY — search and manage x-lines"),
     ]
 }
