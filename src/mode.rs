@@ -89,6 +89,7 @@ static CHAN_MODES: &[&(dyn ChanMode + Sync)] = &[
     &INVEX,
     &KEY,
     &LIMIT,
+    &SLOWMODE,
     &REGISTERED_CHAN,
     &MODERATED,
     &NOEXTERNAL,
@@ -952,6 +953,17 @@ fn parse_rate(p: &str) -> Option<Rate> {
     (count > 0 && secs > 0).then_some(Rate { count, secs })
 }
 
+/// Parse a slow-mode param: `count:secs`, or a bare `secs` meaning one message per
+/// that many seconds.
+fn parse_slow(p: &str) -> Option<Rate> {
+    if p.contains(':') {
+        parse_rate(p)
+    } else {
+        let secs = p.parse::<u64>().ok()?;
+        (secs > 0).then_some(Rate { count: 1, secs })
+    }
+}
+
 /// `+f [*]lines:secs` — kick a user who sends more than `lines` messages in
 /// `secs`; a leading `*` also sets a +b ban on them. Enforced in the PRIVMSG path.
 struct MsgFloodMode;
@@ -1067,6 +1079,45 @@ impl ChanMode for NickFloodMode {
         } else {
             if let Some(c) = s.channels.get_mut(key) {
                 c.modes.nickflood = None;
+            }
+            Applied::Yes(None)
+        }
+    }
+}
+
+/// `+W count:secs` (or `+W secs` = one message per that many seconds) — per-user slow
+/// mode: an unprivileged member may send at most `count` messages per `secs` in the
+/// channel. Enforced in [`crate::coremods::core_message`].
+struct SlowMode;
+static SLOWMODE: SlowMode = SlowMode;
+impl ChanMode for SlowMode {
+    fn letter(&self) -> char {
+        'W'
+    }
+    fn wants_param(&self, adding: bool) -> bool {
+        adding
+    }
+    fn apply(
+        &self,
+        s: &mut Server,
+        _chan: &str,
+        key: &str,
+        _uid: Uid,
+        adding: bool,
+        param: Option<&str>,
+    ) -> Applied {
+        if adding {
+            let Some(r) = param.and_then(parse_slow) else {
+                return Applied::No;
+            };
+            let echo = format!("{}:{}", r.count, r.secs);
+            if let Some(c) = s.channels.get_mut(key) {
+                c.modes.slowmode = Some(r);
+            }
+            Applied::Yes(Some(echo))
+        } else {
+            if let Some(c) = s.channels.get_mut(key) {
+                c.modes.slowmode = None;
             }
             Applied::Yes(None)
         }
@@ -1587,7 +1638,7 @@ mod tests {
 
     #[test]
     fn registry_covers_all_channel_modes() {
-        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuBQAPJUdKXwDr".chars() {
+        for c in "qaohvbeIklmntiszpONCTcSRMfjFLgGuBQAPJUdKXwDrW".chars() {
             assert!(chan_mode(c).is_some(), "missing handler for +{c}");
         }
         assert!(chan_mode('y').is_none());

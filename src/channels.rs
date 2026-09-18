@@ -19,6 +19,7 @@ pub struct Member {
     pub custom_prefixes: Vec<char>, // config-defined prefix mode letters held (customprefix)
     pub joined: u64,                // unix ts this member joined (for +d delaymsg; 0 = unknown)
     pub recent_msgs: Vec<String>,   // +K repeat: this member's last few lines here
+    pub slow_hits: Vec<u64>,        // +W slowmode: recent message unix-ts in this channel
     pub hidden: bool,               // +D delayjoin: JOIN withheld until they reveal themselves
 }
 
@@ -305,6 +306,7 @@ pub struct ChanModes {
     pub flood: Option<MsgFlood>,     // +f
     pub joinflood: Option<Rate>,     // +j
     pub nickflood: Option<Rate>,     // +F
+    pub slowmode: Option<Rate>,      // +W <count>:<secs> per-user rate limit
     pub redirect: Option<String>,    // +L <#target> — when full, send there
     pub history: Option<(u32, u64)>, // +H <lines>:<secs> — replay recent messages to joiners
     pub anticaps: Option<u8>,        // +B <percent> — block messages that are mostly CAPS
@@ -401,6 +403,9 @@ impl ChanModes {
         if self.nickflood.is_some() {
             s.push('F');
         }
+        if self.slowmode.is_some() {
+            s.push('W');
+        }
         if self.redirect.is_some() {
             s.push('L');
         }
@@ -437,6 +442,9 @@ impl ChanModes {
             }
             if let Some(n) = &self.nickflood {
                 s.push_str(&format!(" {}:{}", n.count, n.secs));
+            }
+            if let Some(w) = &self.slowmode {
+                s.push_str(&format!(" {}:{}", w.count, w.secs));
             }
             if let Some(t) = &self.redirect {
                 s.push(' ');

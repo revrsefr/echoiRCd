@@ -209,6 +209,7 @@ pub fn extra_module_list() -> Vec<(&'static str, &'static str)> {
         ("securitygroups", "Named security groups — reusable user-matching sets for policy"),
         ("serverban", "s: extban — match/ban a user by the server they are on"),
         ("showfile", "Serves a configured text file as its own command"),
+        ("slowmode", "Channel mode +W — per-user message rate limit (count:secs)"),
         ("sqlquery", "SQLQUERY — a read-only SQL console over IRC for administrators"),
         ("syslog", "Mirrors the log/snotice stream to the system logger (syslog)"),
         ("tline", "TLINE — report how many connected users a K/G/Z-line mask would hit"),

@@ -335,6 +335,36 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
                 }
             }
         }
+        // +W slowmode — an unprivileged member may send at most count msgs per secs here
+        if let Some(rate) = s.channels.get(&key).and_then(|c| c.modes.slowmode.clone()) {
+            if mrank < RANK_VOICE && !s.chanop_exempt(uid, &key, "slowmode") {
+                let now = crate::server::now();
+                let cutoff = now.saturating_sub(rate.secs);
+                let blocked = if let Some(m) =
+                    s.channels.get_mut(&key).and_then(|c| c.members.get_mut(&uid))
+                {
+                    m.slow_hits.retain(|&t| t > cutoff);
+                    if m.slow_hits.len() as u32 >= rate.count {
+                        true
+                    } else {
+                        m.slow_hits.push(now);
+                        false
+                    }
+                } else {
+                    false
+                };
+                if blocked {
+                    if !notice {
+                        s.numeric(
+                            uid,
+                            ERR_CANNOTSENDTOCHAN,
+                            &format!("{target} :Channel is in slow mode (+W) — please wait before sending again"),
+                        );
+                    }
+                    return CmdResult::Fail;
+                }
+            }
+        }
         // extban `m:` mute — matched users can't speak unless voiced-or-above
         if s.extban_active(uid, &key, 'm') && mrank < RANK_VOICE {
             if !notice {
