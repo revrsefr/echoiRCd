@@ -64,8 +64,15 @@ pub fn read(cfg: &Config) -> WsGuardCfg {
         Some("zline") => Mode::Zline,
         _ => Mode::Off,
     };
-    let tools = cfg.raw.get("wsguard_tools").cloned().unwrap_or_else(|| {
-        [
+    // accept either one space/comma-separated line or repeated `wsguard_tools` lines
+    let tools: Vec<String> = match cfg.raw.get("wsguard_tools") {
+        Some(v) => v
+            .iter()
+            .flat_map(|s| s.split([' ', ',', '\t']))
+            .filter(|t| !t.is_empty())
+            .map(str::to_string)
+            .collect(),
+        None => [
             "websocat",
             "wscat",
             "curl",
@@ -80,8 +87,8 @@ pub fn read(cfg: &Config) -> WsGuardCfg {
         ]
         .iter()
         .map(|s| s.to_string())
-        .collect()
-    });
+        .collect(),
+    };
     WsGuardCfg {
         mode,
         threshold: num(cfg, "wsguard_threshold", 5),
