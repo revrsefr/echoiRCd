@@ -145,12 +145,75 @@ pub fn module_names() -> Vec<String> {
         .collect()
 }
 
-/// `(name, description)` for every module loaded at boot — drives `/MODULES`.
-pub fn module_list() -> Vec<(String, String)> {
+/// `(name, description)` for every hook-bus module loaded at boot.
+pub fn hooked_module_list() -> Vec<(String, String)> {
     default_modules()
         .iter()
         .map(|m| (m.name().to_string(), m.description().to_string()))
         .collect()
+}
+
+/// Modules that register through paths other than the hook bus — commands, channel/user
+/// modes, extbans, the connection lifecycle, WHOIS and log targets — and so aren't in
+/// `default_modules()`. Listed here so `/MODULES` reflects the full compiled-in module set.
+pub fn extra_module_list() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("accountban", "a: extban — match/ban a user by their services account"),
+        ("asn", "Autonomous-system (ASN) lookups from the GeoLite2-ASN database"),
+        ("banredirect", "Ban +b mask$#chan bounces the banned user into #chan"),
+        ("chanlog", "Mirrors the oper server-notice (snotice) stream into a channel"),
+        ("channames", "Restricts which characters may appear in new channel names"),
+        ("channelban", "j: extban — match/ban a user by another channel they are in"),
+        ("clearmode", "CLEARMODE — strip all channel modes and the +b/+e/+I lists at once"),
+        ("connclass", "Connection classes — match clients by IP/host, apply per-class limits"),
+        ("conn_waitpong", "Holds registration until the client answers a PING cookie (bot filter)"),
+        ("customprefix", "Reconfigures channel prefix tiers and defines new status prefixes"),
+        ("customtitle", "TITLE — claim a configured WHOIS title (and optional vhost)"),
+        ("denychans", "Forbids joining channels matching a badchan glob (optional redirect)"),
+        ("dnsbl", "DNS blocklist checks on connect (per-zone action)"),
+        ("extbanbanlist", "b: extban — match a user who is on another channel's ban list"),
+        ("extended_isupport", "draft/extended-isupport — client can re-request ISUPPORT on demand"),
+        ("extjwt", "EXTJWT — signed JWT proving a client's IRC identity to external services"),
+        ("geoip", "MaxMind geolocation (country/city/ASN), the G: geoban and GEOIP command"),
+        ("globops", "GLOBOPS — send a message to all opers via the server-notice stream"),
+        ("hidelist", "Hides a channel list mode's entries (e.g. +b) from members below a rank"),
+        ("hidemode", "Hides specific mode changes from members below a rank"),
+        ("hidewhois", "Hides sensitive WHOIS lines (server, idle, secure) from ordinary users"),
+        ("ident", "Optional RFC 1413 ident lookups on connect"),
+        ("jsonlog", "draft/json-log cap — an oper's server notices delivered as structured JSON"),
+        ("log_json", "Appends the log/snotice stream to a file as JSON lines (JSONL)"),
+        ("metrics", "Optional Prometheus/OpenMetrics HTTP endpoint"),
+        ("namedmodes", "PROP — set/query channel modes by long name instead of letter"),
+        ("network_icon", "Advertises a network icon URL via the ICON ISUPPORT token"),
+        ("ojoin", "OJOIN — an oper joins a channel as network staff with the oper prefix"),
+        ("operlevels", "Numeric oper levels — a lower-level oper can't KILL a higher one"),
+        ("password_hash", "Hashed oper passwords + the MKPASSWD helper (OpenSSL-backed)"),
+        ("profilelink", "Adds a profile URL to WHOIS for logged-in users"),
+        ("realnameban", "r: extban — match/ban a user by real name (GECOS)"),
+        ("relaymsg", "RELAYMSG (draft/relaymsg) — relay a message under a foreign nick"),
+        ("restrictchans", "Only opers may create channels (optional per-glob whitelist)"),
+        ("rmode", "RMODE — bulk-remove entries from a channel list mode (+b/+e/+I) by glob"),
+        ("rpc", "JSON-RPC control API over HTTP (list/kill users, bans, rehash)"),
+        ("securitygroups", "Named security groups — reusable user-matching sets for policy"),
+        ("serverban", "s: extban — match/ban a user by the server they are on"),
+        ("showfile", "Serves a configured text file as its own command"),
+        ("sqlquery", "SQLQUERY — a read-only SQL console over IRC for administrators"),
+        ("syslog", "Mirrors the log/snotice stream to the system logger (syslog)"),
+        ("tline", "TLINE — report how many connected users a K/G/Z-line mask would hit"),
+        ("whoisport", "Shows opers, in WHOIS, which listener port the target connected to"),
+    ]
+}
+
+/// `(name, description)` for every module in the build, sorted by name — drives `/MODULES`.
+pub fn module_list() -> Vec<(String, String)> {
+    let mut list = hooked_module_list();
+    list.extend(
+        extra_module_list()
+            .into_iter()
+            .map(|(n, d)| (n.to_string(), d.to_string())),
+    );
+    list.sort_by(|a, b| a.0.cmp(&b.0));
+    list
 }
 
 /// Commands contributed by modules (chained into the core command table), so a
