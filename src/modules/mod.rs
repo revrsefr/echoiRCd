@@ -86,6 +86,7 @@ pub mod sqlquery;
 pub mod syslog;
 pub mod targetlimit;
 pub mod tline;
+pub mod userip;
 pub mod verify_common;
 pub mod webpush;
 pub mod whoisport;
@@ -202,6 +203,7 @@ pub fn extra_module_list() -> Vec<(&'static str, &'static str)> {
         ("sqlquery", "SQLQUERY — a read-only SQL console over IRC for administrators"),
         ("syslog", "Mirrors the log/snotice stream to the system logger (syslog)"),
         ("tline", "TLINE — report how many connected users a K/G/Z-line mask would hit"),
+        ("userip", "USERIP — show a user's ident and real IP (RPL_USERIP)"),
         ("whoisport", "Shows opers, in WHOIS, which listener port the target connected to"),
     ]
 }
@@ -251,5 +253,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(bridge::commands())
         .chain(metricslog::commands())
         .chain(clones::commands())
+        .chain(userip::commands())
         .collect()
 }

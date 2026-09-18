@@ -15,6 +15,7 @@ pub const RPL_ADMINLOC2: u16 = 258;
 pub const RPL_ADMINEMAIL: u16 = 259;
 pub const RPL_TRYAGAIN: u16 = 263; // command deferred/throttled — "<command> :<info>", wait and retry
 pub const RPL_USERHOST: u16 = 302;
+pub const RPL_USERIP: u16 = 340; // USERIP reply — ident@ip per user
 pub const RPL_ISON: u16 = 303;
 pub const RPL_WHOISIDLE: u16 = 317;
 pub const RPL_WHOISSPECIAL: u16 = 320; // SWHOIS oper-set whois line
