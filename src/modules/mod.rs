@@ -74,6 +74,7 @@ pub mod realnameban;
 pub mod recaptcha;
 pub mod relaymsg;
 pub mod reputation;
+pub mod require_auth;
 pub mod restrictchans;
 pub mod restrictcommands;
 pub mod restrictmsg;
@@ -201,6 +202,7 @@ pub fn extra_module_list() -> Vec<(&'static str, &'static str)> {
         ("profilelink", "Adds a profile URL to WHOIS for logged-in users"),
         ("realnameban", "r: extban — match/ban a user by real name (GECOS)"),
         ("relaymsg", "RELAYMSG (draft/relaymsg) — relay a message under a foreign nick"),
+        ("require_auth", "ALINE/GALINE — force matching masks to log in (SASL) before registering"),
         ("restrictchans", "Only opers may create channels (optional per-glob whitelist)"),
         ("rmode", "RMODE — bulk-remove entries from a channel list mode (+b/+e/+I) by glob"),
         ("rpc", "JSON-RPC control API over HTTP (list/kill users, bans, rehash)"),
@@ -266,5 +268,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(lockserv::commands())
         .chain(jumpserver::commands())
         .chain(xlinetools::commands())
+        .chain(require_auth::commands())
         .collect()
 }

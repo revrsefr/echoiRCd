@@ -930,7 +930,7 @@ impl Command for Restart {
 }
 
 /// Shared KLINE/GLINE/ZLINE handling: the mask alone removes, mask+duration adds.
-fn do_xline(s: &mut Server, uid: Uid, params: &[String], kind: XKind) -> CmdResult {
+pub(crate) fn do_xline(s: &mut Server, uid: Uid, params: &[String], kind: XKind) -> CmdResult {
     if !require_oper(s, uid) {
         return CmdResult::Fail;
     }

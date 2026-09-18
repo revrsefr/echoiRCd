@@ -533,6 +533,16 @@ impl Server {
     /// Finish registration: send the welcome burst + MOTD and queue the connect
     /// hook. The core calls this once NICK, USER and CAP are all satisfied.
     pub fn welcome(&mut self, uid: Uid) {
+        // require_auth (ALINE/GALINE): a matching connection that isn't logged into an
+        // account is refused before it registers.
+        if let Some(reason) = crate::modules::require_auth::check(self, uid) {
+            let nick = self.users.get(&uid).map(|u| u.nick.clone()).unwrap_or_default();
+            let name = self.name.clone();
+            self.send(uid, format!(":{name} NOTICE {nick} :{reason}"));
+            self.send(uid, format!("ERROR :Closing link: ({reason})"));
+            self.remove_user(uid, "Requires authentication");
+            return;
+        }
         let was_unreg = self.users.get(&uid).map(|u| !u.registered).unwrap_or(false);
         if let Some(u) = self.users.get_mut(&uid) {
             u.registered = true;

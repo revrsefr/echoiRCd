@@ -19,6 +19,8 @@ pub enum XKind {
     Svshold, // a services-reserved nick glob (like Qline, but services-owned)
     Rline,   // a regex over "nick!user@host realname"
     Jupe,    // a forbidden server-name glob (blocks it from linking)
+    Aline,   // user@host/ip that must be logged into an account to register (local)
+    Galine,  // like Aline but network-wide (require_auth)
 }
 
 impl XKind {
@@ -34,6 +36,8 @@ impl XKind {
             XKind::Svshold => "SVSHOLD",
             XKind::Rline => "R",
             XKind::Jupe => "JUPE",
+            XKind::Aline => "ALINE",
+            XKind::Galine => "GALINE",
         }
     }
 
@@ -50,6 +54,8 @@ impl XKind {
             "SVSHOLD" => XKind::Svshold,
             "R" => XKind::Rline,
             "JUPE" => XKind::Jupe,
+            "ALINE" => XKind::Aline,
+            "GALINE" => XKind::Galine,
             _ => return None,
         })
     }
@@ -310,6 +316,28 @@ impl Server {
             }
         }
         None
+    }
+
+    /// The reason a require-auth line (ALINE/GALINE) demands this `user@host`/ip be
+    /// logged in, if one matches. The caller (require_auth::check) only asks for
+    /// unauthenticated, non-oper users, so a match here means "refuse".
+    pub fn matched_require_auth(&self, ident: &str, host: &str, ip: &str) -> Option<String> {
+        let uh = format!("{ident}@{host}");
+        let n = now();
+        self.xlines
+            .iter()
+            .find(|x| {
+                matches!(x.kind, XKind::Aline | XKind::Galine)
+                    && (x.expires == 0 || x.expires > n)
+                    && (glob_match(&x.mask, &uh) || glob_match(&x.mask, ip))
+            })
+            .map(|x| {
+                if x.reason.is_empty() {
+                    "You must be logged into an account to use this server".to_string()
+                } else {
+                    x.reason.clone()
+                }
+            })
     }
 
     /// The reason an R-line's regex matches this user, if any. RLINE tests the
