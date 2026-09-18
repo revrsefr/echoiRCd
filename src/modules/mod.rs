@@ -55,6 +55,7 @@ pub mod markread;
 pub mod metadata;
 pub mod metrics;
 pub mod metricslog;
+pub mod modenotice;
 pub mod multiline;
 pub mod namedmodes;
 pub mod network_icon;
@@ -186,6 +187,7 @@ pub fn extra_module_list() -> Vec<(&'static str, &'static str)> {
         ("jsonlog", "draft/json-log cap — an oper's server notices delivered as structured JSON"),
         ("log_json", "Appends the log/snotice stream to a file as JSON lines (JSONL)"),
         ("metrics", "Optional Prometheus/OpenMetrics HTTP endpoint"),
+        ("modenotice", "MODENOTICE — message all local users who have given user modes"),
         ("namedmodes", "PROP — set/query channel modes by long name instead of letter"),
         ("network_icon", "Advertises a network icon URL via the ICON ISUPPORT token"),
         ("ojoin", "OJOIN — an oper joins a channel as network staff with the oper prefix"),
@@ -254,5 +256,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(metricslog::commands())
         .chain(clones::commands())
         .chain(userip::commands())
+        .chain(modenotice::commands())
         .collect()
 }
