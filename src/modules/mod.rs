@@ -20,6 +20,7 @@ pub mod channelban;
 pub mod chathistory;
 pub mod clearmode;
 pub mod cloak;
+pub mod clones;
 pub mod cloudflare_challenge;
 pub mod conn_waitpong;
 pub mod connclass;
@@ -165,6 +166,7 @@ pub fn extra_module_list() -> Vec<(&'static str, &'static str)> {
         ("channames", "Restricts which characters may appear in new channel names"),
         ("channelban", "j: extban — match/ban a user by another channel they are in"),
         ("clearmode", "CLEARMODE — strip all channel modes and the +b/+e/+I lists at once"),
+        ("clones", "CLONES — list local IPs with multiple connections (clone floods)"),
         ("connclass", "Connection classes — match clients by IP/host, apply per-class limits"),
         ("conn_waitpong", "Holds registration until the client answers a PING cookie (bot filter)"),
         ("customprefix", "Reconfigures channel prefix tiers and defines new status prefixes"),
@@ -248,5 +250,6 @@ pub fn module_commands() -> Vec<Box<dyn Command>> {
         .chain(sqlquery::commands())
         .chain(bridge::commands())
         .chain(metricslog::commands())
+        .chain(clones::commands())
         .collect()
 }
