@@ -6,6 +6,14 @@
 #    * booleans are  yes / no        * quote values with spaces or #, e.g. "a b"
 #    * repeat a block (oper, listen, link) or a field (alias, motd) as needed
 #
+#  The config is CHECKED on load against the block schema: an unknown block, an
+#  unknown/misspelled field in a structural block (server, listen, tls, oper, …),
+#  a missing required field, or a duplicated single-use block is a FATAL error,
+#  reported with its line number — the server refuses to start rather than run a
+#  half-applied config. Validate any time without starting:
+#      ./echoircd checkconfig echoircd.conf
+#  Blocks may appear in any order, but the order below is the recommended one.
+#
 #  Every option below is shown with its BUILT-IN DEFAULT; uncomment a line only to
 #  change it. Nothing is hardcoded — all values are read at runtime and most apply
 #  again on `./echoircd rehash` (SIGHUP) without a restart.
@@ -32,8 +40,9 @@ server {
 
 
 # ═══ options ═════════════════════════════════════════════════════════════════
-# Server-wide, client-facing settings. Cosmetic grouping — these are plain keys,
-# so you may equally place them at top level or in another block.
+# Server-wide, client-facing settings. `options` (alias `set`) is a grouping
+# block: its fields are plain runtime keys, checked against the known-key list
+# (an unrecognized field is warned, not fatal — unlike a structural block).
 # options {
 #     # locale: language for client-facing text (numerics, notices, /HELP). "en"
 #     #   (default) is English passthrough (zero cost). Any other <code> loads
