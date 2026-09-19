@@ -28,6 +28,7 @@ pub struct DnsblZone {
     pub action: Option<String>, // per-zone action override (mark/kill/kline/gline/zline)
     pub duration: Option<u64>,  // per-zone ban duration override (seconds)
     pub reason: Option<String>, // per-zone ban reason (supports %ip%)
+    pub codes: Vec<u8>,         // act only on these reply classes (last octet); empty = any
 }
 
 /// Parse one `dnsbl = …` config value. Two forms:
@@ -48,6 +49,7 @@ pub fn parse_zone(value: &str) -> Option<DnsblZone> {
             action: None,
             duration: None,
             reason: None,
+            codes: Vec::new(),
         });
     }
     let attrs = parse_kv(value);
@@ -60,6 +62,13 @@ pub fn parse_zone(value: &str) -> Option<DnsblZone> {
         action: get("action").map(|a| a.to_ascii_lowercase()),
         duration: get("duration").and_then(|d| crate::xline::parse_duration(&d)),
         reason: get("reason"),
+        codes: get("codes")
+            .map(|s| {
+                s.split([',', ' '])
+                    .filter_map(|x| x.trim().parse::<u8>().ok())
+                    .collect()
+            })
+            .unwrap_or_default(),
         name: get("name").unwrap_or_else(|| domain.clone()),
         domain,
     })
@@ -216,6 +225,13 @@ fn act(s: &mut Server, uid: Uid, domain: &str, reply: Ipv4Addr) {
         .iter()
         .find(|z| z.domain.eq_ignore_ascii_case(domain))
         .cloned();
+    // a code-filtered zone (e.g. antivpn: proxy/VPN classes only) ignores listings whose
+    // class isn't in its `codes` set — the list flags many things, we act on some.
+    if let Some(z) = &zone {
+        if !z.codes.is_empty() && !z.codes.contains(&code) {
+            return;
+        }
+    }
     let name = zone
         .as_ref()
         .map(|z| z.name.clone())

@@ -195,6 +195,7 @@ impl Config {
         if let Ok(text) = std::fs::read_to_string(path) {
             Self::parse_into(&mut c, &text);
         }
+        c.dnsbl_zones.extend(crate::modules::antivpn::zones(&c));
         c
     }
 
@@ -207,6 +208,7 @@ impl Config {
             ..Config::default()
         };
         Self::parse_into(&mut c, &text);
+        c.dnsbl_zones.extend(crate::modules::antivpn::zones(&c));
         Some(c)
     }
 

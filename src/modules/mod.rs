@@ -169,7 +169,7 @@ pub fn hooked_module_list() -> Vec<(String, String)> {
 pub fn extra_module_list() -> Vec<(&'static str, &'static str)> {
     vec![
         ("accountban", "a: extban — match/ban a user by their services account"),
-        ("antivpn", "Flags/blocks connections from VPN/hosting ASNs (GeoLite2-ASN)"),
+        ("antivpn", "DNSBL-based VPN/open-proxy blocking, code-filtered (like dnsbl)"),
         ("asn", "Autonomous-system (ASN) lookups from the GeoLite2-ASN database"),
         ("banredirect", "Ban +b mask$#chan bounces the banned user into #chan"),
         ("chanlog", "Mirrors the oper server-notice (snotice) stream into a channel"),

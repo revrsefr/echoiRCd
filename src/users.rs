@@ -543,10 +543,6 @@ impl Server {
             self.remove_user(uid, "Requires authentication");
             return;
         }
-        // antivpn: mark / refuse / z-line connections from VPN or hosting ASNs
-        if crate::modules::antivpn::check(self, uid) {
-            return;
-        }
         let was_unreg = self.users.get(&uid).map(|u| !u.registered).unwrap_or(false);
         if let Some(u) = self.users.get_mut(&uid) {
             u.registered = true;
