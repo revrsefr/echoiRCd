@@ -181,6 +181,19 @@ dns {
 # Per-blocklist form (one value string; overrides the globals):
 # dnsbl { dnsbl "domain=torexit.dan.me.uk name=TorExit action=zline duration=1w reason=Tor-not-allowed"; }
 
+# antivpn — flag connections from VPN / hosting / datacenter networks by their ASN,
+# using the GeoLite2-ASN db (needs geoip_asn_database). Offline, no external query.
+# Catches datacenter/cloud VPNs + bots; residential-IP VPNs look like ISPs and slip
+# through. NOTE: many legit users run a bouncer on a VPS (a hosting ASN), so keep
+# antivpn_exempt_registered on and prefer `mark` — or `kill`/`zline` = require an
+# account. Checked at registration, so a SASL login is known. Change live with rehash.
+# antivpn                     mark;     # off (default) | mark | kill | zline
+# antivpn_asn                 14061,16509,16276,24940,20473,9009,136787,51852;  # else a curated default
+# antivpn_exempt_registered   yes;      # logged-in accounts bypass (default yes)
+# antivpn_exempt_ip           10.0.0.0/8;   # IPs/ranges never flagged (repeatable)
+# antivpn_reason              "VPN / hosting network not allowed here";
+# antivpn_duration            86400;    # z-line seconds in zline mode (default 1 day)
+
 
 # ═══ limits (advertised in ISUPPORT and enforced) ════════════════════════════
 limits {
