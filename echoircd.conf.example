@@ -31,6 +31,23 @@ server {
 }
 
 
+# ═══ options ═════════════════════════════════════════════════════════════════
+# Server-wide, client-facing settings. Cosmetic grouping — these are plain keys,
+# so you may equally place them at top level or in another block.
+# options {
+#     # locale: language for client-facing text (numerics, notices, /HELP). "en"
+#     #   (default) is English passthrough (zero cost). Any other <code> loads
+#     #   lang/<code>.conf and translates the prose; protocol tokens & the S2S wire
+#     #   stay English. Rehash to switch live. Ships with fr (Français), es (Español),
+#     #   ru (Русский), de (Deutsch), it (Italiano) and pt-BR (Português do Brasil).
+#     locale     "pt-BR";
+#     locale_dir "lang";        # directory holding <code>.conf catalogs (default: lang)
+#     # HELP topics load from help/<code>.conf (selected by `locale`, English fallback
+#     #   per topic). Edit a file + REHASH to change help — no restart.
+#     help_dir   "help";        # directory of help/<code>.conf topic files (default: help)
+# }
+
+
 # ═══ listeners ═══════════════════════════════════════════════════════════════
 # Repeatable. `ip "*"` (or "[::]") binds IPv4+IPv6 at once (dual-stack); an IPv4
 # client on it is normalized back to its real v4 address. type: client (default)
@@ -469,16 +486,6 @@ antiabuse {
     # --- hashident: replace ident with a stable opaque token per IP ---
     # hashident     yes;
     # hashident_key "CHANGE_THIS_SECRET";   # HMAC key; makes the mapping unforgeable
-    # --- locale: server-wide language for client-facing messages. "en" (default) is
-    #     English passthrough (zero cost). Any other <code> loads lang/<code>.conf and
-    #     translates numeric/notice prose; protocol tokens & the S2S wire stay English.
-    #     Rehash to switch live. Ships with fr (Français), es (Español), ru (Русский),
-    #     de (Deutsch), it (Italiano) and pt-BR (Português do Brasil). ---
-    # locale     pt-BR;
-    # locale_dir "lang";        # directory holding <code>.conf catalogs (default: lang)
-    # --- HELP: /HELP topics load from help/<code>.conf (selected by `locale`, English
-    #     fallback per topic). Edit a file + REHASH to change help — no restart. ---
-    # help_dir   "help";        # directory of help/<code>.conf topic files (default: help)
     # --- solvemsg: unvouched users answer one arithmetic question before their
     #     PMs are delivered (opers & logged-in accounts exempt). ---
     # solvemsg yes;
