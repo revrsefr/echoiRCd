@@ -476,14 +476,21 @@ fn looks_like_blocks(text: &str) -> bool {
 
 /// Tokenize the block format: `{ } ;`, quoted strings, and bare words. Line
 /// (`#`, `//`) and block (`/* */`) comments are skipped.
-fn tokenize(text: &str) -> Vec<Tok> {
+/// Tokenize the block format, tagging each token with its 1-based source line so
+/// the validator can point at the offending line. Line counting spans whitespace,
+/// comments and multi-line strings.
+fn tokenize(text: &str) -> Vec<(Tok, usize)> {
     let c: Vec<char> = text.chars().collect();
     let n = c.len();
     let mut i = 0;
+    let mut line = 1usize;
     let mut toks = Vec::new();
     while i < n {
         let ch = c[i];
         if ch.is_whitespace() {
+            if ch == '\n' {
+                line += 1;
+            }
             i += 1;
             continue;
         }
@@ -496,22 +503,26 @@ fn tokenize(text: &str) -> Vec<Tok> {
         if ch == '/' && i + 1 < n && c[i + 1] == '*' {
             i += 2;
             while i + 1 < n && !(c[i] == '*' && c[i + 1] == '/') {
+                if c[i] == '\n' {
+                    line += 1;
+                }
                 i += 1;
             }
             i = (i + 2).min(n);
             continue;
         }
+        let start = line;
         match ch {
             '{' => {
-                toks.push(Tok::Open);
+                toks.push((Tok::Open, start));
                 i += 1;
             }
             '}' => {
-                toks.push(Tok::Close);
+                toks.push((Tok::Close, start));
                 i += 1;
             }
             ';' => {
-                toks.push(Tok::Semi);
+                toks.push((Tok::Semi, start));
                 i += 1;
             }
             '"' => {
@@ -531,10 +542,13 @@ fn tokenize(text: &str) -> Vec<Tok> {
                         i += 1;
                         break;
                     }
+                    if c[i] == '\n' {
+                        line += 1;
+                    }
                     s.push(c[i]);
                     i += 1;
                 }
-                toks.push(Tok::Word(s));
+                toks.push((Tok::Word(s), start));
             }
             _ => {
                 let mut s = String::new();
@@ -552,7 +566,7 @@ fn tokenize(text: &str) -> Vec<Tok> {
                     s.push(x);
                     i += 1;
                 }
-                toks.push(Tok::Word(s));
+                toks.push((Tok::Word(s), start));
             }
         }
     }
@@ -561,25 +575,64 @@ fn tokenize(text: &str) -> Vec<Tok> {
 
 /// Translate block syntax into the equivalent flat `key = value` text.
 fn blocks_to_flat(text: &str) -> String {
+    let mut out = String::new();
+    for node in parse_ast(text) {
+        match node {
+            AstNode::Block { name, fields, .. } => {
+                let pairs: Vec<(String, String)> =
+                    fields.into_iter().map(|f| (f.name, f.val)).collect();
+                emit_block(&mut out, &name, &pairs);
+            }
+            AstNode::Top { key, val, .. } => emit_line(&mut out, &key, &val),
+        }
+    }
+    out
+}
+
+/// One parsed field inside a block: `name value…;` with the source line of `name`.
+struct AstField {
+    name: String,
+    val: String,
+    line: usize,
+}
+
+/// A parsed top-level item: either a named block or a bare `key value;` line.
+enum AstNode {
+    Block {
+        name: String,
+        line: usize,
+        fields: Vec<AstField>,
+    },
+    Top {
+        key: String,
+        val: String,
+        line: usize,
+    },
+}
+
+/// Parse the block format into an ordered AST (blocks and top-level keys), each
+/// item carrying its source line. Shares [`tokenize`] with [`blocks_to_flat`] so
+/// validation and flattening can never see different structure.
+fn parse_ast(text: &str) -> Vec<AstNode> {
     let toks = tokenize(text);
     let n = toks.len();
     let mut i = 0;
-    let mut out = String::new();
+    let mut nodes = Vec::new();
     while i < n {
-        let name = match &toks[i] {
-            Tok::Word(w) => w.clone(),
+        let (name, nline) = match &toks[i] {
+            (Tok::Word(w), l) => (w.clone(), *l),
             _ => {
                 i += 1;
                 continue;
             }
         };
         i += 1;
-        if i < n && toks[i] == Tok::Open {
+        if i < n && toks[i].0 == Tok::Open {
             i += 1;
-            let mut fields: Vec<(String, String)> = Vec::new();
-            while i < n && toks[i] != Tok::Close {
-                let field = match &toks[i] {
-                    Tok::Word(w) => w.clone(),
+            let mut fields: Vec<AstField> = Vec::new();
+            while i < n && toks[i].0 != Tok::Close {
+                let (field, fline) = match &toks[i] {
+                    (Tok::Word(w), l) => (w.clone(), *l),
                     _ => {
                         i += 1;
                         continue;
@@ -587,26 +640,34 @@ fn blocks_to_flat(text: &str) -> String {
                 };
                 i += 1;
                 let mut vals = Vec::new();
-                while i < n && toks[i] != Tok::Semi && toks[i] != Tok::Close {
-                    if let Tok::Word(w) = &toks[i] {
+                while i < n && toks[i].0 != Tok::Semi && toks[i].0 != Tok::Close {
+                    if let (Tok::Word(w), _) = &toks[i] {
                         vals.push(w.clone());
                     }
                     i += 1;
                 }
-                if i < n && toks[i] == Tok::Semi {
+                if i < n && toks[i].0 == Tok::Semi {
                     i += 1;
                 }
-                fields.push((field, vals.join(" ")));
+                fields.push(AstField {
+                    name: field,
+                    val: vals.join(" "),
+                    line: fline,
+                });
             }
             if i < n {
                 i += 1; // consume `}`
             }
-            emit_block(&mut out, &name, &fields);
+            nodes.push(AstNode::Block {
+                name,
+                line: nline,
+                fields,
+            });
         } else {
-            // top-level `key value... ;` with no braces
+            // top-level `key value... ;` with no braces (legacy flat escape hatch)
             let mut vals = Vec::new();
-            while i < n && toks[i] != Tok::Semi {
-                if let Tok::Word(w) = &toks[i] {
+            while i < n && toks[i].0 != Tok::Semi {
+                if let (Tok::Word(w), _) = &toks[i] {
                     vals.push(w.clone());
                 }
                 i += 1;
@@ -614,10 +675,176 @@ fn blocks_to_flat(text: &str) -> String {
             if i < n {
                 i += 1;
             }
-            emit_line(&mut out, &name, &vals.join(" "));
+            nodes.push(AstNode::Top {
+                key: name,
+                val: vals.join(" "),
+                line: nline,
+            });
         }
     }
-    out
+    nodes
+}
+
+/// A single validation finding, with the 1-based source line (0 = whole file).
+pub struct CfgIssue {
+    pub line: usize,
+    pub msg: String,
+}
+
+fn type_error(ft: crate::config_schema::Ft, val: &str) -> Option<String> {
+    use crate::config_schema::Ft;
+    let v = val.trim();
+    match ft {
+        Ft::Str => None,
+        Ft::Int => {
+            if v.is_empty() || v.chars().all(|c| c.is_ascii_digit()) {
+                None
+            } else {
+                Some(format!("expected a number, got `{v}`"))
+            }
+        }
+        Ft::Flag => {
+            if v.is_empty()
+                || matches!(
+                    v.to_ascii_lowercase().as_str(),
+                    "yes" | "no" | "true" | "false" | "on" | "off" | "1" | "0"
+                )
+            {
+                None
+            } else {
+                Some(format!("expected yes/no, got `{v}`"))
+            }
+        }
+    }
+}
+
+/// Validate a block-format config against [`crate::config_schema`]. Returns
+/// `(errors, warnings)`. Errors: unknown block, unknown/malformed field in a
+/// structural block, a missing required field, a duplicated non-repeatable block,
+/// or a missing required block. Warnings: an unrecognized field in a grouping
+/// block or a bare top-level key. A flat (`key = value`) config has no blocks to
+/// check and returns empty vectors.
+pub fn validate_config(text: &str) -> (Vec<CfgIssue>, Vec<CfgIssue>) {
+    use crate::config_schema as schema;
+    let mut errs: Vec<CfgIssue> = Vec::new();
+    let mut warns: Vec<CfgIssue> = Vec::new();
+    if !looks_like_blocks(text) {
+        return (errs, warns);
+    }
+    let mut seen_nonrep: Vec<(&'static str, usize)> = Vec::new();
+    let mut have_server = false;
+    let mut have_listen = false;
+    for node in parse_ast(text) {
+        match node {
+            AstNode::Top { key, line, .. } => {
+                if !schema::is_known_key(&key) {
+                    warns.push(CfgIssue {
+                        line,
+                        msg: format!("unknown top-level key `{key}`"),
+                    });
+                }
+            }
+            AstNode::Block { name, line, fields } => {
+                let Some(spec) = schema::block(&name) else {
+                    errs.push(CfgIssue {
+                        line,
+                        msg: format!(
+                            "unknown block `{name}` — not one of the {} known blocks",
+                            schema::BLOCKS.len()
+                        ),
+                    });
+                    continue;
+                };
+                match spec.name {
+                    "server" => have_server = true,
+                    "listen" => have_listen = true,
+                    _ => {}
+                }
+                if !spec.repeatable {
+                    if let Some((_, prev)) = seen_nonrep.iter().find(|(n, _)| *n == spec.name) {
+                        errs.push(CfgIssue {
+                            line,
+                            msg: format!(
+                                "duplicate `{}` block (already defined at line {prev}); it may appear only once",
+                                spec.name
+                            ),
+                        });
+                    } else {
+                        seen_nonrep.push((spec.name, line));
+                    }
+                }
+                if spec.lines {
+                    continue; // motd / opermotd: free-form quoted lines, no field names
+                }
+                match spec.kind {
+                    schema::Kind::Structural => {
+                        for fld in &fields {
+                            match spec.field(&fld.name) {
+                                None => errs.push(CfgIssue {
+                                    line: fld.line,
+                                    msg: format!(
+                                        "unknown field `{}` in `{}` block",
+                                        fld.name, spec.name
+                                    ),
+                                }),
+                                Some(fs) => {
+                                    if let Some(m) = type_error(fs.ft, &fld.val) {
+                                        errs.push(CfgIssue {
+                                            line: fld.line,
+                                            msg: format!(
+                                                "field `{}` in `{}`: {m}",
+                                                fld.name, spec.name
+                                            ),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        for fs in spec.fields.iter().filter(|f| f.required) {
+                            let present = fields.iter().any(|fl| {
+                                fs.names.iter().any(|n| n.eq_ignore_ascii_case(&fl.name))
+                            });
+                            if !present {
+                                errs.push(CfgIssue {
+                                    line,
+                                    msg: format!(
+                                        "`{}` block is missing required field `{}`",
+                                        spec.name, fs.names[0]
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                    schema::Kind::Grouping => {
+                        for fld in &fields {
+                            if !schema::is_known_key(&fld.name) {
+                                warns.push(CfgIssue {
+                                    line: fld.line,
+                                    msg: format!(
+                                        "unrecognized field `{}` in `{}` block (ignored — check for a typo)",
+                                        fld.name, spec.name
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if !have_server {
+        errs.push(CfgIssue {
+            line: 0,
+            msg: "no `server` block (server name and sid are required)".into(),
+        });
+    }
+    if !have_listen {
+        errs.push(CfgIssue {
+            line: 0,
+            msg: "no `listen` block (the server needs at least one listener)".into(),
+        });
+    }
+    (errs, warns)
 }
 
 fn emit_line(out: &mut String, key: &str, value: &str) {
@@ -1009,5 +1236,101 @@ mod tests {
         // no password and no fp would let anyone oper up — must be dropped
         assert!(opers("oper = nobody").is_empty());
         assert!(opers("oper = nobody type=netadmin").is_empty());
+    }
+
+    // ── schema validation ───────────────────────────────────────────────────
+    const GOOD: &str = "server { name \"a\"; sid \"0AA\"; }\nlisten { ip \"*\"; port 6667; }\n";
+
+    fn errs(text: &str) -> Vec<String> {
+        validate_config(text).0.into_iter().map(|i| i.msg).collect()
+    }
+    fn warns(text: &str) -> Vec<String> {
+        validate_config(text).1.into_iter().map(|i| i.msg).collect()
+    }
+
+    #[test]
+    fn validate_accepts_minimal_and_example() {
+        assert!(
+            errs(GOOD).is_empty(),
+            "minimal config should validate: {:?}",
+            errs(GOOD)
+        );
+        let example = concat!(env!("CARGO_MANIFEST_DIR"), "/echoircd.conf.example");
+        let text = std::fs::read_to_string(example).expect("example present");
+        let (e, _w) = validate_config(&text);
+        assert!(
+            e.is_empty(),
+            "shipped example must have no errors: {:?}",
+            e.iter().map(|i| &i.msg).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn validate_rejects_unknown_block() {
+        let e = errs(&format!("{GOOD}floood {{ flood_messages 8; }}\n"));
+        assert!(
+            e.iter().any(|m| m.contains("unknown block `floood`")),
+            "{e:?}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_unknown_structural_field() {
+        let e =
+            errs("server { name \"a\"; sid \"0AA\"; }\nlisten { ip \"*\"; port 6667; pport 1; }\n");
+        assert!(
+            e.iter()
+                .any(|m| m.contains("unknown field `pport` in `listen`")),
+            "{e:?}"
+        );
+    }
+
+    #[test]
+    fn validate_flags_missing_required_field_and_block() {
+        // server missing sid
+        let e = errs("server { name \"a\"; }\nlisten { ip \"*\"; port 6667; }\n");
+        assert!(
+            e.iter().any(|m| m.contains("missing required field `sid`")),
+            "{e:?}"
+        );
+        // no listen at all
+        let e2 = errs("server { name \"a\"; sid \"0AA\"; }\n");
+        assert!(e2.iter().any(|m| m.contains("no `listen` block")), "{e2:?}");
+        // no server at all
+        let e3 = errs("listen { ip \"*\"; port 6667; }\n");
+        assert!(e3.iter().any(|m| m.contains("no `server` block")), "{e3:?}");
+    }
+
+    #[test]
+    fn validate_flags_bad_number_and_duplicate() {
+        let e = errs("server { name \"a\"; sid \"0AA\"; }\nlisten { ip \"*\"; port abc; }\n");
+        assert!(e.iter().any(|m| m.contains("expected a number")), "{e:?}");
+        let e2 = errs(&format!(
+            "{GOOD}tls {{ cert \"a\"; }}\ntls {{ key \"b\"; }}\n"
+        ));
+        assert!(
+            e2.iter().any(|m| m.contains("duplicate `tls` block")),
+            "{e2:?}"
+        );
+    }
+
+    #[test]
+    fn validate_warns_unknown_grouping_field_but_does_not_error() {
+        let cfg = format!("{GOOD}limits {{ maxxchannel 5; }}\n");
+        assert!(
+            errs(&cfg).is_empty(),
+            "unknown grouping field must not be an error"
+        );
+        assert!(
+            warns(&cfg).iter().any(|m| m.contains("maxxchannel")),
+            "{:?}",
+            warns(&cfg)
+        );
+    }
+
+    #[test]
+    fn validate_ignores_flat_format() {
+        // legacy flat `key = value` has no blocks — nothing to validate, no errors
+        assert!(errs("servername = irc.x\nsid = 0AA\n").is_empty());
     }
 }

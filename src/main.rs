@@ -136,20 +136,41 @@ fn mkpasswd_cli(cost_arg: Option<&str>) -> i32 {
 /// sorted dump of every key/value it produces. Two configs (e.g. flat vs block
 /// format) that dump identically parse identically.
 fn checkconfig_cli(path: &str) -> i32 {
-    match echoircd::config::Config::try_load(path) {
-        Some(c) => {
-            print!("{}", c.dump());
-            if c.servername.is_empty() {
-                eprintln!("echoircd: WARNING — servername is empty");
-                return 2;
-            }
-            0
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("echoircd: cannot read config {path}: {e}");
+            return 1;
         }
-        None => {
-            eprintln!("echoircd: cannot read config {path}");
-            1
+    };
+    // Structural validation against the block schema (unknown block/field, missing
+    // required field, bad number/bool). Report every finding with its line.
+    let (errs, warns) = echoircd::config::validate_config(&text);
+    for w in &warns {
+        eprintln!("echoircd: {path}:{}: warning: {}", w.line, w.msg);
+    }
+    for e in &errs {
+        if e.line == 0 {
+            eprintln!("echoircd: {path}: error: {}", e.msg);
+        } else {
+            eprintln!("echoircd: {path}:{}: error: {}", e.line, e.msg);
         }
     }
+    let Some(c) = echoircd::config::Config::try_load(path) else {
+        eprintln!("echoircd: cannot read config {path}");
+        return 1;
+    };
+    print!("{}", c.dump());
+    if !errs.is_empty() {
+        eprintln!("echoircd: {} configuration error(s)", errs.len());
+        return 1;
+    }
+    if c.servername.is_empty() {
+        eprintln!("echoircd: WARNING — servername is empty");
+        return 2;
+    }
+    eprintln!("echoircd: configuration OK ({} warning(s))", warns.len());
+    0
 }
 
 fn main() {
@@ -177,6 +198,29 @@ fn main() {
         std::process::exit(0);
     }
     let path = first.unwrap_or_else(|| "echoircd.conf".to_string());
+    // Validate the config against the block schema before booting. A missing file
+    // is fine (built-in defaults); a present-but-broken config refuses to start so
+    // a typo'd block/field is caught here instead of silently ignored.
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        let (errs, warns) = echoircd::config::validate_config(&text);
+        for w in &warns {
+            eprintln!("echoircd: {path}:{}: config warning: {}", w.line, w.msg);
+        }
+        if !errs.is_empty() {
+            for e in &errs {
+                if e.line == 0 {
+                    eprintln!("echoircd: {path}: config error: {}", e.msg);
+                } else {
+                    eprintln!("echoircd: {path}:{}: config error: {}", e.line, e.msg);
+                }
+            }
+            eprintln!(
+                "echoircd: {} configuration error(s); refusing to start (run `echoircd checkconfig {path}`)",
+                errs.len()
+            );
+            std::process::exit(1);
+        }
+    }
     let cfg = Config::load(&path);
 
     // precompute the bcrypt constants off-thread so the first hash never stalls the core

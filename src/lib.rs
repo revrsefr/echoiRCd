@@ -32,6 +32,7 @@ pub mod bcrypt;
 pub mod channels;
 pub mod command;
 pub mod config;
+pub mod config_schema;
 pub mod connguard;
 pub mod coremods;
 pub mod database;
