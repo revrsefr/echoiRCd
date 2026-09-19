@@ -249,6 +249,17 @@ pub fn a_lookup(qname: &str, timeout: Duration) -> Option<Ipv4Addr> {
     val
 }
 
+/// Resolve ALL of `qname`'s A records (not just the first). A DNSBL may list an IP
+/// under several classes at once (e.g. Tor exit + spamtrap), so a code-filtered check
+/// needs every returned class, not whichever the resolver happened to order first.
+/// Uncached — used only on the DNSBL connect path.
+pub fn a_lookup_all(qname: &str, timeout: Duration) -> Vec<Ipv4Addr> {
+    let id = rand_txid();
+    send_query(&nameserver(), qname, QTYPE_A, id, timeout)
+        .map(|reply| parse_a_reply_all(&reply, id))
+        .unwrap_or_default()
+}
+
 /// Resolve SRV records for `qname` (e.g. `_xmpp-client._tcp.example.com`) and return
 /// `(target_host, port)` candidates in RFC 2782 order: ascending priority, then
 /// descending weight. Empty on NXDOMAIN / error / a `.` target (service disabled). No
@@ -346,6 +357,47 @@ fn parse_a_reply(msg: &[u8], want_id: u16) -> Option<Ipv4Addr> {
         pos = rdata + rdlen;
     }
     None
+}
+
+/// Like [`parse_a_reply`] but collects EVERY A record (all listing classes). Fully
+/// bounds-checked — the packet is untrusted.
+fn parse_a_reply_all(msg: &[u8], want_id: u16) -> Vec<Ipv4Addr> {
+    let mut out = Vec::new();
+    if msg.len() < 12 || u16::from_be_bytes([msg[0], msg[1]]) != want_id || msg[3] & 0x0f != 0 {
+        return out;
+    }
+    let qd = u16::from_be_bytes([msg[4], msg[5]]);
+    let an = u16::from_be_bytes([msg[6], msg[7]]);
+    let mut pos = 12;
+    for _ in 0..qd {
+        pos = match skip_name(msg, pos).and_then(|p| p.checked_add(4)) {
+            Some(p) if p <= msg.len() => p,
+            _ => return out,
+        };
+    }
+    for _ in 0..an {
+        let Some(p) = skip_name(msg, pos) else { break };
+        pos = p;
+        if pos + 10 > msg.len() {
+            break;
+        }
+        let rtype = u16::from_be_bytes([msg[pos], msg[pos + 1]]);
+        let rdlen = u16::from_be_bytes([msg[pos + 8], msg[pos + 9]]) as usize;
+        let rdata = pos + 10;
+        if rdata + rdlen > msg.len() {
+            break;
+        }
+        if rtype == QTYPE_A && rdlen == 4 {
+            out.push(Ipv4Addr::new(
+                msg[rdata],
+                msg[rdata + 1],
+                msg[rdata + 2],
+                msg[rdata + 3],
+            ));
+        }
+        pos = rdata + rdlen;
+    }
+    out
 }
 
 /// Encode a dotted name into wire format (length-prefixed labels + root 0).

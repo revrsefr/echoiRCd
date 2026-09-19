@@ -2308,7 +2308,7 @@ mod tests {
             2,
             crate::modules::dnsbl::Outcome::Hit {
                 zone: "torexit.dan.me.uk".to_string(),
-                reply: Ipv4Addr::new(127, 0, 0, 2),
+                replies: vec![Ipv4Addr::new(127, 0, 0, 2)],
             },
         );
         let joined: String = std::iter::from_fn(|| orx.try_recv().ok())

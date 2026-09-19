@@ -192,6 +192,9 @@ dns {
 # antivpn_codes   8,9,10,11,14,19;     # reply classes counted as proxy/VPN (DroneBL scheme)
 # antivpn_reason  "VPN / open proxy not allowed here (%class%)";  # %ip% %dnsbl% %class%
 # antivpn_duration 86400;              # ban seconds for the *line actions (default 1 day)
+# Alternative list — EFnet RBL categorises open proxies (class 1) and Tor exits (class 4);
+# antivpn checks ALL returned classes, so a multi-listed IP is still caught:
+#   antivpn mark;  antivpn_bl rbl.efnetrbl.org;  antivpn_codes 1,4;
 
 
 # ═══ limits (advertised in ISUPPORT and enforced) ════════════════════════════

@@ -124,8 +124,9 @@ pub enum Outcome {
     Skipped,
     /// Checked against every zone; the address is not listed.
     Clean,
-    /// Listed: `zone` returned `reply` (`127.0.0.x`, last octet = reason code).
-    Hit { zone: String, reply: Ipv4Addr },
+    /// Listed: `zone` returned these `127.0.0.x` records (last octet = a reason class;
+    /// a DNSBL may list an IP under several classes at once).
+    Hit { zone: String, replies: Vec<Ipv4Addr> },
 }
 
 /// Most blocklist zones consulted per connecting client (latency bound).
@@ -143,10 +144,11 @@ pub fn check(ip: IpAddr, zones: &[String], timeout: Duration) -> Outcome {
     for zone in zones.iter().take(MAX_ZONES) {
         let z = zone.trim().trim_end_matches('.');
         let qname = format!("{}.{z}", resolver::reverse_labels(ip));
-        if let Some(reply) = resolver::a_lookup(&qname, timeout) {
+        let replies = resolver::a_lookup_all(&qname, timeout);
+        if !replies.is_empty() {
             return Outcome::Hit {
                 zone: zone.clone(),
-                reply,
+                replies,
             };
         }
     }
@@ -162,10 +164,10 @@ pub fn report(s: &mut Server, uid: Uid, outcome: Outcome) {
             s.notice_star(uid, "Checking for DNSBL");
             s.notice_star(uid, "Checking for DNSBL done, no hit.");
         }
-        Outcome::Hit { zone, reply } => {
+        Outcome::Hit { zone, replies } => {
             s.notice_star(uid, "Checking for DNSBL");
             s.notice_star(uid, "Checking for DNSBL done.");
-            act(s, uid, &zone, reply);
+            act(s, uid, &zone, &replies);
         }
     }
 }
@@ -199,7 +201,7 @@ fn dronebl_class(code: u8) -> Option<&'static str> {
 /// Act on a hit against blocklist `domain` per its (or the global) action: `mark`
 /// just informs; the `*line` actions add a ban and close; `kill` closes without a
 /// persistent ban. Emits the XLINE notice (via `add_xline`) then the DNSBL one.
-fn act(s: &mut Server, uid: Uid, domain: &str, reply: Ipv4Addr) {
+fn act(s: &mut Server, uid: Uid, domain: &str, replies: &[Ipv4Addr]) {
     let (mask, ident, host, ip) = match s.users.get(&uid) {
         Some(u) => (u.prefix(), u.ident.clone(), u.host.clone(), u.addr.ip()),
         None => return,
@@ -208,6 +210,27 @@ fn act(s: &mut Server, uid: Uid, domain: &str, reply: Ipv4Addr) {
     // an explicitly E-lined (exempt) host is never auto-banned or killed by a blocklist
     // — the registration ban path and the enforce sweep honor E-lines, so this must too
     let exempt = s.is_exempt(&ident, &host, &ipstr);
+    // Resolve this hit's per-zone settings, each falling back to the global default.
+    let zone = s
+        .dnsbl_zones
+        .iter()
+        .find(|z| z.domain.eq_ignore_ascii_case(domain))
+        .cloned();
+    // A code-filtered zone (e.g. antivpn: proxy/VPN classes only) acts only if one of the
+    // returned classes is in its `codes` set — a DNSBL may list an IP under several
+    // classes at once, so check them all and act on (and report) the matching one.
+    let codes = zone.as_ref().map(|z| z.codes.clone()).unwrap_or_default();
+    let reply = if codes.is_empty() {
+        match replies.first() {
+            Some(r) => *r,
+            None => return,
+        }
+    } else {
+        match replies.iter().find(|r| codes.contains(&r.octets()[3])) {
+            Some(r) => *r,
+            None => return, // listed, but not in a class this zone acts on
+        }
+    };
     // the reply's last octet is the blocklist's listing class — surface WHY the IP is
     // listed (SOCKS proxy vs botnet vs brute-force …). DroneBL codes get named.
     let code = reply.octets()[3];
@@ -219,19 +242,6 @@ fn act(s: &mut Server, uid: Uid, domain: &str, reply: Ipv4Addr) {
     } else {
         format!("class {code}")
     };
-    // Resolve this hit's per-zone settings, each falling back to the global default.
-    let zone = s
-        .dnsbl_zones
-        .iter()
-        .find(|z| z.domain.eq_ignore_ascii_case(domain))
-        .cloned();
-    // a code-filtered zone (e.g. antivpn: proxy/VPN classes only) ignores listings whose
-    // class isn't in its `codes` set — the list flags many things, we act on some.
-    if let Some(z) = &zone {
-        if !z.codes.is_empty() && !z.codes.contains(&code) {
-            return;
-        }
-    }
     let name = zone
         .as_ref()
         .map(|z| z.name.clone())
