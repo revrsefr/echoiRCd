@@ -472,8 +472,9 @@ antiabuse {
     # --- locale: server-wide language for client-facing messages. "en" (default) is
     #     English passthrough (zero cost). Any other <code> loads lang/<code>.conf and
     #     translates numeric/notice prose; protocol tokens & the S2S wire stay English.
-    #     Rehash to switch live. Ships with fr (Français) and es (Español). ---
-    # locale     fr;
+    #     Rehash to switch live. Ships with fr (Français), es (Español), ru (Русский),
+    #     de (Deutsch), it (Italiano) and pt-BR (Português do Brasil). ---
+    # locale     pt-BR;
     # locale_dir "lang";        # directory holding <code>.conf catalogs (default: lang)
     # --- HELP: /HELP topics load from help/<code>.conf (selected by `locale`, English
     #     fallback per topic). Edit a file + REHASH to change help — no restart. ---
