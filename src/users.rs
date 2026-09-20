@@ -32,6 +32,7 @@ pub struct UserFlags {
     pub logged_in: bool,      // +r (logged into an account; services-managed)
     pub reg_only_pm: bool,    // +R (only accept PMs from logged-in users)
     pub ssl_pm: bool,         // +z (only accept PMs from TLS users)
+    pub noctcp: bool,         // +T (block CTCPs sent to this user; users/ignore-noctcp bypasses)
     pub snomask: bool,        // +s (oper: receive server notices)
     pub snomask_cats: String, // +s snomask category letters this oper is subscribed to
     pub callerid: bool,       // +g (only accept PMs from users on the ACCEPT list)
@@ -88,6 +89,9 @@ impl UserFlags {
         }
         if self.ssl_pm {
             s.push('z');
+        }
+        if self.noctcp {
+            s.push('T');
         }
         if self.snomask {
             s.push('s');
@@ -577,7 +581,7 @@ impl Server {
             uid,
             RPL_MYINFO,
             &format!(
-                "{} echoircd-{RELEASE} iowxsgBkDIHrRzWhc qaohvbeIklimnpstzCTcSNORMfjFLgGuBQAPJUdKXwDE",
+                "{} echoircd-{RELEASE} iowxsgBkDIHrRzTWhc qaohvbeIklimnpstzCTcSNORMfjFLgGuBQAPJUdKXwDE",
                 self.disp_name(uid)
             ),
         );

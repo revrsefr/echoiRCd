@@ -580,6 +580,34 @@ pub(crate) fn deliver(s: &mut Server, uid: Uid, params: &[String], notice: bool)
                 return CmdResult::Fail;
             }
         }
+        // user +T (noctcp): block CTCPs (except ACTION) aimed at a +T user. A
+        // blocked CTCP *request* (PRIVMSG) tells the sender; an automatic CTCP
+        // *reply* (NOTICE) is dropped silently. Opers holding users/ignore-noctcp
+        // (services admins and up) may still CTCP a +T user.
+        if is_ctcp(text)
+            && !is_action(text)
+            && uid != tuid
+            && s.users.get(&tuid).map(|u| u.flags.noctcp).unwrap_or(false)
+            && !crate::modules::opertypes::has_priv(
+                s,
+                uid,
+                crate::modules::opertypes::privs::USERS_IGNORE_NOCTCP,
+            )
+        {
+            if !notice {
+                let tn = s
+                    .users
+                    .get(&tuid)
+                    .map(|u| u.nick.clone())
+                    .unwrap_or_default();
+                s.numeric(
+                    uid,
+                    ERR_CANTSENDTOUSER,
+                    &format!("{tn} :Cannot CTCP this user — they have mode +T set (CTCPs blocked)"),
+                );
+            }
+            return CmdResult::Fail;
+        }
         // user +R (regdeaf): drop messages from users not logged into an account
         if s.users
             .get(&tuid)

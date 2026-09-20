@@ -1369,6 +1369,7 @@ static USER_MODES: &[&(dyn UserMode + Sync)] = &[
     &REGISTERED,
     &SERVPROTECT,
     &SSLPM,
+    &UNOCTCP,
     &SNOMASK,
     &CALLERID,
     &SHOWWHOIS,
@@ -1412,6 +1413,9 @@ fn set_regdeaf(f: &mut UserFlags, v: bool) {
 fn set_sslpm(f: &mut UserFlags, v: bool) {
     f.ssl_pm = v;
 }
+fn set_unoctcp(f: &mut UserFlags, v: bool) {
+    f.noctcp = v;
+}
 fn set_callerid(f: &mut UserFlags, v: bool) {
     f.callerid = v;
 }
@@ -1444,6 +1448,13 @@ static REGDEAF: UFlag = UFlag {
 static SSLPM: UFlag = UFlag {
     ch: 'z',
     set: set_sslpm,
+};
+/// `+T` — block CTCPs (except ACTION) sent to this user. Anyone may set it on
+/// themselves; opers holding `users/ignore-noctcp` (services admins and up) can
+/// still CTCP a `+T` user. Enforced in the PRIVMSG/NOTICE delivery path.
+static UNOCTCP: UFlag = UFlag {
+    ch: 'T',
+    set: set_unoctcp,
 };
 static CALLERID: UFlag = UFlag {
     ch: 'g',
@@ -1669,7 +1680,7 @@ mod tests {
 
     #[test]
     fn registry_covers_all_user_modes() {
-        for c in "iwoxBDIHrRzsgWhc".chars() {
+        for c in "iwoxBDIHrRzsgWhcT".chars() {
             assert!(user_mode(c).is_some(), "missing umode +{c}");
         }
         assert!(user_mode('Q').is_none());

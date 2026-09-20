@@ -42,6 +42,9 @@ pub mod privs {
     pub const CHANNELS_IGNORE_NONICKS: &str = "channels/ignore-nonicks";
     /// message a +g (caller-id) user without being on their ACCEPT list
     pub const USERS_IGNORE_CALLERID: &str = "users/ignore-callerid";
+
+    /// Bypass a target user's `+T` (noctcp): CTCP a user who has blocked CTCPs.
+    pub const USERS_IGNORE_NOCTCP: &str = "users/ignore-noctcp";
     /// reach a +D (deaf) user with your channel messages despite their deafness
     pub const USERS_IGNORE_PRIVDEAF: &str = "users/ignore-privdeaf";
     /// `/WHOIS` a +W (showwhois) user without notifying them
@@ -487,7 +490,7 @@ fn builtin() -> (HashMap<String, ClassDef>, HashMap<String, TypeDef>) {
                 "SVSLOGIN",
                 "SVSLOGOUT",
             ],
-            &[],
+            &["users/ignore-noctcp"],
             "",
         ),
     );
