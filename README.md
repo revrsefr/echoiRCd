@@ -45,7 +45,10 @@ JSON-RPC control plane — with every operational limit exposed as a config key.
   **type/class privilege model** (per-type commands, named privileges like
   `users/auspex`/`channels/override`, and usermode/chanmode allowlists — each
   `*`/`-` tunable), staff prefix (`operprefix`/`OJOIN`), oper levels, rank-gated
-  `hidelist`/`hidemode`, and a reload-safe `REHASH`.
+  `hidelist`/`hidemode`, and a reload-safe `REHASH`. A wider toolbox — `CLONES`,
+  `USERIP`, `MODENOTICE`, `LOCKSERV`, `JUMPSERVER`, x-line search/copy tools, and
+  `ALINE`/`GALINE` require-auth bans — plus native **LDAP** operator authentication
+  (verify the `OPER` password against a directory).
 - **Services & accounts** — SASL PLAIN/EXTERNAL relayed over the link, the `SVS*` /
   `ENCAP` / `METADATA` interface, account-gated modes, and optional ircd-side
   account registration (`REGISTER`/`VERIFY`).
@@ -57,14 +60,18 @@ JSON-RPC control plane — with every operational limit exposed as a config key.
   either as a spoofed source (`relay` mode) or as a real virtual member visible in
   `WHO`/`NAMES` (`puppet` mode), and routes are added or reloaded live with the
   `BRIDGE` command.
-- **Database** — a native, non-blocking PostgreSQL client with named connection
-  pools on an off-core worker pool. Reputation, x-lines, read-markers, permanent
-  channels and web-push subscriptions can persist to relational tables, and a
-  read-only `/SQL` console gives network admins query access over IRC.
+- **Database & event bus** — a native, non-blocking PostgreSQL client with named
+  connection pools on an off-core worker pool. Reputation, x-lines, read-markers,
+  permanent channels and web-push subscriptions can persist to relational tables, and
+  a read-only `/SQL` console gives network admins query access over IRC. A matching
+  non-blocking **Redis** subsystem publishes a live event bus — connects, quits,
+  joins/parts, nick changes, kicks, opers and x-lines — for external tooling.
 - **Security & anti-spam** — TLS with client-cert fingerprints, keyed host
-  cloaking, DNSBL, per-IP connection/message flood limits, a target-change throttle,
-  per-address **reputation** scoring (the `y:` score extban, `REPUTATION` command),
-  an AWAY throttle, mixed-script & random (drone) detection, CAPTCHA / PONG-cookie /
+  cloaking, DNSBL (and a code-filtered proxy/VPN blocklist), a **WebSocket
+  handshake guard** that flags fake (bot/terminal) browsers, per-IP
+  connection/message flood limits, a target-change throttle, per-address
+  **reputation** scoring (the `y:` score extban, `REPUTATION` command), an AWAY
+  throttle, mixed-script & random (drone) detection, CAPTCHA / PONG-cookie /
   arithmetic gates, and DCC filtering.
 - **Transports** — plaintext, TLS (OpenSSL or rustls backend), a native WebSocket
   layer (`ws://` / `wss://`), and the PROXY protocol (v1/v2) behind a load balancer.
@@ -75,9 +82,10 @@ JSON-RPC control plane — with every operational limit exposed as a config key.
   a WHOIS country line.
 - **Localization** — a server-wide message locale: `locale fr` renders every
   numeric, notice and server message from a `lang/<code>.conf` catalog, while
-  protocol tokens, IDs, user data and the S2S wire stay canonical. Ships **French**
-  and **Spanish**, English is a zero-cost passthrough, and it switches live on
-  `REHASH` — with no per-message cost on the broadcast hot path.
+  protocol tokens, IDs, user data and the S2S wire stay canonical. Ships **French,
+  Spanish, Russian, German, Italian** and **Brazilian Portuguese**, English is a
+  zero-cost passthrough, and it switches live on `REHASH` — with no per-message cost
+  on the broadcast hot path.
 - **Control & observability** — a token-authenticated JSON-RPC plane over HTTP, an
   optional OpenMetrics/Prometheus endpoint, and `draft/metrics`: the same counters
   and gauges delivered as JSON over IRC (the `METRICS` command / capability).
@@ -119,10 +127,14 @@ oper   { name "admin"; password "$2b$…"; type netadmin; }
 
 See [`echoircd.conf.example`](echoircd.conf.example) for the full, annotated set of
 keys — every operational limit is a config key with a built-in default, and most
-settings apply on `REHASH` without a restart. Three helper subcommands round it out:
+settings apply on `REHASH` without a restart. The config is **checked on load** — an
+unknown block, an unknown or misspelled field in a structural block (`server`,
+`listen`, `oper`, …), a missing required field, or a duplicated single-use block is a
+fatal error reported with its line number, caught at startup instead of being
+silently ignored. Three helper subcommands round it out:
 
 - `echoircd mkpasswd` — read a password from stdin, print a bcrypt hash for an `oper` block.
-- `echoircd checkconfig [file]` — parse a config and dump its keys, to validate one or diff two.
+- `echoircd checkconfig [file]` — validate a config against the block schema (unknown block/field, missing required field, bad value → error with a line number) and dump its resolved keys.
 - `echoircd rehash` — signal the running server to reload its config in place.
 
 Message localization is catalog-driven: set `locale fr` (or `es`) and the server
