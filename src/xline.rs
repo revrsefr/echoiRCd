@@ -388,6 +388,16 @@ impl Server {
         }
     }
 
+    /// Whether an active (unexpired) x-line of exactly `kind`+`mask` exists. Lets a
+    /// repeat source (e.g. a DNSBL reconnect from a still-listed IP) suppress a
+    /// duplicate ban + notice for a line the connection is already refused by.
+    pub fn xline_active(&self, kind: XKind, mask: &str) -> bool {
+        let n = now();
+        self.xlines
+            .iter()
+            .any(|x| x.kind == kind && x.mask == mask && (x.expires == 0 || x.expires > n))
+    }
+
     /// Add (or replace) an x-line, then kill every connected user it matches.
     pub fn add_xline(
         &mut self,

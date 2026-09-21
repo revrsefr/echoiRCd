@@ -264,6 +264,22 @@ fn act(s: &mut Server, uid: Uid, domain: &str, replies: &[Ipv4Addr]) {
         .replace("%dnsbl%", domain)
         .replace("%class%", &class_desc);
     let setter = format!("dnsbl@{}", s.name);
+    // A reconnect from an IP we've already *line-banned must not re-ban it or
+    // re-emit the XLINE/DNSBL notices — the existing line is what refuses it, so we
+    // just drop the connection. Once the ban expires `xline_active` is false again
+    // and a fresh listing re-bans as normal.
+    if !exempt {
+        let already = match action.as_str() {
+            "kline" => s.xline_active(XKind::Kline, &format!("*@{ipstr}")),
+            "gline" => s.xline_active(XKind::Gline, &format!("*@{ipstr}")),
+            "zline" => s.xline_active(XKind::Zline, &ipstr),
+            _ => false,
+        };
+        if already {
+            s.refuse_banned(uid, &reason);
+            return;
+        }
+    }
     // Apply the action first so the XLINE notice precedes the DNSBL one, matching
     // how an operator watching both snomasks sees a blocklist ban land.
     let closes = if exempt {
