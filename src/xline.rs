@@ -93,6 +93,22 @@ pub fn parse_duration(s: &str) -> Option<u64> {
     Some(n.saturating_mul(mul))
 }
 
+/// Render seconds as the largest single exact unit with a suffix (`3600` → `1h`,
+/// `1800` → `30m`, `0` → `0`), falling back to bare seconds when no unit divides
+/// evenly. Always round-trips through [`parse_duration`], so it is safe as a mode
+/// parameter that propagates over S2S and persists (unlike a compound `1h30m`).
+pub fn short_duration(secs: u64) -> String {
+    if secs == 0 {
+        return "0".to_string();
+    }
+    for (size, unit) in [(604800u64, 'w'), (86400, 'd'), (3600, 'h'), (60, 'm')] {
+        if secs % size == 0 {
+            return format!("{}{unit}", secs / size);
+        }
+    }
+    secs.to_string()
+}
+
 /// Render a duration (seconds) as a human phrase — `1 week`, `1 day 2 hours`,
 /// `30 minutes` — largest non-zero units first. Used in the XLINE server notice.
 pub fn human_duration(mut secs: u64) -> String {
@@ -690,6 +706,20 @@ impl Server {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn short_duration_round_trips_through_parse() {
+        // the +H mode param must survive display → re-parse (S2S + persistence)
+        for secs in [0u64, 1, 59, 60, 90, 1800, 3600, 5400, 86400, 604800, 3661] {
+            let s = short_duration(secs);
+            assert_eq!(parse_duration(&s), Some(secs), "short={s:?} for {secs}s");
+        }
+        assert_eq!(short_duration(3600), "1h");
+        assert_eq!(short_duration(1800), "30m");
+        assert_eq!(short_duration(0), "0");
+        // the bug this guards: `1h` used to parse to 0, so +H 25:1h became 25:0
+        assert_eq!(parse_duration("1h"), Some(3600));
+    }
 
     proptest! {
         // Fuzz the duration parser: no arbitrary string may panic it.

@@ -660,11 +660,14 @@ impl ChanMode for ChanHistory {
                 return Applied::No;
             };
             let lines = lines.min(crate::modules::chathistory::HISTORY_CAP as u32);
-            let secs = secs_s.parse::<u64>().unwrap_or(0);
+            // The time is a duration (`1h`, `30m`, `1d`, or bare seconds), not a
+            // plain integer — `25:1h` must mean one hour, not 0. `0`/absent =
+            // count-only (keep the last <lines> regardless of age).
+            let secs = crate::xline::parse_duration(secs_s).unwrap_or(0);
             if let Some(c) = s.channels.get_mut(key) {
                 c.modes.history = Some((lines, secs));
             }
-            Applied::Yes(Some(format!("{lines}:{secs}")))
+            Applied::Yes(Some(format!("{lines}:{}", crate::xline::short_duration(secs))))
         } else {
             if let Some(c) = s.channels.get_mut(key) {
                 c.modes.history = None;
