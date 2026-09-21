@@ -171,7 +171,7 @@ impl Command for Whois {
                         s.numeric(
                             uid,
                             RPL_WHOISSPECIAL,
-                            &format!(":is in security groups: {}", sg.join(", ")),
+                            &format!("{} :is in security groups: {}", ru.nick, sg.join(", ")),
                         );
                     }
                     s.numeric(
@@ -338,13 +338,13 @@ impl Command for Whois {
         // Network Administrator" — from the oper's type (hidden with +H like 313).
         if oper && (!hideoper || asker_oper) {
             if let Some(line) = crate::modules::opertypes::whois_line(s, tuid) {
-                s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));
+                s.numeric(uid, RPL_WHOISSPECIAL, &format!("{nick} :{line}"));
             }
         }
-        // 320: oper-set SWHOIS line. No redundant target-nick param — just the
-        // text — so clients that don't special-case 320 don't echo the nick.
+        // 320: oper-set SWHOIS line. Like every WHOIS numeric it carries the
+        // target nick as its first param, so 320-aware clients render it right.
         if let Some(line) = &swhois {
-            s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));
+            s.numeric(uid, RPL_WHOISSPECIAL, &format!("{nick} :{line}"));
         }
         // security groups (public ones to all; opers/self see private ones too)
         let groups = crate::modules::securitygroups::user_groups(s, tuid, is_self || asker_oper);
@@ -352,38 +352,38 @@ impl Command for Whois {
             s.numeric(
                 uid,
                 RPL_WHOISSPECIAL,
-                &format!(":is in security groups: {}", groups.join(", ")),
+                &format!("{nick} :is in security groups: {}", groups.join(", ")),
             );
         }
         // reputation score, subject to the configured whois visibility (all/opers/self/none)
         if crate::modules::reputation::whois_visible(s, uid, tuid) {
             let score = crate::modules::reputation::score_of(s, tuid);
             if score > 0 {
-                s.numeric(uid, RPL_WHOISSPECIAL, &format!(":Score: {score}"));
+                s.numeric(uid, RPL_WHOISSPECIAL, &format!("{nick} :Score: {score}"));
             }
         }
         // profileLink: a profile URL for logged-in users (when configured)
         if let Some(line) = crate::modules::profilelink::line(s, &account) {
-            s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));
+            s.numeric(uid, RPL_WHOISSPECIAL, &format!("{nick} :{line}"));
         }
         // helpmode: +h marks a user available for help (visible to everyone)
         if s.users.get(&tuid).map(|u| u.flags.helpop).unwrap_or(false) {
-            s.numeric(uid, RPL_WHOISSPECIAL, ":is available for help.");
+            s.numeric(uid, RPL_WHOISSPECIAL, &format!("{nick} :is available for help."));
         }
         // customtitle: a claimed vanity title
         if let Some(line) = crate::modules::customtitle::line(s, tuid) {
-            s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));
+            s.numeric(uid, RPL_WHOISSPECIAL, &format!("{nick} :{line}"));
         }
         // whoisport: the listener port — opers only
         if asker_oper {
             if let Some(line) = crate::modules::whoisport::line(s, tuid) {
-                s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));
+                s.numeric(uid, RPL_WHOISSPECIAL, &format!("{nick} :{line}"));
             }
         }
         // geoip: where the user connects from — needs users/auspex (like the real host/ip)
         if asker_auspex_u {
             if let Some(line) = crate::modules::geoip::whois_line(s, tuid) {
-                s.numeric(uid, RPL_WHOISSPECIAL, &format!(":{line}"));
+                s.numeric(uid, RPL_WHOISSPECIAL, &format!("{nick} :{line}"));
             }
         }
         // users/auspex: see through the cloak to the real host/ip
