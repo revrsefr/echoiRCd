@@ -414,6 +414,16 @@ impl Server {
             .any(|x| x.kind == kind && x.mask == mask && (x.expires == 0 || x.expires > n))
     }
 
+    /// Like [`xline_active`](Self::xline_active) but also matching the reason — so an
+    /// oper re-issuing the exact same ban can be turned into a no-op instead of
+    /// re-announcing it, while changing the reason still goes through.
+    pub fn xline_active_exact(&self, kind: XKind, mask: &str, reason: &str) -> bool {
+        let n = now();
+        self.xlines.iter().any(|x| {
+            x.kind == kind && x.mask == mask && x.reason == reason && (x.expires == 0 || x.expires > n)
+        })
+    }
+
     /// Add (or replace) an x-line, then kill every connected user it matches.
     pub fn add_xline(
         &mut self,

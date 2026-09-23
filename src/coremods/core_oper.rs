@@ -951,18 +951,28 @@ pub(crate) fn do_xline(s: &mut Server, uid: Uid, params: &[String], kind: XKind)
         }
         return CmdResult::Ok;
     }
-    // <mask> <duration> :<reason>; tolerate the durationless form by taking an
-    // unparseable second token as the reason (permanent ban).
+    // <mask> [<duration>] <reason…>; the reason is the REST of the line and may
+    // contain spaces (with or without a leading ':'). A second token that isn't a
+    // duration starts the reason (a permanent ban).
     let (dur, reason) = match parse_duration(&params[1]) {
-        Some(d) => (
-            d,
-            params
-                .get(2)
-                .cloned()
-                .unwrap_or_else(|| "No reason given".to_string()),
-        ),
-        None => (0, params[1].clone()),
+        Some(d) => {
+            let r = params[2..].join(" ");
+            let r = if r.trim().is_empty() {
+                "No reason given".to_string()
+            } else {
+                r
+            };
+            (d, r)
+        }
+        None => (0, params[1..].join(" ")),
     };
+    // Re-issuing the exact same active ban would only re-announce + re-propagate it;
+    // report it instead of spamming the +x snomask (changing the reason still applies).
+    if s.xline_active_exact(kind, &mask, &reason) {
+        let m = s.trf("{0}-line already set on {1}", &[kind.tag(), mask.as_str()]);
+        s.send(uid, format!(":{} NOTICE {nick} :{m}", s.name));
+        return CmdResult::Ok;
+    }
     s.add_xline(kind, &mask, dur, &nick, &reason);
     s.propagate_addline(kind.tag(), &mask, &nick, dur, &reason);
     CmdResult::Ok
