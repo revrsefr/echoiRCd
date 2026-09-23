@@ -186,6 +186,18 @@ fn build(s: &mut Server, rec: Record) {
             _ => {}
         }
     }
+    // Defensive: collapse any duplicate mask a dirty record could carry, so a
+    // permanent channel never reloads with a doubled ban / except / … list.
+    let dedup = |list: &mut Vec<Ban>| {
+        let mut seen = std::collections::HashSet::new();
+        list.retain(|b| seen.insert(b.mask.clone()));
+    };
+    dedup(&mut c.bans);
+    dedup(&mut c.excepts);
+    dedup(&mut c.invex);
+    dedup(&mut c.filters);
+    dedup(&mut c.exemptchanops);
+    dedup(&mut c.autoop);
     s.channels.insert(key.clone(), c);
     apply_modes(s, &rec.name, &key, &rec.modes);
     // guarantee permanence even if the stored mode string somehow lost the 'P'

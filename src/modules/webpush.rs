@@ -151,11 +151,14 @@ fn load_subs(s: &mut Server) {
                             crate::modules::jwt::unb64url(p),
                             crate::modules::jwt::unb64url(a),
                         ) {
-                            store.0.entry(id.to_string()).or_default().push(Sub {
-                                endpoint: ep.to_string(),
-                                p256dh,
-                                auth,
-                            });
+                            let list = store.0.entry(id.to_string()).or_default();
+                            if !list.iter().any(|x| x.endpoint == ep) {
+                                list.push(Sub {
+                                    endpoint: ep.to_string(),
+                                    p256dh,
+                                    auth,
+                                });
+                            }
                         }
                     }
                 }
@@ -183,11 +186,14 @@ fn load_subs_text(s: &mut Server) {
             crate::modules::jwt::unb64url(f[2]),
             crate::modules::jwt::unb64url(f[3]),
         ) {
-            store.0.entry(f[0].to_string()).or_default().push(Sub {
-                endpoint: f[1].to_string(),
-                p256dh: p,
-                auth: a,
-            });
+            let list = store.0.entry(f[0].to_string()).or_default();
+            if !list.iter().any(|x| x.endpoint == f[1]) {
+                list.push(Sub {
+                    endpoint: f[1].to_string(),
+                    p256dh: p,
+                    auth: a,
+                });
+            }
         }
     }
 }
