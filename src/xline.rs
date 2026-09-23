@@ -654,12 +654,14 @@ impl Server {
     /// the legacy text so bans are never lost.
     pub fn load_xlines(&mut self) {
         let n = now();
+        let mut loaded = false;
         if crate::database::stores_in_db(self) {
             if let Some(rows) = crate::database::store_rows_load(
                 self,
                 XLINES_DDL,
                 "SELECT tag, mask, expires, set_at, setter, reason FROM echoircd_xlines",
             ) {
+                loaded = true;
                 if rows.is_empty() {
                     self.load_xlines_text(); // migrate the legacy blob/file …
                     self.save_xlines(); // … and seed the table
@@ -686,11 +688,23 @@ impl Server {
                         });
                     }
                 }
-                return;
             }
             // the database was unreachable — fall through to the legacy text
         }
-        self.load_xlines_text();
+        if !loaded {
+            self.load_xlines_text();
+        }
+        // Self-heal: a past persistence path could double-write every row on each
+        // restart (2, 4, 8, … identical copies). Collapse duplicate (kind,mask)
+        // rows here — keeping the first — and rewrite the store if we dropped any,
+        // so the table converges back to one row per ban.
+        let before = self.xlines.len();
+        let mut seen = std::collections::HashSet::new();
+        self.xlines
+            .retain(|x| seen.insert((x.kind.tag(), x.mask.clone())));
+        if self.xlines.len() != before {
+            self.save_xlines();
+        }
     }
 
     /// Parse x-lines from the legacy text form (the central blob when pgsql, else the
